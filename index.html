@@ -1,0 +1,248 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>(주)아신테크</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="icon.ico">
+  <!-- 모바일 홈 화면 추가용 (아이폰/안드로이드) -->
+  <link rel="apple-touch-icon" href="icon.png">
+  <!-- PDF.js 라이브러리 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  
+  <!-- [추가] MapLibre GL JS & PMTiles (Map Viewer 뷰어용) -->
+  <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@2.11.0/dist/index.js"></script>
+
+  <style>
+    /* 반응형 탭 / 모바일 최적화 */
+    @media (max-width: 991px) {
+        .container { padding: 0; width: 100%; max-width: 100%; }
+        .header h1 { font-size: 1.2rem; margin-left: 10px; }
+        .nav-tabs { justify-content: space-around; }
+        .nav-tab { padding: 10px 5px; font-size: 14px; flex: 1; }
+        /* 사이드바 닫기 버튼 (공통) */
+        .sidebar-close-btn { display: block !important; }
+    }
+
+    /* 모바일 가로 모드 (Landscape) 최적화: 탭 높이 조정 */
+    @media (max-width: 991px) and (orientation: landscape) {
+        .header { padding: 5px 15px; flex-direction: row; text-align: left; }
+        .header h1 { font-size: 1rem; margin: 0; }
+        .nav-tab { padding: 6px 5px; font-size: 13px; }
+    }
+
+    /* 캐드 뷰어 스타일 */
+    #cad-map { width: 100%; height: calc(100vh - 180px); border-radius: 8px; border: 1px solid #ddd; margin-top: 10px; }
+    .cad-controls { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
+    .cad-controls select { padding: 8px; border-radius: 4px; border: 1px solid #ccc; min-width: 200px; }
+    .cad-legend { font-size: 12px; color: #666; margin-left: auto; }
+
+    /* 레이어 목록 패널 */
+    .layer-panel {
+        position: absolute; top: 50px; left: 10px; width: 220px; max-height: 60vh;
+        background: rgba(255, 255, 255, 0.95); border: 1px solid #ccc; border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2); overflow-y: auto; padding: 10px; z-index: 10;
+        display: none; /* 초기엔 숨김 */
+    }
+    .map-overlay-btn {
+        position: absolute; top: 10px; left: 10px; z-index: 5;
+        background: white; border: 1px solid #999; padding: 8px 12px; border-radius: 4px; 
+        cursor: pointer; font-size: 13px; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        display: none; /* JS로 제어 */
+    }
+    .map-overlay-btn:hover { background: #f0f0f0; }
+    .layer-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; }
+    .layer-color-picker { width: 20px; height: 20px; border: none; padding: 0; cursor: pointer; }
+    .layer-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1>(주)아신테크</h1>
+      </div>
+      <div>
+        <a href="https://map.ngii.go.kr/ms/mesrInfo/geoidIntro.do" target="_blank" class="btn btn-info" style="text-decoration: none;">국토정보플랫폼 바로가기</a>
+        <a href="http://www.ngii.go.kr/" target="_blank" class="btn btn-success" style="text-decoration: none;">국토지리정보원 바로가기</a>
+      </div>
+    </div>
+    
+    <div class="nav-tabs" id="mainTabs">
+      <button class="nav-tab active" onclick="switchTab('cadViewer')">Map Viewer</button>
+      <button class="nav-tab" onclick="switchTab('projects')">사진 관리</button>
+      <button class="nav-tab" onclick="switchTab('guidelines')">지침서</button>      
+    </div>
+    
+    <div class="content">
+      <div id="alertArea"></div>
+
+      <!-- 1. 프로젝트 탭 -->
+      <div id="projects-tab" class="tab-content">
+        <div class="form-group" style="display: flex; gap: 10px;">
+          <input type="text" id="newProjectName" placeholder="새 프로젝트 이름 입력" style="flex: 1;">
+          <button id="createProjectBtn" class="btn btn-primary" onclick="createProject()">생성</button>
+        </div>
+        <h3 style="margin: 20px 0 10px; border-bottom: 1px solid #eee; padding-bottom: 10px;">프로젝트 목록</h3>
+        <div id="projectsList">
+          <div class="empty-state"><span class="spinner"></span> 로딩 중...</div>
+        </div>
+      </div>
+
+      <!-- 2. 사진 관리 상세 뷰 (기본 숨김 처리) -->
+      <div id="photo-manager-interface" style="display:none;">
+        <div class="pm-header">
+          <div class="pm-title">
+            <button class="btn btn-secondary" onclick="closePhotoManager()">← 뒤로</button>
+            <h2 id="pmProjectName">프로젝트 이름</h2>
+          </div>
+          <div class="pm-actions">
+            <div class="view-toggle-group">
+                <button class="btn btn-outline active" id="btnViewGrid" onclick="toggleViewMode('grid')" title="썸네일 보기">▦</button>
+                <button class="btn btn-outline" id="btnViewList" onclick="toggleViewMode('list')" title="리스트 보기">☰</button>
+            </div>
+            <button class="btn btn-info" onclick="triggerUploadForCurrent()">📤 추가</button>
+          </div>
+        </div>
+        <div id="pmPhotoContainer" class="photo-container grid-view"></div>
+      </div>
+      
+      <!-- 3. 업로드 탭 -->
+      <div id="upload-tab" class="tab-content">
+        <button class="btn btn-secondary" onclick="backToProjectFromUpload()" style="margin-bottom:15px;">← 뒤로가기</button>
+        <div class="form-group">
+          <label>프로젝트 선택</label>
+          <select id="uploadProjectSelect"></select>
+        </div>
+        <div class="file-upload-wrapper" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <input type="file" id="fileInput" accept="image/*" multiple onchange="handleFiles(this.files)" style="display:none">
+          <p style="font-size: 18px; margin-bottom: 5px;">📁 클릭 또는 파일 드래그</p>
+          <p style="color: #666; font-size: 13px;">여러 장 선택 가능</p>
+        </div>
+        <div id="selectedFiles" style="margin-top: 15px;"></div>
+        <button class="btn btn-primary" onclick="uploadPhotos()" style="margin-top: 20px; width: 100%;">선택한 사진 업로드 시작</button>
+      </div>
+
+      <!-- 4. 앱뷰어 탭 -->
+      <div id="cadViewer-tab" class="tab-content active">
+        <div class="cad-controls">
+            <label for="cadProjectSelect"><strong>프로젝트 선택:</strong></label>
+            <select id="cadProjectSelect" onchange="loadCadMap(this.value)">
+                <option value="">프로젝트를 선택하세요</option>
+            </select>
+            <span class="cad-legend" id="cadStatus">준비됨</span>
+        </div>
+        <div style="position: relative;">
+            <div id="cad-map"></div>
+            <button id="cadLayerToggleBtn" class="map-overlay-btn" onclick="toggleLayerPanel()">☰ 레이어 목록</button>
+            <div id="cadLayerPanel" class="layer-panel">
+                <h4 style="margin: 0 0 10px 0; font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;">레이어 목록</h4>
+                <div id="cadLayerList"></div>
+            </div>
+        </div>
+      </div>
+
+
+
+
+      <!-- 5. 지침서보기 탭 -->
+      <div id="guidelines-tab" class="tab-content">
+        <div class="guidelines-wrapper">
+          <!-- 사이드바 (목록) -->
+          <div class="guidelines-sidebar">
+            <div class="sidebar-header">지침서 목록</div>
+            <button class="guide-menu-item active" id="menu-guide-road" onclick="selectGuideline('road')">도로대장 작성지침</button>
+            <button class="guide-menu-item" id="menu-guide-rtk" onclick="selectGuideline('rtk')">네트워크RTK 변경안내</button>
+            <button class="guide-menu-item" id="menu-guide-numericMap" onclick="selectGuideline('numericMap')">수치지도 도엽번호</button>
+            <button class="guide-menu-item" id="menu-guide-uis" onclick="selectGuideline('uis')">UIS 시설물 측량 코드표</button>
+            <button class="guide-menu-item" id="menu-guide-nonConformity" onclick="selectGuideline('nonConformity')">공공측량 부적합 사례</button>
+            <button class="guide-menu-item" id="menu-guide-gnssNotice" onclick="selectGuideline('gnssNotice')">GNSS 관측 방식 고지</button>
+            <button class="guide-menu-item" id="menu-guide-faq" onclick="selectGuideline('faq')">공공측량제도 FAQ</button>
+            <button class="guide-menu-item" id="menu-guide-regulationRevision" onclick="selectGuideline('regulationRevision')">공공측량작업 규정 개정 안내</button>
+            <button class="guide-menu-item" id="menu-guide-materialAbbr" onclick="selectGuideline('materialAbbr')">지하시설물 제원표기방법/재질약어표</button>
+            <button class="guide-menu-item" id="menu-guide-publicSurveyReg" onclick="selectGuideline('publicSurveyReg')">공공측량 작업 규정</button>
+          </div>
+
+          <!-- 메인 콘텐츠 (내용) -->
+          <div class="guidelines-content">
+            <h3 id="currentPdfTitle" style="margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #007bff; color: #333;">2024 도로대장 작성 지침</h3>
+        
+        <!-- PDF 뷰어 -->
+        <div class="pdf-container" id="pdfContainer">
+          <button class="pdf-mobile-toc-toggle" onclick="toggleSidebar()" title="목차 보기">☰ 목차</button>
+          <div class="pdf-sidebar" id="pdfSidebar">
+            <div class="pdf-toc-header"><span>지침서 목차</span><button onclick="toggleSidebar()" class="close-sidebar-btn">✕</button></div>
+            <ul class="pdf-toc-list" id="pdfTOC"><li style="padding:15px; color:#666;">지침서 로딩 중...</li></ul>
+          </div>
+          <div class="pdf-viewer-main" id="pdfViewerMain">
+            <div class="pdf-toolbar">
+              <div class="pdf-controls">
+                <button onclick="changePage(-1)">◀</button><span class="page-indicator"><span id="page_num">0</span> / <span id="page_count">0</span></span><button onclick="changePage(1)">▶</button>
+              </div>
+              <div class="pdf-controls">
+                <button onclick="zoomOut()">－</button><button onclick="zoomIn()">＋</button><button onclick="toggleFullScreen()">⛶</button>
+              </div>
+            </div>
+            <div class="pdf-canvas-wrapper"><canvas id="pdf-canvas"></canvas></div>
+          </div>
+        </div>
+        <div id="pdf-loading-msg" style="text-align:center; margin-top:10px; color:#666; display:none;">
+          <span class="spinner"></span> 지침서를 불러오는 중입니다... 잠시만 기다려주세요.
+        </div>
+
+        <!-- UIS 코드표 -->
+        <div id="uisCodeTableContainer" style="display:none; overflow-x: auto;"></div>
+        
+        <!-- 네트워크 RTK 안내 -->
+        <div id="networkRtkContainer" style="display:none; overflow-x: auto;"></div>
+
+        <!-- 도로대장 작성지침 목차 (PDF 뷰어 대체) -->
+        <div id="roadLedgerTocContainer" style="display:none; overflow-x: auto;"></div>
+
+        <!-- 공공측량 부적합 사례 -->
+        <div id="nonConformityContainer" style="display:none; overflow-x: auto;"></div>
+
+        <!-- 수치지도 도엽번호 -->
+        <div id="numericMapContainer" style="display:none; overflow-x: auto;"></div>
+
+        <!-- GNSS 관측 방식 고지 -->
+        <div id="gnssNoticeContainer" style="display:none; overflow-x: auto;"></div>
+
+        <!-- 공공측량제도 FAQ -->
+        <div id="faqContainer" style="display:none; overflow-x: auto;"></div>
+
+        <!-- 공공측량작업 규정 개정 안내 -->
+        <div id="regulationRevisionContainer" style="display:none; overflow-x: auto;"></div>
+
+        <!-- 지하시설물 제원표기/재질약어표 -->
+        <div id="materialAbbrContainer" style="display:none; overflow-x: auto;"></div>
+
+        <!-- 공공측량 작업 규정 -->
+        <div id="publicSurveyRegContainer" style="display:none; overflow-x: auto;"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="lightboxOverlay" class="lightbox-overlay" onclick="closeLightbox(event)">
+    <span class="lightbox-close" onclick="closeLightbox()">&times;</span>
+    <div class="lightbox-content-wrapper">
+        <img class="lightbox-image" id="lightboxImg" src="" alt="Full View">
+        <div class="lightbox-caption" id="lightboxCaption"></div>
+    </div>
+    <a class="lightbox-prev" onclick="navigateLightbox(-1)">&#10094;</a>
+    <a class="lightbox-next" onclick="navigateLightbox(1)">&#10095;</a>
+    <div class="lightbox-tools">
+        <a id="lightboxDownloadBtn" href="#" target="_blank" class="btn btn-primary" style="padding:5px 10px; font-size:12px;">원본 열기</a>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
