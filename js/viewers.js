@@ -169,7 +169,25 @@ function queueRenderPage(n) { pageRendering ? pageNumPending=n : renderPage(n); 
 export function changePage(o) { if(pdfDoc && pageNum+o>=1 && pageNum+o<=pdfDoc.numPages) { pageNum+=o; queueRenderPage(pageNum); } }
 export function zoomIn() { scale+=0.25; queueRenderPage(pageNum); }
 export function zoomOut() { if(scale>0.4) scale-=0.25; queueRenderPage(pageNum); }
-export function toggleFullScreen() { const e=document.querySelector('.pdf-container'); document.fullscreenElement ? document.exitFullscreen() : e.requestFullscreen(); }
+export function toggleFullScreen() {
+    const mapContainer = document.getElementById('cad-map');
+    const pdfContainer = document.getElementById('pdfContainer');
+
+    let elementToFullscreen = null;
+    if (document.getElementById('cadViewer-tab')?.classList.contains('active')) {
+        elementToFullscreen = mapContainer;
+    } else if (document.getElementById('guidelines-tab')?.classList.contains('active')) {
+        elementToFullscreen = pdfContainer || document.querySelector('.pdf-container');
+    }
+
+    if (!elementToFullscreen) return;
+
+    if (!document.fullscreenElement) {
+        elementToFullscreen.requestFullscreen().catch(err => console.error(`전체화면 오류: ${err.message}`));
+    } else {
+        document.exitFullscreen();
+    }
+}
 export function toggleSidebar() { document.getElementById('pdfSidebar').classList.toggle('open'); }
 
 function renderRoadLedgerTOC() {
@@ -834,9 +852,10 @@ export async function loadCadMap(projectId) {
 export function toggleBackgroundMap(isVisible) {
     if (!cadMap || !cadMap.getLayer('background-layer')) return;
     cadMap.setLayoutProperty('background-layer', 'visibility', isVisible ? 'visible' : 'none');
-    // [추가] 배경지도 유무에 따라 텍스트 색상 변경 (어두운 배경에서 흰색으로)
-    if (cadMap.getLayer('cad-text')) {
-        cadMap.setPaintProperty('cad-text', 'text-color', isVisible ? '#000000' : '#FFFFFF');
+    
+    // 전체화면이 아닐 때만 배경색을 제어합니다. (배경지도가 꺼지면 흰색 배경으로 설정하여 검은 텍스트 가독성 확보)
+    if (!document.fullscreenElement) {
+        cadMap.getCanvasContainer().style.backgroundColor = isVisible ? '' : 'white';
     }
 }
 
@@ -847,6 +866,30 @@ export function toggleMarkers(isVisible) {
     // 1. 마커(Point) 레이어 토글
     if (cadMap.getLayer('cad-points')) {
         cadMap.setLayoutProperty('cad-points', 'visibility', isVisible ? 'visible' : 'none');
+    }
+}
+
+/**
+ * CAD 모드(전체화면) 스타일 적용/해제
+ * 전체화면 시: 배경 검정, 텍스트 흰색
+ * 일반모드 시: 배경 흰색(배경지도 없을 때) 또는 투명, 텍스트 검정
+ */
+function applyCadModeStyle(isCadMode) {
+    if (!cadMap) return;
+
+    const container = cadMap.getCanvasContainer();
+    const textColor = isCadMode ? '#FFFFFF' : '#000000';
+
+    if (isCadMode) {
+        container.style.backgroundColor = 'black';
+    } else {
+        const bgLayer = cadMap.getLayer('background-layer');
+        const isBgVisible = bgLayer && cadMap.getLayoutProperty('background-layer', 'visibility') !== 'none';
+        container.style.backgroundColor = isBgVisible ? '' : 'white';
+    }
+
+    if (cadMap.getLayer('cad-text')) {
+        cadMap.setPaintProperty('cad-text', 'text-color', textColor);
     }
 }
 
@@ -913,3 +956,14 @@ export function cleanupCadViewer() {
     document.getElementById('cadLayerPanel').style.display = 'none';
     document.getElementById('cadLayerToggleBtn').style.display = 'none';
 }
+
+// 전체화면 상태 변경 감지 리스너
+document.addEventListener('fullscreenchange', () => {
+    const fullscreenElement = document.fullscreenElement;
+    // 지도가 전체화면일 때만 CAD 스타일 적용
+    if (fullscreenElement && fullscreenElement.id === 'cad-map') {
+        applyCadModeStyle(true);
+    } else {
+        applyCadModeStyle(false);
+    }
+});
