@@ -852,11 +852,7 @@ export async function loadCadMap(projectId) {
 export function toggleBackgroundMap(isVisible) {
     if (!cadMap || !cadMap.getLayer('background-layer')) return;
     cadMap.setLayoutProperty('background-layer', 'visibility', isVisible ? 'visible' : 'none');
-    
-    // 전체화면이 아닐 때만 배경색을 제어합니다. (배경지도가 꺼지면 흰색 배경으로 설정하여 검은 텍스트 가독성 확보)
-    if (!document.fullscreenElement) {
-        cadMap.getCanvasContainer().style.backgroundColor = isVisible ? '' : 'white';
-    }
+    updateCadStyle();
 }
 
 // [추가] 마커 토글 및 텍스트 위치 조정 기능
@@ -870,23 +866,22 @@ export function toggleMarkers(isVisible) {
 }
 
 /**
- * CAD 모드(전체화면) 스타일 적용/해제
- * 전체화면 시: 배경 검정, 텍스트 흰색
- * 일반모드 시: 배경 흰색(배경지도 없을 때) 또는 투명, 텍스트 검정
+ * 배경지도 유무와 전체화면 상태에 따른 스타일 업데이트
  */
-function applyCadModeStyle(isCadMode) {
+function updateCadStyle() {
     if (!cadMap) return;
 
-    const container = cadMap.getCanvasContainer();
-    const textColor = isCadMode ? '#FFFFFF' : '#000000';
+    const bgLayer = cadMap.getLayer('background-layer');
+    const isBgVisible = bgLayer && cadMap.getLayoutProperty('background-layer', 'visibility') !== 'none';
 
-    if (isCadMode) {
-        container.style.backgroundColor = 'black';
-    } else {
-        const bgLayer = cadMap.getLayer('background-layer');
-        const isBgVisible = bgLayer && cadMap.getLayoutProperty('background-layer', 'visibility') !== 'none';
-        container.style.backgroundColor = isBgVisible ? '' : 'white';
-    }
+    const canvasContainer = cadMap.getCanvasContainer();
+    const mapContainer = cadMap.getContainer();
+    let textColor = '#000000'; // 텍스트는 항상 검정색 유지
+    // 배경지도가 보이면 투명(지도보임), 안 보이면 흰색 배경
+    let bgColor = isBgVisible ? '' : '#ffffff';
+
+    canvasContainer.style.backgroundColor = bgColor;
+    mapContainer.style.backgroundColor = bgColor;
 
     if (cadMap.getLayer('cad-text')) {
         cadMap.setPaintProperty('cad-text', 'text-color', textColor);
@@ -915,6 +910,14 @@ function getRandomColor() {
 
 function renderLayerList() {
     const listEl = document.getElementById('cadLayerList'); listEl.innerHTML = '';
+    
+    // [추가] 전체 레이어 색상 변경 컨트롤
+    const globalDiv = document.createElement('div');
+    globalDiv.className = 'layer-item';
+    globalDiv.style.cssText = 'border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; font-weight: bold; display: flex; align-items: center; justify-content: space-between;';
+    globalDiv.innerHTML = `<span>전체 색상 변경</span> <input type="color" class="layer-color-picker" onchange="window.changeAllLayerColors(this.value)" title="모든 레이어 색상 변경">`;
+    listEl.appendChild(globalDiv);
+
     Array.from(cadLayers).sort().forEach(layer => {
         const color = cadLayerColors[layer]; const isChecked = !cadHiddenLayers.has(layer);
         const div = document.createElement('div'); div.className = 'layer-item';
@@ -925,6 +928,14 @@ function renderLayerList() {
 
 export function toggleLayer(layerName, isVisible) { if (isVisible) cadHiddenLayers.delete(layerName); else cadHiddenLayers.add(layerName); updateMapFilter(); }
 export function changeLayerColor(layerName, newColor) { cadLayerColors[layerName] = newColor; updateMapStyle(); }
+// [추가] 전체 레이어 색상 일괄 변경 함수
+export function changeAllLayerColors(newColor) {
+    for (const layer of cadLayers) {
+        cadLayerColors[layer] = newColor;
+    }
+    updateMapStyle();
+    renderLayerList(); // 개별 색상 선택기들도 업데이트된 색상으로 다시 렌더링
+}
 export function toggleLayerPanel() { const panel = document.getElementById('cadLayerPanel'); panel.style.display = (panel.style.display === 'none' || panel.style.display === '') ? 'block' : 'none'; }
 
 function updateMapFilter() {
@@ -946,6 +957,7 @@ function updateMapStyle() {
     const matchExpr = ['match', ['get', 'layer']];
     for (const [layer, color] of Object.entries(cadLayerColors)) matchExpr.push(layer, color);
     matchExpr.push('#cccccc');
+    
     if (cadMap.getLayer('cad-lines')) cadMap.setPaintProperty('cad-lines', 'line-color', matchExpr);
     if (cadMap.getLayer('cad-points')) cadMap.setPaintProperty('cad-points', 'circle-color', matchExpr);
 }
@@ -959,11 +971,5 @@ export function cleanupCadViewer() {
 
 // 전체화면 상태 변경 감지 리스너
 document.addEventListener('fullscreenchange', () => {
-    const fullscreenElement = document.fullscreenElement;
-    // 지도가 전체화면일 때만 CAD 스타일 적용
-    if (fullscreenElement && fullscreenElement.id === 'cad-map') {
-        applyCadModeStyle(true);
-    } else {
-        applyCadModeStyle(false);
-    }
+    updateCadStyle();
 });
