@@ -134,6 +134,10 @@
             <select id="cadProjectSelect" onchange="loadCadMap(this.value)">
                 <option value="">프로젝트를 선택하세요</option>
             </select>
+            <!-- [추가] 지도 제어 컨트롤 -->
+            <label style="font-size: 13px; display: flex; align-items: center; gap: 5px;"><input type="checkbox" id="chkMap" checked onchange="toggleBackgroundMap(this.checked)"> 배경지도</label>
+            <label style="font-size: 13px; display: flex; align-items: center; gap: 5px;"><input type="checkbox" id="chkMarkers" checked onchange="toggleMarkers(this.checked)"> 마커(Point)</label>
+            
             <span class="cad-legend" id="cadStatus">준비됨</span>
         </div>
         <div style="position: relative;">

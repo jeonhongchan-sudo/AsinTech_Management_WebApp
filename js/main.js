@@ -1,6 +1,6 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, showAlert } from './core.js';
-import { initPdfViewer, selectGuideline, changePage, zoomIn, zoomOut, toggleFullScreen, toggleSidebar, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, toggleLayerPanel } from './viewers.js';
+import { initPdfViewer, selectGuideline, changePage, zoomIn, zoomOut, toggleFullScreen, toggleSidebar, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers } from './viewers.js';
 import { loadProjects, createProject, deleteProject, renameProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, renamePhoto, setupDragDrop, handleFiles, uploadPhotos, backToProjectFromUpload, triggerUploadForCurrent, openLightbox, closeLightbox, navigateLightbox } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 지원용)
@@ -31,6 +31,8 @@ window.loadCadMap = loadCadMap;
 window.toggleLayer = toggleLayer;
 window.changeLayerColor = changeLayerColor;
 window.toggleLayerPanel = toggleLayerPanel;
+window.toggleBackgroundMap = toggleBackgroundMap;
+window.toggleMarkers = toggleMarkers;
 
 // 탭 전환 로직
 export function switchTab(tabName) {

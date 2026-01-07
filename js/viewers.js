@@ -802,19 +802,52 @@ export async function loadCadMap(projectId) {
                     'osm': { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '&copy; OpenStreetMap', maxzoom: 19 }
                 },
                 layers: [
-                    { id: 'background-layer', type: 'raster', source: 'osm', paint: { 'raster-opacity': 0.6 } },
+                    // [수정] 배경지도 투명도를 1.0으로 변경하여 전체화면 시 어두워지는 현상 해결
+                    { id: 'background-layer', type: 'raster', source: 'osm', paint: { 'raster-opacity': 1.0 } },
                     { id: 'cad-lines', source: 'cad_source', 'source-layer': 'line', type: 'line', paint: { 'line-color': '#555555', 'line-width': 1.5 } },
                     { id: 'cad-points', source: 'cad_source', 'source-layer': 'point', type: 'circle', paint: { 'circle-color': '#FF0000', 'circle-radius': 3, 'circle-stroke-width': 1, 'circle-stroke-color': '#333333' } },
-                    { id: 'cad-text', type: 'symbol', source: 'cad_source', 'source-layer': 'point', filter: ['has', 'text'], layout: { 'text-field': ['get', 'text'], 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-anchor': 'bottom-left', 'text-offset': [0.1, -0.1], 'text-font': ['Open Sans Regular'] }, paint: { 'text-color': '#000000' } }
+                    { id: 'cad-text', type: 'symbol', source: 'cad_source', 'source-layer': 'point', filter: ['has', 'text'], layout: { 'text-field': ['get', 'text'], 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-anchor': 'bottom-left', 'text-offset': [0, 0], 'text-font': ['Open Sans Regular'], 'text-rotate': ['get', 'rotation'], 'text-rotation-alignment': 'map' }, paint: { 'text-color': '#000000' } }
                 ]
             }
         });
         cadMap.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showUserHeading: true }), 'top-right');
         cadMap.addControl(new maplibregl.FullscreenControl(), 'top-right');
         cadMap.addControl(new maplibregl.NavigationControl(), 'top-right');
-        cadMap.on('load', () => { updateMapStyle(); updateMapFilter(); statusEl.innerText = '도면 로드 완료'; });
+        cadMap.on('load', () => { 
+            updateMapStyle(); 
+            updateMapFilter(); 
+            
+            // [추가] 초기 UI 상태 반영 (체크박스 상태 동기화)
+            const chkMap = document.getElementById('chkMap');
+            if (chkMap) toggleBackgroundMap(chkMap.checked);
+            
+            const chkMarkers = document.getElementById('chkMarkers');
+            if (chkMarkers) toggleMarkers(chkMarkers.checked);
+
+            statusEl.innerText = '도면 로드 완료'; 
+        });
         cadMap.on('idle', updateLayerDiscovery);
     } catch (e) { console.error(e); statusEl.innerText = '지도 로드 오류: ' + e.message; }
+}
+
+// [추가] 배경지도 토글 기능
+export function toggleBackgroundMap(isVisible) {
+    if (!cadMap || !cadMap.getLayer('background-layer')) return;
+    cadMap.setLayoutProperty('background-layer', 'visibility', isVisible ? 'visible' : 'none');
+    // [추가] 배경지도 유무에 따라 텍스트 색상 변경 (어두운 배경에서 흰색으로)
+    if (cadMap.getLayer('cad-text')) {
+        cadMap.setPaintProperty('cad-text', 'text-color', isVisible ? '#000000' : '#FFFFFF');
+    }
+}
+
+// [추가] 마커 토글 및 텍스트 위치 조정 기능
+export function toggleMarkers(isVisible) {
+    if (!cadMap) return;
+    
+    // 1. 마커(Point) 레이어 토글
+    if (cadMap.getLayer('cad-points')) {
+        cadMap.setLayoutProperty('cad-points', 'visibility', isVisible ? 'visible' : 'none');
+    }
 }
 
 function updateLayerDiscovery() {
