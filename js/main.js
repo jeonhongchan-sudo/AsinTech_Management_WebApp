@@ -126,6 +126,12 @@ export async function performLogin(username, isAuto = false) {
 
     // [수정] 설정 로드 대기 (await) - 맵 로드 시 색상 적용을 위해 필요
     if (state.supabaseConfig) {
+        // [추가] 로그인 시 테이블에 유저가 없으면 등록 (기존 유저는 ignore-duplicates로 설정 보존)
+        try {
+            await callSupabaseDirect('user_settings', 'POST', { username: username, layer_colors: {} }, { 'Prefer': 'resolution=ignore-duplicates' });
+        } catch (e) {
+            console.warn("유저 자동 등록 실패:", e);
+        }
         await fetchUserSettings(username);
     }
 
