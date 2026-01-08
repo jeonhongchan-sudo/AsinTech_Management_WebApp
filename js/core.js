@@ -12,7 +12,9 @@ export const state = {
     currentViewMode: 'grid',
     currentPhotosData: [],
     currentLightboxIndex: 0,
-    r2Config: null
+    r2Config: null,
+    currentUser: null,      // [추가] 현재 로그인한 사용자 ID
+    userSettings: {}        // [추가] 사용자별 설정 (색상 등)
 };
 
 // 유틸리티 함수
@@ -52,7 +54,7 @@ export async function callApi(action, params = {}) {
     }
 }
 
-export async function callSupabaseDirect(endpoint, method = 'GET', body = null, extraHeaders = {}) {
+export async function callSupabaseDirect(endpoint, method = 'GET', body = null, extraHeaders = {}, fetchOptions = {}) {
     if (!state.supabaseConfig) throw new Error("Supabase config not loaded");
     const baseUrl = state.supabaseConfig.url.replace(/\/$/, '');
     const options = {
@@ -62,11 +64,13 @@ export async function callSupabaseDirect(endpoint, method = 'GET', body = null, 
             'Authorization': `Bearer ${state.supabaseConfig.key}`,
             'Content-Type': 'application/json',
             ...extraHeaders
-        }
+        },
+        ...fetchOptions
     };
     if (body) options.body = JSON.stringify(body);
     const response = await fetch(`${baseUrl}/rest/v1/${endpoint}`, options);
     if (!response.ok) throw new Error(`Supabase Error: ${response.status}`);
     if (response.status === 204) return null;
-    return await response.json();
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
 }

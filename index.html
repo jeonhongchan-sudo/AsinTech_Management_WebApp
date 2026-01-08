@@ -247,6 +247,15 @@
     </div>
   </div>
 
+  <!-- [추가] 로그인 모달 -->
+  <div id="loginOverlay" class="lightbox-overlay" style="display: flex; z-index: 3000;">
+    <div class="container" style="max-width: 400px; min-height: auto; padding: 30px; text-align: center;">
+        <h2 style="margin-bottom: 20px;">사용자 로그인</h2>
+        <input type="text" id="loginUsername" placeholder="사용자 이름 입력" style="width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px;" onkeydown="if(event.key==='Enter') handleLogin()">
+        <button class="btn btn-primary" style="width: 100%; padding: 12px;" onclick="handleLogin()">앱 시작하기</button>
+    </div>
+  </div>
+
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

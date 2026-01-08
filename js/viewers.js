@@ -736,6 +736,7 @@ let cadProtocol = null;
 let cadLayers = new Set();
 let cadLayerColors = {};
 let cadHiddenLayers = new Set();
+let currentCadProjectId = null; // [추가] 현재 로드된 CAD 프로젝트 ID
 
 export async function initCadViewer() {
     const statusEl = document.getElementById('cadStatus');
@@ -781,6 +782,7 @@ async function loadCadProjects() {
 
 export async function loadCadMap(projectId) {
     if (!projectId) return;
+    currentCadProjectId = projectId; // [추가] 프로젝트 ID 저장
     const statusEl = document.getElementById('cadStatus');
     statusEl.innerText = '지도 데이터 로딩 중...';
     if (cadMap) { cadMap.remove(); cadMap = null; }
@@ -803,7 +805,16 @@ export async function loadCadMap(projectId) {
             if (header) { bounds = [header.minLon, header.minLat, header.maxLon, header.maxLat]; maxDataZoom = header.maxZoom || 24; }
             const metadata = await p.getMetadata();
             if (metadata && metadata.vector_layers) {
-                metadata.vector_layers.forEach(l => { cadLayers.add(l.id); if (!cadLayerColors[l.id]) cadLayerColors[l.id] = getRandomColor(); });
+                metadata.vector_layers.forEach(l => { 
+                    cadLayers.add(l.id); 
+                    // [수정] 프로젝트ID_레이어명 키로 색상 조회 (프로젝트별 독립 설정)
+                    const storageKey = `${currentCadProjectId}_${l.id}`;
+                    if (state.userSettings?.layer_colors?.[storageKey]) {
+                        cadLayerColors[l.id] = state.userSettings.layer_colors[storageKey];
+                    } else if (!cadLayerColors[l.id]) {
+                        cadLayerColors[l.id] = getRandomColor(); 
+                    }
+                });
                 renderLayerList();
                 document.getElementById('cadLayerToggleBtn').style.display = 'block';
             }
@@ -896,7 +907,13 @@ function updateLayerDiscovery() {
         const layerName = f.properties.layer;
         if (layerName && !cadLayers.has(layerName)) {
             cadLayers.add(layerName);
-            if (!cadLayerColors[layerName]) cadLayerColors[layerName] = getRandomColor();
+            // [수정] 프로젝트ID_레이어명 키로 색상 조회
+            const storageKey = `${currentCadProjectId}_${layerName}`;
+            if (state.userSettings?.layer_colors?.[storageKey]) {
+                cadLayerColors[layerName] = state.userSettings.layer_colors[storageKey];
+            } else if (!cadLayerColors[layerName]) {
+                cadLayerColors[layerName] = getRandomColor();
+            }
             updated = true;
         }
     });
@@ -927,15 +944,52 @@ function renderLayerList() {
 }
 
 export function toggleLayer(layerName, isVisible) { if (isVisible) cadHiddenLayers.delete(layerName); else cadHiddenLayers.add(layerName); updateMapFilter(); }
-export function changeLayerColor(layerName, newColor) { cadLayerColors[layerName] = newColor; updateMapStyle(); }
+
+export function changeLayerColor(layerName, newColor) { 
+    cadLayerColors[layerName] = newColor; 
+    updateMapStyle(); 
+    saveUserColors(layerName, newColor); // [추가] 저장
+}
+
 // [추가] 전체 레이어 색상 일괄 변경 함수
 export function changeAllLayerColors(newColor) {
     for (const layer of cadLayers) {
         cadLayerColors[layer] = newColor;
+        if (state.currentUser) { // 메모리 상의 설정도 업데이트
+            if (!state.userSettings.layer_colors) state.userSettings.layer_colors = {};
+            // [수정] 프로젝트ID_레이어명 키로 저장
+            const storageKey = `${currentCadProjectId}_${layer}`;
+            state.userSettings.layer_colors[storageKey] = newColor;
+        }
     }
     updateMapStyle();
     renderLayerList(); // 개별 색상 선택기들도 업데이트된 색상으로 다시 렌더링
+    saveUserColors(); // [추가] 일괄 저장
 }
+
+// [추가] 사용자 색상 설정 저장 함수 (Supabase Upsert)
+async function saveUserColors(layerName, newColor) {
+    if (!state.currentUser || !state.supabaseConfig) return;
+    
+    if (layerName && newColor) {
+        if (!state.userSettings.layer_colors) state.userSettings.layer_colors = {};
+        // [수정] 프로젝트ID_레이어명 키로 저장
+        const storageKey = `${currentCadProjectId}_${layerName}`;
+        state.userSettings.layer_colors[storageKey] = newColor;
+    }
+
+    try {
+        // Supabase Upsert (Insert or Update)
+        await callSupabaseDirect('user_settings', 'POST', {
+            username: state.currentUser,
+            layer_colors: state.userSettings.layer_colors
+        }, { 'Prefer': 'resolution=merge-duplicates' }, { keepalive: true }); // [수정] keepalive 추가
+        console.log(`색상 저장 완료 [${layerName}]:`, newColor);
+    } catch (e) {
+        console.error("색상 저장 실패:", e);
+    }
+}
+
 export function toggleLayerPanel() { const panel = document.getElementById('cadLayerPanel'); panel.style.display = (panel.style.display === 'none' || panel.style.display === '') ? 'block' : 'none'; }
 
 function updateMapFilter() {
@@ -958,6 +1012,7 @@ function updateMapStyle() {
     for (const [layer, color] of Object.entries(cadLayerColors)) matchExpr.push(layer, color);
     matchExpr.push('#cccccc');
     
+    // [수정] 원본 색상 무시하고 사용자 설정(또는 랜덤) 색상만 적용
     if (cadMap.getLayer('cad-lines')) cadMap.setPaintProperty('cad-lines', 'line-color', matchExpr);
     if (cadMap.getLayer('cad-points')) cadMap.setPaintProperty('cad-points', 'circle-color', matchExpr);
 }
@@ -965,6 +1020,7 @@ function updateMapStyle() {
 export function cleanupCadViewer() {
     if (cadMap) { cadMap.remove(); cadMap = null; }
     state.r2Config = null; cadLayers.clear(); cadLayerColors = {}; cadHiddenLayers.clear();
+    currentCadProjectId = null; // [추가] 초기화
     document.getElementById('cadLayerPanel').style.display = 'none';
     document.getElementById('cadLayerToggleBtn').style.display = 'none';
 }

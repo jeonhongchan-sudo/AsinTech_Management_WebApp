@@ -1,5 +1,5 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
-import { state, callApi, showAlert } from './core.js';
+import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
 import { initPdfViewer, selectGuideline, changePage, zoomIn, zoomOut, toggleFullScreen, toggleSidebar, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers } from './viewers.js';
 import { loadProjects, createProject, deleteProject, renameProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, renamePhoto, setupDragDrop, handleFiles, uploadPhotos, backToProjectFromUpload, triggerUploadForCurrent, openLightbox, closeLightbox, navigateLightbox } from './managers.js';
 
@@ -34,6 +34,8 @@ window.changeAllLayerColors = changeAllLayerColors;
 window.toggleLayerPanel = toggleLayerPanel;
 window.toggleBackgroundMap = toggleBackgroundMap;
 window.toggleMarkers = toggleMarkers;
+window.handleLogin = handleLogin; // [추가] 로그인 함수 바인딩
+window.logout = logout; // [추가] 로그아웃 함수 바인딩
 
 // 탭 전환 로직
 export function switchTab(tabName) {
@@ -56,6 +58,92 @@ export function switchTab(tabName) {
   }
 }
 
+// [수정] 로그인 로직 분리 (자동 로그인 검증 강화)
+export async function performLogin(username, isAuto = false) {
+    // 1. UI 준비 (수동 로그인일 때만 버튼 제어)
+    const overlay = document.getElementById('loginOverlay');
+    const btn = overlay.querySelector('button');
+    if (!isAuto && overlay.style.display !== 'none' && btn) {
+        btn.innerText = "로그인 중...";
+        btn.disabled = true;
+    }
+
+    // 2. Supabase 검증 및 설정 로드
+    let isValidUser = false;
+    if (state.supabaseConfig) {
+        try {
+            const data = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=layer_colors`);
+            if (data && data.length > 0) {
+                state.userSettings = { layer_colors: data[0].layer_colors || {} };
+                console.log("사용자 설정 로드 완료:", state.userSettings);
+                isValidUser = true;
+            } else {
+                // DB에 데이터 없음
+                if (isAuto) {
+                    console.warn("자동 로그인 실패: DB에 사용자 정보 없음 (삭제됨)");
+                    localStorage.removeItem('asin_user'); // 유효하지 않은 정보 삭제
+                    return false; // 로그인 중단 (로그인 창 유지)
+                }
+                
+                // 수동 로그인인 경우: 신규 유저로 간주하고 진행
+                state.userSettings = { layer_colors: {} }; 
+                console.log("신규 사용자 진입");
+                isValidUser = true;
+            }
+        } catch (e) { 
+            console.warn("사용자 설정 로드 실패:", e); 
+            // 에러 발생 시 자동 로그인은 안전을 위해 차단
+            if (isAuto) return false;
+            state.userSettings = { layer_colors: {} }; 
+            isValidUser = true;
+        }
+    }
+
+    if (!isValidUser) return false;
+
+    // 3. 로그인 확정 및 저장
+    state.currentUser = username;
+    localStorage.setItem('asin_user', username); // [중요] 검증 통과 시에만 저장/갱신
+
+    overlay.style.display = 'none';
+    if (btn) { btn.innerText = "앱 시작하기"; btn.disabled = false; }
+    updateHeaderWithUser(username); // [추가] 헤더에 사용자 표시
+    return true;
+}
+
+// [수정] UI에서 호출하는 로그인 핸들러
+export async function handleLogin() {
+    const input = document.getElementById('loginUsername');
+    const username = input.value.trim();
+    if (!username) return alert("사용자 이름을 입력해주세요.");
+    await performLogin(username, false); // 수동 로그인
+}
+
+// [추가] 로그아웃 함수
+export function logout() {
+    if(confirm("로그아웃 하시겠습니까?")) {
+        localStorage.removeItem('asin_user');
+        location.reload();
+    }
+}
+
+// [추가] 헤더에 사용자 정보 및 로그아웃 버튼 표시
+function updateHeaderWithUser(username) {
+    let userInfo = document.getElementById('userInfoDisplay');
+    if (!userInfo) {
+        const headerDiv = document.querySelector('.header > div:last-child');
+        if (headerDiv) {
+            userInfo = document.createElement('span');
+            userInfo.id = 'userInfoDisplay';
+            userInfo.style.cssText = 'margin-right: 10px; color: white; font-weight: bold; font-size: 14px;';
+            headerDiv.insertBefore(userInfo, headerDiv.firstChild);
+        }
+    }
+    if (userInfo) {
+        userInfo.innerHTML = `👤 ${username} <button onclick="window.logout()" style="background:none; border:none; color:#eee; cursor:pointer; text-decoration:underline; font-size:12px; margin-left:5px;">(로그아웃)</button>`;
+    }
+}
+
 // 초기화
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('photo-manager-interface').style.display = 'none';
@@ -67,9 +155,24 @@ document.addEventListener('DOMContentLoaded', function() {
       if (res.success && res.url && res.key) {
           state.supabaseConfig = { url: res.url, key: res.key, vworldKey: res.vworldKey, colabUrl: res.colabUrl };
           console.log("Supabase Config Loaded");
+          
+          // [추가] 자동 로그인 체크
+          const savedUser = localStorage.getItem('asin_user');
+          if (savedUser) performLogin(savedUser, true); // 자동 로그인 시도
       }
       loadProjects();
-  }).catch(e => { console.warn("Config fetch failed", e); loadProjects(); });
+  }).catch(e => { 
+      console.warn("Config fetch failed", e); 
+      // Config 실패해도 저장된 유저 있으면 오프라인 로그인 처리
+      const savedUser = localStorage.getItem('asin_user');
+      // 오프라인일 때는 검증 불가능하므로 일단 진입 허용 (또는 차단 가능)
+      if (savedUser) { 
+          state.currentUser = savedUser; 
+          document.getElementById('loginOverlay').style.display = 'none'; 
+          updateHeaderWithUser(savedUser); 
+      }
+      loadProjects(); 
+  });
 
   setupDragDrop();
   
