@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
-import { initPdfViewer, selectGuideline, changePage, zoomIn, zoomOut, toggleFullScreen, toggleSidebar, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers } from './viewers.js';
-import { loadProjects, createProject, deleteProject, renameProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, renamePhoto, setupDragDrop, handleFiles, uploadPhotos, backToProjectFromUpload, triggerUploadForCurrent, openLightbox, closeLightbox, navigateLightbox } from './managers.js';
+import { initPdfViewer, selectGuideline, changePage, zoomIn, zoomOut, toggleFullScreen, toggleSidebar, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerColorsFromSettings } from './viewers.js';
+import { loadProjects, createProject, deleteProject, renameProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, renamePhoto, setupDragDrop, handleFiles, uploadPhotos, backToProjectFromUpload, triggerUploadForCurrent, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 지원용)
 window.switchTab = switchTab;
@@ -36,6 +36,12 @@ window.toggleBackgroundMap = toggleBackgroundMap;
 window.toggleMarkers = toggleMarkers;
 window.handleLogin = handleLogin; // [추가] 로그인 함수 바인딩
 window.logout = logout; // [추가] 로그아웃 함수 바인딩
+window.openAdminPage = openAdminPage;
+window.closeAdminPage = closeAdminPage;
+window.toggleSystemLock = toggleSystemLock;
+window.createNewUser = createNewUser;
+window.deleteUser = deleteUser;
+window.renameUser = renameUser;
 
 // 탭 전환 로직
 export function switchTab(tabName) {
@@ -58,6 +64,23 @@ export function switchTab(tabName) {
   }
 }
 
+// [추가] 사용자 설정 로드 헬퍼 함수
+async function fetchUserSettings(username) {
+    if (!state.supabaseConfig) return;
+    try {
+        const data = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=layer_colors`);
+        if (data && data.length > 0) {
+            state.userSettings = { layer_colors: data[0].layer_colors || {} };
+            reloadLayerColorsFromSettings(); // 맵이 이미 열려있다면 즉시 적용
+        } else {
+            state.userSettings = { layer_colors: {} };
+        }
+    } catch (e) {
+        console.warn("사용자 설정 로드 실패:", e);
+        state.userSettings = { layer_colors: {} };
+    }
+}
+
 // [수정] 로그인 로직 분리 (자동 로그인 검증 강화)
 export async function performLogin(username, isAuto = false) {
     // 1. UI 준비 (수동 로그인일 때만 버튼 제어)
@@ -68,46 +91,44 @@ export async function performLogin(username, isAuto = false) {
         btn.disabled = true;
     }
 
-    // 2. Supabase 검증 및 설정 로드
-    let isValidUser = false;
+    // [추가] 로그인 잠금(Lock) 체크 로직
     if (state.supabaseConfig) {
         try {
-            const data = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=layer_colors`);
-            if (data && data.length > 0) {
-                state.userSettings = { layer_colors: data[0].layer_colors || {} };
-                console.log("사용자 설정 로드 완료:", state.userSettings);
-                isValidUser = true;
-            } else {
-                // DB에 데이터 없음
-                if (isAuto) {
-                    console.warn("자동 로그인 실패: DB에 사용자 정보 없음 (삭제됨)");
-                    localStorage.removeItem('asin_user'); // 유효하지 않은 정보 삭제
-                    return false; // 로그인 중단 (로그인 창 유지)
-                }
+            // 1. 시스템 잠금 상태 확인 (SYSTEM_CONFIG)
+            const configData = await callSupabaseDirect(`user_settings?username=eq.SYSTEM_CONFIG&select=layer_colors`);
+            const isLocked = configData && configData.length > 0 && configData[0].layer_colors?.locked === true;
+
+            if (isLocked) {
+                // 2. 잠겨있다면, 유저가 존재하는지 확인
+                const userCheck = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=username`);
+                const isAdmin = state.adminUser && username === state.adminUser;
                 
-                // 수동 로그인인 경우: 신규 유저로 간주하고 진행
-                state.userSettings = { layer_colors: {} }; 
-                console.log("신규 사용자 진입");
-                isValidUser = true;
+                // 관리자가 아니고, 목록에도 없다면 차단
+                if (!isAdmin && (!userCheck || userCheck.length === 0)) {
+                    alert("현재 신규 가입이 제한되어 있습니다.\n관리자에게 문의하세요.");
+                    if (btn) { btn.innerText = "앱 시작하기"; btn.disabled = false; }
+                    return false;
+                }
             }
-        } catch (e) { 
-            console.warn("사용자 설정 로드 실패:", e); 
-            // 에러 발생 시 자동 로그인은 안전을 위해 차단
-            if (isAuto) return false;
-            state.userSettings = { layer_colors: {} }; 
-            isValidUser = true;
+        } catch (e) {
+            console.warn("Login check warning:", e);
         }
     }
 
-    if (!isValidUser) return false;
-
-    // 3. 로그인 확정 및 저장
+    // [변경] 통신 대기 없이 즉시 로그인 처리 (사용자 요청)
     state.currentUser = username;
-    localStorage.setItem('asin_user', username); // [중요] 검증 통과 시에만 저장/갱신
+    localStorage.setItem('asin_user', username);
 
+    // UI 해제 및 헤더 업데이트
     overlay.style.display = 'none';
     if (btn) { btn.innerText = "앱 시작하기"; btn.disabled = false; }
-    updateHeaderWithUser(username); // [추가] 헤더에 사용자 표시
+    updateHeaderWithUser(username);
+
+    // [수정] 설정 로드 대기 (await) - 맵 로드 시 색상 적용을 위해 필요
+    if (state.supabaseConfig) {
+        await fetchUserSettings(username);
+    }
+
     return true;
 }
 
@@ -149,37 +170,49 @@ function updateHeaderWithUser(username) {
     }
     if (userInfo) {
         // [수정] 디자인 개선: 텍스트 간소화 및 로그아웃 버튼 스타일 변경
-        userInfo.innerHTML = `<span style="font-weight:bold; margin-right:5px;">${username}</span> <button onclick="window.logout()" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.4); border-radius:10px; color:#fff; cursor:pointer; padding:2px 8px; font-size:11px;">로그아웃</button>`;
+        let html = `<span style="font-weight:bold; margin-right:5px;">${username}</span>`;
+        
+        // [추가] 관리자 버튼 (username이 adminUser와 같을 때만 표시)
+        if (state.adminUser && username === state.adminUser) {
+            html += `<button onclick="window.openAdminPage()" style="background:#ffc107; border:none; border-radius:10px; color:#000; cursor:pointer; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px;">관</button>`;
+        }
+        
+        html += `<button onclick="window.logout()" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.4); border-radius:10px; color:#fff; cursor:pointer; padding:2px 8px; font-size:11px;">로그아웃</button>`;
+        userInfo.innerHTML = html;
     }
 }
 
 // 초기화
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('photo-manager-interface').style.display = 'none';
+  
+  // [최적화] 앱 진입 즉시 로컬 스토리지에서 사용자 이름 복원 (API 대기 시간 제거)
+  const savedUser = localStorage.getItem('asin_user');
+  if (savedUser) {
+      const input = document.getElementById('loginUsername');
+      if (input) input.value = savedUser;
+  }
+
   initPdfViewer();
   initProj4Defs();
   initCadViewer(); // 초기 탭(Map Viewer) 초기화
 
-  callApi('getSupabaseConfig').then(res => {
+  callApi('getSupabaseConfig').then(async res => {
       if (res.success && res.url && res.key) {
           state.supabaseConfig = { url: res.url, key: res.key, vworldKey: res.vworldKey, colabUrl: res.colabUrl };
-          console.log("Supabase Config Loaded");
+          // [추가] GAS에서 전달받은 관리자 ID 저장 (GAS 스크립트에 AD_USER 속성 반환 로직 필요)
+          if (res.adminUser) state.adminUser = res.adminUser;
           
-          // [추가] 자동 로그인 체크
-          const savedUser = localStorage.getItem('asin_user');
-          if (savedUser) performLogin(savedUser, true); // 자동 로그인 시도
+          console.log("Supabase Config Loaded");
+          // [추가] Config 로드 전 이미 로그인이 수행된 경우 설정 가져오기
+          if (state.currentUser) {
+              updateHeaderWithUser(state.currentUser); // [추가] 관리자 정보 수신 후 헤더(버튼) 갱신
+              await fetchUserSettings(state.currentUser);
+          }
       }
       loadProjects();
   }).catch(e => { 
       console.warn("Config fetch failed", e); 
-      // Config 실패해도 저장된 유저 있으면 오프라인 로그인 처리
-      const savedUser = localStorage.getItem('asin_user');
-      // 오프라인일 때는 검증 불가능하므로 일단 진입 허용 (또는 차단 가능)
-      if (savedUser) { 
-          state.currentUser = savedUser; 
-          document.getElementById('loginOverlay').style.display = 'none'; 
-          updateHeaderWithUser(savedUser); 
-      }
       loadProjects(); 
   });
 

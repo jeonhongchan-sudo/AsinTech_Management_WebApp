@@ -967,6 +967,23 @@ export function changeAllLayerColors(newColor) {
     saveUserColors(); // [추가] 일괄 저장
 }
 
+// [추가] 지연 로드된 사용자 설정 적용 함수
+export function reloadLayerColorsFromSettings() {
+    if (!cadMap || !currentCadProjectId) return;
+    let updated = false;
+    cadLayers.forEach(layer => {
+        const storageKey = `${currentCadProjectId}_${layer}`;
+        if (state.userSettings?.layer_colors?.[storageKey]) {
+            cadLayerColors[layer] = state.userSettings.layer_colors[storageKey];
+            updated = true;
+        }
+    });
+    if (updated) {
+        updateMapStyle();
+        renderLayerList();
+    }
+}
+
 // [추가] 사용자 색상 설정 저장 함수 (Supabase Upsert)
 async function saveUserColors(layerName, newColor) {
     if (!state.currentUser || !state.supabaseConfig) return;

@@ -191,3 +191,106 @@ function updateLightboxImage() {
     const fullImageUrl = (p.url && p.url.includes('.r2.dev')) ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=w1920-h1080`;
     document.getElementById('lightboxImg').src = fullImageUrl; document.getElementById('lightboxDownloadBtn').href = p.url; 
 }
+
+// --- Admin Manager ---
+export function openAdminPage() {
+    document.getElementById('adminOverlay').style.display = 'flex';
+    loadAdminData();
+}
+
+export function closeAdminPage() {
+    document.getElementById('adminOverlay').style.display = 'none';
+}
+
+async function loadAdminData() {
+    if (!state.supabaseConfig) return;
+    const listEl = document.getElementById('adminUserList');
+    const chkLock = document.getElementById('chkLoginLock');
+    listEl.innerHTML = '<tr><td colspan="2" style="text-align:center;">로딩 중...</td></tr>';
+
+    try {
+        // 1. 시스템 설정(잠금 상태) 조회 - SYSTEM_CONFIG 유저의 layer_colors 필드 활용
+        const configData = await callSupabaseDirect(`user_settings?username=eq.SYSTEM_CONFIG&select=layer_colors`);
+        if (configData && configData.length > 0 && configData[0].layer_colors?.locked) {
+            chkLock.checked = true;
+        } else {
+            chkLock.checked = false;
+        }
+
+        // 2. 유저 목록 조회
+        let users = await callSupabaseDirect(`user_settings?username=neq.SYSTEM_CONFIG&select=username,created_at&order=created_at.desc`);
+        
+        // [추가] 관리자 본인 제외 필터링
+        if (users && state.adminUser) {
+            users = users.filter(u => u.username !== state.adminUser);
+        }
+
+        let html = '';
+        if (users && users.length > 0) {
+            users.forEach(u => {
+                html += `<tr>
+                    <td>${u.username}</td>
+                    <td style="text-align:center;">
+                        <button class="btn btn-outline" style="padding:2px 5px; font-size:11px;" onclick="window.renameUser('${u.username}')">이름변경</button>
+                        <button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteUser('${u.username}')">삭제</button>
+                    </td>
+                </tr>`;
+            });
+        } else {
+            html = '<tr><td colspan="2" style="text-align:center;">등록된 유저가 없습니다.</td></tr>';
+        }
+        listEl.innerHTML = html;
+
+    } catch (e) {
+        console.error(e);
+        listEl.innerHTML = `<tr><td colspan="2" style="text-align:center; color:red;">로드 실패: ${e.message}</td></tr>`;
+    }
+}
+
+export async function toggleSystemLock(isLocked) {
+    if (!state.supabaseConfig) return;
+    try {
+        // SYSTEM_CONFIG 유저에 잠금 상태 저장
+        await callSupabaseDirect('user_settings', 'POST', {
+            username: 'SYSTEM_CONFIG',
+            layer_colors: { locked: isLocked }
+        }, { 'Prefer': 'resolution=merge-duplicates' });
+        showAlert(isLocked ? "신규 가입이 차단되었습니다." : "신규 가입이 허용되었습니다.");
+    } catch (e) {
+        console.error(e);
+        showAlert("설정 저장 실패", "error");
+        document.getElementById('chkLoginLock').checked = !isLocked; // 원복
+    }
+}
+
+export async function createNewUser() {
+    const input = document.getElementById('newUserName');
+    const name = input.value.trim();
+    if (!name) return alert("이름을 입력하세요.");
+    if (name === 'SYSTEM_CONFIG') return alert("사용할 수 없는 이름입니다.");
+
+    try {
+        await callSupabaseDirect('user_settings', 'POST', { username: name, layer_colors: {} }, { 'Prefer': 'resolution=merge-duplicates' });
+        input.value = '';
+        loadAdminData();
+    } catch (e) { showAlert("유저 추가 실패: " + e.message, "error"); }
+}
+
+export async function deleteUser(username) {
+    if (!confirm(`'${username}' 유저를 삭제하시겠습니까?\n해당 유저의 설정 데이터가 모두 삭제됩니다.`)) return;
+    try {
+        await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}`, 'DELETE');
+        loadAdminData();
+    } catch (e) { showAlert("삭제 실패", "error"); }
+}
+
+export async function renameUser(oldName) {
+    const newName = prompt(`'${oldName}'의 새로운 이름을 입력하세요:`);
+    if (!newName || newName.trim() === '') return;
+    if (newName === oldName) return;
+
+    try {
+        await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(oldName)}`, 'PATCH', { username: newName });
+        loadAdminData();
+    } catch (e) { showAlert("이름 변경 실패 (중복된 이름일 수 있습니다)", "error"); }
+}
