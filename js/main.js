@@ -131,16 +131,25 @@ export function logout() {
 function updateHeaderWithUser(username) {
     let userInfo = document.getElementById('userInfoDisplay');
     if (!userInfo) {
-        const headerDiv = document.querySelector('.header > div:last-child');
-        if (headerDiv) {
+        // [수정] 타겟 변경: 헤더의 첫 번째 div (로고 영역)
+        const headerLogoDiv = document.querySelector('.header > div:first-child');
+        if (headerLogoDiv) {
+            // 로고와 사용자 정보를 가로로 배치하기 위해 스타일 조정
+            headerLogoDiv.style.display = 'flex';
+            headerLogoDiv.style.alignItems = 'center';
+            headerLogoDiv.style.gap = '15px';
+            headerLogoDiv.style.flexWrap = 'wrap'; // 모바일 등 좁은 화면 대응
+            headerLogoDiv.style.justifyContent = 'center'; // 모바일에서 중앙 정렬 유지
+
             userInfo = document.createElement('span');
             userInfo.id = 'userInfoDisplay';
-            userInfo.style.cssText = 'margin-right: 10px; color: white; font-weight: bold; font-size: 14px;';
-            headerDiv.insertBefore(userInfo, headerDiv.firstChild);
+            userInfo.style.cssText = 'color: white; font-size: 14px; display: inline-flex; align-items: center;';
+            headerLogoDiv.appendChild(userInfo);
         }
     }
     if (userInfo) {
-        userInfo.innerHTML = `👤 ${username} <button onclick="window.logout()" style="background:none; border:none; color:#eee; cursor:pointer; text-decoration:underline; font-size:12px; margin-left:5px;">(로그아웃)</button>`;
+        // [수정] 디자인 개선: 텍스트 간소화 및 로그아웃 버튼 스타일 변경
+        userInfo.innerHTML = `<span style="font-weight:bold; margin-right:5px;">${username}</span> <button onclick="window.logout()" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.4); border-radius:10px; color:#fff; cursor:pointer; padding:2px 8px; font-size:11px;">로그아웃</button>`;
     }
 }
 
