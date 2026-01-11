@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
-import { initPdfViewer, selectGuideline, changePage, zoomIn, zoomOut, toggleFullScreen, toggleSidebar, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerColorsFromSettings } from './viewers.js';
-import { loadProjects, createProject, deleteProject, renameProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, renamePhoto, setupDragDrop, handleFiles, uploadPhotos, backToProjectFromUpload, triggerUploadForCurrent, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser } from './managers.js';
+import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerColorsFromSettings, loadMapMemos, flyToLocation } from './viewers.js';
+import { loadProjects, createProject, deleteProject, renameProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, renamePhoto, setupDragDrop, handleFiles, uploadPhotos, backToProjectFromUpload, triggerUploadForCurrent, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageUpload, toggleMemoArchiveMode, searchArchivedMemos } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 지원용)
 window.switchTab = switchTab;
@@ -22,11 +22,7 @@ window.openLightbox = openLightbox;
 window.closeLightbox = closeLightbox;
 window.navigateLightbox = navigateLightbox;
 window.selectGuideline = selectGuideline;
-window.changePage = changePage;
-window.zoomIn = zoomIn;
-window.zoomOut = zoomOut;
 window.toggleFullScreen = toggleFullScreen;
-window.toggleSidebar = toggleSidebar;
 window.loadCadMap = loadCadMap;
 window.toggleLayer = toggleLayer;
 window.changeLayerColor = changeLayerColor;
@@ -42,10 +38,34 @@ window.toggleSystemLock = toggleSystemLock;
 window.createNewUser = createNewUser;
 window.deleteUser = deleteUser;
 window.renameUser = renameUser;
+window.loadMemoList = loadMemoList; // [추가]
+window.deleteMemo = deleteMemo; // [추가]
+window.handleMemoImageUpload = handleMemoImageUpload; // [추가] 메모 사진 업로드 핸들러
+window.toggleMemoArchiveMode = toggleMemoArchiveMode; // [추가] 아카이브 모드 토글
+window.searchArchivedMemos = searchArchivedMemos; // [추가] 아카이브 검색
+window.loadMapMemos = loadMapMemos; // [추가] 지도 메모 갱신용
+
+// [수정] 메모 위치로 이동 (프로젝트 로드 -> 탭 전환 -> 지도 이동)
+window.viewMemoOnMap = async function(projectId, lon, lat) {
+    switchTab('cadViewer');
+    
+    // 현재 로드된 프로젝트가 해당 메모의 프로젝트와 다르면 로드
+    if (state.currentCadProjectId !== projectId) {
+        // select 요소 값 변경 및 로드 트리거
+        const select = document.getElementById('cadProjectSelect');
+        if(select) select.value = projectId;
+        await window.loadCadMap(projectId);
+    }
+    
+    // 지도 로드 후 이동 (약간의 지연 필요할 수 있음)
+    setTimeout(() => flyToLocation(lon, lat), 500);
+};
 
 // 탭 전환 로직
 export function switchTab(tabName) {
   if (tabName !== 'photo-manager') document.getElementById('photo-manager-interface').style.display = 'none';
+  
+  // [수정] 탭 전환 시 지도 뷰어 처리 (메모 탭 독립성 확보를 위해 원복)
   if (tabName === 'cadViewer') initCadViewer(); else cleanupCadViewer();
   
   document.getElementById('mainTabs').style.display = 'flex';
@@ -61,6 +81,10 @@ export function switchTab(tabName) {
     const uis = document.getElementById('uisCodeTableContainer');
     const rtk = document.getElementById('networkRtkContainer');
     if (uis.style.display !== 'block' && rtk.style.display !== 'block') selectGuideline('road');
+  }
+
+  if (tabName === 'memos') {
+      loadMemoList();
   }
 }
 
@@ -199,7 +223,6 @@ document.addEventListener('DOMContentLoaded', function() {
       if (input) input.value = savedUser;
   }
 
-  initPdfViewer();
   initProj4Defs();
   initCadViewer(); // 초기 탭(Map Viewer) 초기화
 
@@ -209,7 +232,6 @@ document.addEventListener('DOMContentLoaded', function() {
           // [추가] GAS에서 전달받은 관리자 ID 저장 (GAS 스크립트에 AD_USER 속성 반환 로직 필요)
           if (res.adminUser) state.adminUser = res.adminUser;
           
-          console.log("Supabase Config Loaded");
           // [추가] Config 로드 전 이미 로그인이 수행된 경우 설정 가져오기
           if (state.currentUser) {
               updateHeaderWithUser(state.currentUser); // [추가] 관리자 정보 수신 후 헤더(버튼) 갱신
@@ -224,9 +246,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
   setupDragDrop();
   
-  // PDF 초기화 (road)
-  if(typeof pdfjsLib !== 'undefined') selectGuideline('road');
-
   document.addEventListener('keydown', function(event) {
     if (document.getElementById('lightboxOverlay').style.display === 'flex') {
         if (event.key === 'ArrowLeft') navigateLightbox(-1);
@@ -239,5 +258,4 @@ document.addEventListener('DOMContentLoaded', function() {
 function initProj4Defs() {
     if (typeof proj4 === 'undefined') return;
     proj4.defs("EPSG:5179", "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 +x_0=1000000 +y_0=2000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
-    if (typeof ol !== 'undefined' && ol.proj && ol.proj.proj4 && ol.proj.proj4.register) ol.proj.proj4.register(proj4);
 }

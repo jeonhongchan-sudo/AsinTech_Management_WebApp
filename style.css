@@ -127,6 +127,53 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
   .lightbox-close { top: 10px; right: 10px; font-size: 30px; }
   .lightbox-prev, .lightbox-next { padding: 10px; font-size: 18px; }
   .btn { padding: 10px 16px; }
+
+  /* [추가] 모바일 반응형 테이블 (카드 뷰 변환) */
+  .list-view-table { border: 0; }
+  .list-view-table thead { display: none; }
+  .list-view-table tr {
+    display: block;
+    margin-bottom: 15px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .list-view-table td {
+    display: block;
+    text-align: right;
+    font-size: 13px;
+    border-bottom: 1px solid #eee;
+    position: relative;
+    padding-left: 35% !important; /* 라벨 공간 확보 */
+    padding-top: 10px;
+    padding-bottom: 10px;
+    min-height: 35px;
+    white-space: normal;
+  }
+  .list-view-table td:last-child { border-bottom: 0; }
+  .list-view-table td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 10px;
+    width: 30%;
+    font-weight: bold;
+    text-align: left;
+    color: #555;
+    top: 10px;
+  }
+  /* 메모 내용이 길 경우 보기 좋게 조정 */
+  .list-view-table td.memo-content {
+      text-align: left;
+      padding-left: 10px !important;
+      padding-top: 35px; /* 라벨 아래로 내용 배치 */
+  }
+  .list-view-table td.memo-content::before {
+      top: 8px;
+      width: 100%;
+      border-bottom: 1px dashed #eee;
+      padding-bottom: 5px;
+  }
 }
 
 /* --- 지침서 탭 사이드바 레이아웃 --- */

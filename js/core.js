@@ -15,7 +15,10 @@ export const state = {
     r2Config: null,
     currentUser: null,      // [추가] 현재 로그인한 사용자 ID
     userSettings: {},       // [추가] 사용자별 설정 (색상 등)
-    adminUser: null         // [추가] 관리자 ID (API로 수신)
+    adminUser: null,        // [추가] 관리자 ID (API로 수신)
+    currentCadProjectId: null, // [추가] 현재 Map Viewer의 프로젝트 ID
+    memos: [],              // [추가] 현재 프로젝트의 메모 목록
+    isMemoArchiveMode: false // [추가] 메모 아카이브 조회 모드 여부
 };
 
 // 유틸리티 함수

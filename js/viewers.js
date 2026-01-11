@@ -2,32 +2,11 @@
 import { state, callApi, callSupabaseDirect, showAlert, R2_BASE_URL } from './core.js';
 import { UIS_DATA, ROAD_LEDGER_ITEMS, PDF_TOC_DATA, NETWORK_RTK_DATA, NON_CONFORMITY_CASES_DATA, NUMERIC_MAP_DATA, GNSS_NOTICE_DATA, PUBLIC_SURVEY_FAQ_DATA, REGULATION_REVISION_DATA, MATERIAL_ABBREVIATION_DATA, PUBLIC_SURVEY_REGULATIONS_DATA } from './data.js';
 
-// --- PDF Viewer Logic ---
-let pdfCache = {};
-let currentPdfType = 'road';
-let pdfDoc = null, pageNum = 1, pageRendering = false, pageNumPending = null, scale = 1.0; 
-let canvas, ctx;
-let isPdfLoading = false;
-const PAGE_OFFSET = 14; 
-
-export function initPdfViewer() {
-    canvas = document.getElementById('pdf-canvas');
-    if(canvas) ctx = canvas.getContext('2d');
-    
-    if (typeof pdfjsLib !== 'undefined') {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-    }
-    
-    if (window.innerWidth < 992) scale = 0.6;
-    window.addEventListener('resize', () => { scale = (window.innerWidth < 992) ? 0.6 : 1.0; });
-}
-
 export function selectGuideline(type) {
     document.querySelectorAll('.guide-menu-item').forEach(b => b.classList.remove('active'));
     document.getElementById('menu-guide-' + type)?.classList.add('active');
 
     const titleEl = document.getElementById('currentPdfTitle');
-    const pdfContainer = document.getElementById('pdfContainer');
     const uisContainer = document.getElementById('uisCodeTableContainer');
     const rtkContainer = document.getElementById('networkRtkContainer');
     const ncContainer = document.getElementById('nonConformityContainer');
@@ -38,10 +17,7 @@ export function selectGuideline(type) {
     const revisionContainer = document.getElementById('regulationRevisionContainer');
     const materialContainer = document.getElementById('materialAbbrContainer');
     const publicSurveyRegContainer = document.getElementById('publicSurveyRegContainer');
-    const loadingMsg = document.getElementById('pdf-loading-msg');
-    const tocToggleBtn = document.querySelector('.pdf-mobile-toc-toggle');
 
-    pdfContainer.style.display = 'none';
     uisContainer.style.display = 'none';
     if(rtkContainer) rtkContainer.style.display = 'none';
     if(ncContainer) ncContainer.style.display = 'none';
@@ -52,132 +28,74 @@ export function selectGuideline(type) {
     if(publicSurveyRegContainer) publicSurveyRegContainer.style.display = 'none';
     if(materialContainer) materialContainer.style.display = 'none';
     if(revisionContainer) revisionContainer.style.display = 'none';
-    loadingMsg.style.display = 'none';
     
-    currentPdfType = type;
-
     if (type === 'uis') {
         titleEl.innerText = 'UIS 시설물 측량 코드표';
         uisContainer.style.display = 'block';
         renderUISTable();
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     } else if (type === 'rtk') {
         titleEl.innerText = NETWORK_RTK_DATA.title;
         if(rtkContainer) {
             rtkContainer.style.display = 'block';
             renderNetworkRtk();
         }
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     } else if (type === 'nonConformity') {
         titleEl.innerText = NON_CONFORMITY_CASES_DATA.title;
         if(ncContainer) {
             ncContainer.style.display = 'block';
             renderNonConformityCases();
         }
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     } else if (type === 'road') {
         titleEl.innerText = '2024 도로대장 작성 지침';
         if(roadContainer) {
             roadContainer.style.display = 'block';
             renderRoadLedgerTOC();
         }
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     } else if (type === 'numericMap') {
         titleEl.innerText = NUMERIC_MAP_DATA.title;
         if(numericContainer) {
             numericContainer.style.display = 'block';
             renderNumericMap();
         }
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     } else if (type === 'gnssNotice') {
         titleEl.innerText = GNSS_NOTICE_DATA.title;
         if(gnssContainer) {
             gnssContainer.style.display = 'block';
             renderGnssNotice();
         }
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     } else if (type === 'faq') {
         titleEl.innerText = PUBLIC_SURVEY_FAQ_DATA.title;
         if(faqContainer) {
             faqContainer.style.display = 'block';
             renderPublicSurveyFaq();
         }
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     } else if (type === 'regulationRevision') {
         titleEl.innerText = REGULATION_REVISION_DATA.documentTitle;
         if(revisionContainer) {
             revisionContainer.style.display = 'block';
             renderRegulationRevision();
         }
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     } else if (type === 'materialAbbr') {
         titleEl.innerText = MATERIAL_ABBREVIATION_DATA.documentTitle;
         if(materialContainer) {
             materialContainer.style.display = 'block';
             renderMaterialAbbr();
         }
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     } else if (type === 'publicSurveyReg') {
         titleEl.innerText = PUBLIC_SURVEY_REGULATIONS_DATA.documentTitle;
         if(publicSurveyRegContainer) {
             publicSurveyRegContainer.style.display = 'block';
             renderPublicSurveyRegulations();
         }
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
-    } else {
-        if(tocToggleBtn) tocToggleBtn.style.display = 'none';
     }
 }
 
-function loadPdf(type, isBackground = false) { 
-  if(pdfCache[type]) return; 
-  isPdfLoading = true;
-  const loadingMsg = document.getElementById('pdf-loading-msg');
-  
-  if (!isBackground) {
-      loadingMsg.style.display = 'block';
-      loadingMsg.innerText = '문서를 불러오는 중입니다...';
-      document.getElementById('pdfContainer').style.display = 'none';
-  }
-
-  const action = 'getNumericMapPdf'; // road는 이제 PDF 뷰어를 사용하지 않음
-  callApi(action).then(r => { 
-    if(r.success) { 
-        pdfjsLib.getDocument({data:atob(r.data)}).promise.then(p => { 
-            pdfCache[type] = p;
-            isPdfLoading = false;
-            if (currentPdfType === type && document.getElementById('guidelines-tab').classList.contains('active')) {
-                pdfDoc = p;
-                pageNum = 1;
-                document.getElementById('page_count').textContent = p.numPages;
-                renderPage(pageNum);
-                loadingMsg.style.display = 'none';
-                document.getElementById('pdfContainer').style.display = 'flex';
-            }
-        }); 
-    } else { throw new Error(r.error); }
-  }).catch(err => {
-      isPdfLoading = false;
-      if(!isBackground && currentPdfType === type) {
-         loadingMsg.innerHTML = `문서 로드 실패. <button onclick="window.selectGuideline('${type}')" class="btn btn-primary">다시 시도</button><br><small>${err}</small>`;
-      }
-  }); 
-}
-
-function renderPage(n) { pageRendering=true; pdfDoc.getPage(n).then(p => { const vp=p.getViewport({scale:scale}); canvas.width=vp.width; canvas.height=vp.height; p.render({canvasContext:ctx, viewport:vp}).promise.then(() => { pageRendering=false; if(pageNumPending){ renderPage(pageNumPending); pageNumPending=null; } }); document.getElementById('page_num').textContent=n; }); }
-function queueRenderPage(n) { pageRendering ? pageNumPending=n : renderPage(n); }
-export function changePage(o) { if(pdfDoc && pageNum+o>=1 && pageNum+o<=pdfDoc.numPages) { pageNum+=o; queueRenderPage(pageNum); } }
-export function zoomIn() { scale+=0.25; queueRenderPage(pageNum); }
-export function zoomOut() { if(scale>0.4) scale-=0.25; queueRenderPage(pageNum); }
 export function toggleFullScreen() {
     const mapContainer = document.getElementById('cad-map');
-    const pdfContainer = document.getElementById('pdfContainer');
 
     let elementToFullscreen = null;
     if (document.getElementById('cadViewer-tab')?.classList.contains('active')) {
         elementToFullscreen = mapContainer;
-    } else if (document.getElementById('guidelines-tab')?.classList.contains('active')) {
-        elementToFullscreen = pdfContainer || document.querySelector('.pdf-container');
     }
 
     if (!elementToFullscreen) return;
@@ -188,7 +106,6 @@ export function toggleFullScreen() {
         document.exitFullscreen();
     }
 }
-export function toggleSidebar() { document.getElementById('pdfSidebar').classList.toggle('open'); }
 
 function renderRoadLedgerTOC() {
     const container = document.getElementById('roadLedgerTocContainer');
@@ -206,8 +123,7 @@ function renderRoadLedgerTOC() {
     html += `<div class="toc-list" style="display:flex; flex-direction:column; gap:8px;">`;
     
     tocData.forEach(item => {
-        // 실제 PDF 페이지 = 목차 페이지 + 옵셋(14)
-        const realPage = item.page + PAGE_OFFSET;
+        const realPage = item.page + 14; // PAGE_OFFSET
         const link = `${pdfBaseUrl}#page=${realPage}`;
         
         html += `<a href="${link}" target="_blank" style="display:flex; justify-content:space-between; padding:12px 15px; background:#f8f9fa; border:1px solid #eee; border-radius:5px; text-decoration:none; color:#333; transition:background 0.2s;">
@@ -736,7 +652,7 @@ let cadProtocol = null;
 let cadLayers = new Set();
 let cadLayerColors = {};
 let cadHiddenLayers = new Set();
-let currentCadProjectId = null; // [추가] 현재 로드된 CAD 프로젝트 ID
+let memoMarkers = []; // [추가] 메모 마커 관리용 배열
 
 export async function initCadViewer() {
     const statusEl = document.getElementById('cadStatus');
@@ -769,12 +685,33 @@ async function loadCadProjects() {
     const select = document.getElementById('cadProjectSelect');
     select.innerHTML = '<option value="">로딩 중...</option>';
     try {
-        const data = await callSupabaseDirect('cad_projects?select=id,name,created_at&order=created_at.desc');
+        // [수정] cad_projects의 생성일과 연관된 cad_files의 updated_at을 함께 조회
+        // cad_projects 테이블에 updated_at이 없을 수 있으므로 cad_files 테이블을 참조
+        const data = await callSupabaseDirect('cad_projects?select=id,name,created_at,cad_files(updated_at)');
+        
+        // [추가] 각 프로젝트별로 파일들의 최종 업데이트 날짜를 비교하여 최신 날짜 산출
+        const projects = data.map(p => {
+            let lastDate = new Date(p.created_at); // 기본값: 프로젝트 생성일
+            if (p.cad_files && Array.isArray(p.cad_files)) {
+                p.cad_files.forEach(f => {
+                    if (f.updated_at) {
+                        const fDate = new Date(f.updated_at);
+                        if (fDate > lastDate) lastDate = fDate;
+                    }
+                });
+            }
+            return { ...p, finalDate: lastDate };
+        });
+
+        // [추가] 계산된 최종 날짜(최신순)로 정렬
+        projects.sort((a, b) => b.finalDate - a.finalDate);
+
         select.innerHTML = '<option value="">프로젝트를 선택하세요</option>';
-        data.forEach(p => {
+        projects.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.id;
-            opt.innerText = `${p.name} (${new Date(p.created_at).toLocaleDateString()})`;
+            // [수정] 프로젝트 이름과 최종 업데이트 날짜 표시
+            opt.innerText = `${p.name} (${p.finalDate.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })})`;
             select.appendChild(opt);
         });
     } catch (e) { select.innerHTML = '<option value="">목록 로드 실패</option>'; showAlert('CAD 프로젝트 목록 로드 실패: ' + e.message, 'error'); }
@@ -782,7 +719,7 @@ async function loadCadProjects() {
 
 export async function loadCadMap(projectId) {
     if (!projectId) return;
-    currentCadProjectId = projectId; // [추가] 프로젝트 ID 저장
+    state.currentCadProjectId = projectId; // [수정] 전역 상태에 프로젝트 ID 저장
     const statusEl = document.getElementById('cadStatus');
     statusEl.innerText = '지도 데이터 로딩 중...';
     if (cadMap) { cadMap.remove(); cadMap = null; }
@@ -808,7 +745,7 @@ export async function loadCadMap(projectId) {
                 metadata.vector_layers.forEach(l => { 
                     cadLayers.add(l.id); 
                     // [수정] 프로젝트ID_레이어명 키로 색상 조회 (프로젝트별 독립 설정)
-                    const storageKey = `${currentCadProjectId}_${l.id}`;
+                    const storageKey = `${state.currentCadProjectId}_${l.id}`;
                     if (state.userSettings?.layer_colors?.[storageKey]) {
                         cadLayerColors[l.id] = state.userSettings.layer_colors[storageKey];
                     } else if (!cadLayerColors[l.id]) {
@@ -854,6 +791,9 @@ export async function loadCadMap(projectId) {
             if (chkMarkers) toggleMarkers(chkMarkers.checked);
 
             statusEl.innerText = '도면 로드 완료'; 
+            
+            // [추가] 메모 데이터 로드 (지도 표시용)
+            loadMapMemos();
         });
         cadMap.on('idle', updateLayerDiscovery);
     } catch (e) { console.error(e); statusEl.innerText = '지도 로드 오류: ' + e.message; }
@@ -908,7 +848,7 @@ function updateLayerDiscovery() {
         if (layerName && !cadLayers.has(layerName)) {
             cadLayers.add(layerName);
             // [수정] 프로젝트ID_레이어명 키로 색상 조회
-            const storageKey = `${currentCadProjectId}_${layerName}`;
+            const storageKey = `${state.currentCadProjectId}_${layerName}`;
             if (state.userSettings?.layer_colors?.[storageKey]) {
                 cadLayerColors[layerName] = state.userSettings.layer_colors[storageKey];
             } else if (!cadLayerColors[layerName]) {
@@ -958,7 +898,7 @@ export function changeAllLayerColors(newColor) {
         if (state.currentUser) { // 메모리 상의 설정도 업데이트
             if (!state.userSettings.layer_colors) state.userSettings.layer_colors = {};
             // [수정] 프로젝트ID_레이어명 키로 저장
-            const storageKey = `${currentCadProjectId}_${layer}`;
+            const storageKey = `${state.currentCadProjectId}_${layer}`;
             state.userSettings.layer_colors[storageKey] = newColor;
         }
     }
@@ -969,10 +909,10 @@ export function changeAllLayerColors(newColor) {
 
 // [추가] 지연 로드된 사용자 설정 적용 함수
 export function reloadLayerColorsFromSettings() {
-    if (!cadMap || !currentCadProjectId) return;
+    if (!cadMap || !state.currentCadProjectId) return;
     let updated = false;
     cadLayers.forEach(layer => {
-        const storageKey = `${currentCadProjectId}_${layer}`;
+        const storageKey = `${state.currentCadProjectId}_${layer}`;
         if (state.userSettings?.layer_colors?.[storageKey]) {
             cadLayerColors[layer] = state.userSettings.layer_colors[storageKey];
             updated = true;
@@ -991,7 +931,7 @@ async function saveUserColors(layerName, newColor) {
     if (layerName && newColor) {
         if (!state.userSettings.layer_colors) state.userSettings.layer_colors = {};
         // [수정] 프로젝트ID_레이어명 키로 저장
-        const storageKey = `${currentCadProjectId}_${layerName}`;
+        const storageKey = `${state.currentCadProjectId}_${layerName}`;
         state.userSettings.layer_colors[storageKey] = newColor;
     }
 
@@ -1001,7 +941,6 @@ async function saveUserColors(layerName, newColor) {
             username: state.currentUser,
             layer_colors: state.userSettings.layer_colors
         }, { 'Prefer': 'resolution=merge-duplicates' }, { keepalive: true }); // [수정] keepalive 추가
-        console.log(`색상 저장 완료 [${layerName}]:`, newColor);
     } catch (e) {
         console.error("색상 저장 실패:", e);
     }
@@ -1037,12 +976,198 @@ function updateMapStyle() {
 export function cleanupCadViewer() {
     if (cadMap) { cadMap.remove(); cadMap = null; }
     state.r2Config = null; cadLayers.clear(); cadLayerColors = {}; cadHiddenLayers.clear();
-    currentCadProjectId = null; // [추가] 초기화
+    state.currentCadProjectId = null; // [추가] 초기화
     document.getElementById('cadLayerPanel').style.display = 'none';
     document.getElementById('cadLayerToggleBtn').style.display = 'none';
+    // [추가] 메모 마커 초기화
+    memoMarkers.forEach(m => m.remove());
+    memoMarkers = [];
 }
 
 // 전체화면 상태 변경 감지 리스너
 document.addEventListener('fullscreenchange', () => {
     updateCadStyle();
 });
+
+// --- [추가] 메모 기능 (Map Interaction) ---
+
+// 메모 데이터 로드 (지도용)
+export async function loadMapMemos() { // [수정] export 추가 및 마커 표시 로직 구현
+    if (!state.currentCadProjectId || !state.supabaseConfig || !cadMap) return;
+    
+    // 기존 마커 제거
+    memoMarkers.forEach(m => m.remove());
+    memoMarkers = [];
+
+    try {
+        // [수정] 내 메모 또는(OR) 공개된 메모만 조회
+        const user = state.currentUser ? encodeURIComponent(state.currentUser) : 'anonymous';
+        const data = await callSupabaseDirect(`memos?project_id=eq.${state.currentCadProjectId}&or=(is_public.eq.true,username.eq.${user})&select=*`);
+        state.memos = data || [];
+        
+        // [추가] 지도에 마커 표시
+        state.memos.forEach(memo => {
+            // 내 메모는 노란색, 타인 메모(공개)는 파란색 등으로 구분 가능
+            const isMine = memo.username === state.currentUser;
+            const color = isMine ? '#FFC107' : '#007bff'; 
+            const marker = new maplibregl.Marker({ color: color, scale: 0.8 })
+                .setLngLat([memo.lon, memo.lat]);
+
+            const popupDiv = document.createElement('div');
+            
+            let btnHtml = '';
+            if (isMine) {
+                btnHtml = `<button class="btn btn-danger" style="width:100%; padding:2px; font-size:11px;" onclick="window.deleteMemo('${memo.id}')">삭제</button>`;
+            }
+            
+            // [추가] 이미지 미리보기
+            let imgHtml = '';
+            if (memo.image_url) {
+                imgHtml = `<div style="margin-bottom:5px;"><img src="${memo.image_url}" style="max-width:100%; max-height:100px; border-radius:4px; cursor:pointer;" onclick="window.open('${memo.image_url}')"></div>`;
+            }
+
+            popupDiv.innerHTML = `<div style="font-size:11px; color:#888; margin-bottom:3px;">${memo.username || '-'} | ${new Date(memo.created_at).toLocaleDateString()} ${memo.is_public ? '(공개)' : '🔒'}</div>
+                                  ${imgHtml}
+                                  <div style="font-size:13px; margin-bottom:8px; white-space:pre-wrap;">${memo.content}</div>
+                                  ${btnHtml}`;
+
+            marker.setPopup(new maplibregl.Popup({ offset: 25 }).setDOMContent(popupDiv));
+            marker.addTo(cadMap);
+            memoMarkers.push(marker);
+        });
+    } catch (e) {
+        console.warn("메모 로드 실패 (테이블이 없을 수 있음):", e);
+        state.memos = [];
+    }
+}
+
+// [추가] 외부(메모 목록)에서 호출하여 해당 위치로 지도 이동
+export function flyToLocation(lon, lat) {
+    if (cadMap) {
+        cadMap.flyTo({ center: [lon, lat], zoom: 18, essential: true });
+    }
+}
+
+// 지도 클릭/터치 핸들러 등록
+function setupMapInteraction() {
+    if(!cadMap) return;
+    cadMap.on('click', handleMapClick);
+    // 터치 이벤트는 click으로 통합 처리됨 (MapLibre)
+}
+
+// 지도 클릭 핸들러 (스냅 기능 포함)
+async function handleMapClick(e) {
+    if (!state.currentCadProjectId) return;
+
+    // 1. 스냅 (Snap) - 클릭 지점 주변의 포인트 피처 검색
+    const snapRadius = 15; // 픽셀 단위 검색 반경
+    const bbox = [
+        [e.point.x - snapRadius, e.point.y - snapRadius],
+        [e.point.x + snapRadius, e.point.y + snapRadius]
+    ];
+    
+    const features = cadMap.queryRenderedFeatures(bbox, { layers: ['cad-points'] });
+    let targetFeature = null;
+    
+    if (features.length > 0) {
+        // 가장 가까운 피처 찾기
+        let minDistance = Infinity;
+
+        features.forEach(f => {
+            const coords = f.geometry.coordinates; // [lon, lat]
+            const p = cadMap.project(coords); // 화면 좌표로 변환
+            const dist = Math.hypot(p.x - e.point.x, p.y - e.point.y);
+            if (dist < minDistance) {
+                minDistance = dist;
+                targetFeature = f;
+            }
+        });
+    }
+
+    // [수정] 스냅된 포인트가 없으면 클릭한 위치 좌표 사용
+    if (!targetFeature) {
+        targetFeature = {
+            geometry: { coordinates: [e.lngLat.lng, e.lngLat.lat] },
+            properties: { layer: '사용자 지정' }
+        };
+    }
+
+    openMemoPopup(targetFeature);
+}
+
+// 메모 팝업 열기
+function openMemoPopup(feature) {
+    const coords = feature.geometry.coordinates; // [lon, lat]
+    const layer = feature.properties.layer || 'unknown';
+    
+    // 기존 메모 찾기 (좌표 기준, 약간의 오차 허용)
+    const existingMemo = state.memos.find(m => 
+        Math.abs(m.lon - coords[0]) < 0.0000001 && 
+        Math.abs(m.lat - coords[1]) < 0.0000001
+    );
+
+    const content = existingMemo ? existingMemo.content : '';
+    const memoId = existingMemo ? existingMemo.id : null; // [추가] 수정 시 ID 전달
+    const isPublic = existingMemo ? existingMemo.is_public : false; // [추가] 기존 공개 여부
+    const existingImgUrl = existingMemo ? existingMemo.image_url : '';
+    const existingImgHtml = existingImgUrl ? `<div style="position:relative; display:inline-block; margin-bottom:5px;">
+        <img src="${existingImgUrl}" style="max-width:100%; max-height:100px; border-radius:4px;">
+        <button onclick="window.clearMemoImage('popupMemoPreview', 'popupMemoUrl', 'popupMemoFile', 'popupMemoCamera')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:12px; line-height:1; display:flex; align-items:center; justify-content:center;">&times;</button>
+    </div>` : '';
+    
+    const popupContent = document.createElement('div');
+    popupContent.style.width = '200px';
+    popupContent.innerHTML = `
+        <h4 style="margin:0 0 5px 0; font-size:14px;">메모 작성</h4>
+        <textarea id="popupMemoInput" style="width:100%; height:80px; margin-bottom:5px; font-size:13px;">${content}</textarea>
+        <div style="display:flex; gap:5px; margin-bottom:5px;">
+            <button class="btn btn-info" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoFile').click()" title="파일 선택">📁</button>
+            <button class="btn btn-secondary" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoCamera').click()" title="사진 촬영">📷</button>
+        </div>
+        <input type="file" id="popupMemoFile" accept="image/*" style="display:none" onchange="window.handleMemoImageUpload(this, 'popupMemoPreview', 'popupMemoUrl')">
+        <input type="file" id="popupMemoCamera" accept="image/*" capture="environment" style="display:none" onchange="window.handleMemoImageUpload(this, 'popupMemoPreview', 'popupMemoUrl')">
+        <div id="popupMemoPreview" style="margin-bottom:5px; min-height:10px;">${existingImgHtml}</div>
+        <input type="hidden" id="popupMemoUrl" value="${existingImgUrl || ''}">
+        <label style="font-size:12px; display:flex; align-items:center; margin-bottom:5px;">
+            <input type="checkbox" id="popupMemoPublic" ${isPublic ? 'checked' : ''}> 공개 메모 (다른 사용자와 공유)
+        </label>
+        <button id="popupMemoSaveBtn" class="btn btn-primary" style="width:100%; padding:5px; font-size:12px;">저장</button>
+    `;
+
+    const popup = new maplibregl.Popup({ closeOnClick: false })
+        .setLngLat(coords)
+        .setDOMContent(popupContent)
+        .addTo(cadMap);
+
+    // [추가] 팝업 내 textarea 입력 불가 문제 해결 (이벤트 전파 차단)
+    const textarea = popupContent.querySelector('#popupMemoInput');
+    if (textarea) {
+        // 키보드 이벤트가 지도로 전파되는 것을 막아 입력이 가능하게 함
+        ['keydown', 'keyup', 'keypress', 'input'].forEach(evt => textarea.addEventListener(evt, e => e.stopPropagation()));
+        setTimeout(() => textarea.focus(), 100); // 팝업 열린 후 포커스
+    }
+
+    popupContent.querySelector('#popupMemoSaveBtn').onclick = async () => {
+        const newContent = popupContent.querySelector('#popupMemoInput').value;
+        const newIsPublic = popupContent.querySelector('#popupMemoPublic').checked; // [추가] 공개 여부 값
+        const imageUrl = popupContent.querySelector('#popupMemoUrl').value;
+        
+        if (!newContent.trim()) return alert("내용을 입력하세요.");
+        
+        // managers.js의 saveMemo 호출 (window 객체 통해 접근하거나 직접 구현)
+        if (window.saveMemo) {
+            // [수정] memoId를 함께 전달하여 수정/신규 구분
+            await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, imageUrl || null);
+            popup.remove();
+        } else {
+            alert("저장 기능 오류");
+        }
+    };
+}
+
+// loadCadMap 완료 시 인터랙션 설정 호출
+const originalLoadCadMap = loadCadMap;
+loadCadMap = async function(projectId) {
+    await originalLoadCadMap(projectId);
+    setupMapInteraction();
+};
