@@ -1,6 +1,6 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
-import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerColorsFromSettings, loadMapMemos, flyToLocation } from './viewers.js';
+import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation } from './viewers.js';
 import { loadProjects, createProject, deleteProject, renameProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, renamePhoto, setupDragDrop, handleFiles, uploadPhotos, backToProjectFromUpload, triggerUploadForCurrent, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageUpload, toggleMemoArchiveMode, searchArchivedMemos } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 지원용)
@@ -92,16 +92,20 @@ export function switchTab(tabName) {
 async function fetchUserSettings(username) {
     if (!state.supabaseConfig) return;
     try {
-        const data = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=layer_colors`);
+        // [수정] layer_styles 컬럼도 함께 조회
+        const data = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=layer_colors,layer_styles`);
         if (data && data.length > 0) {
-            state.userSettings = { layer_colors: data[0].layer_colors || {} };
-            reloadLayerColorsFromSettings(); // 맵이 이미 열려있다면 즉시 적용
+            state.userSettings = { 
+                layer_colors: data[0].layer_colors || {},
+                layer_styles: data[0].layer_styles || {} // [추가] 스타일 설정 로드
+            };
+            reloadLayerStylesFromSettings(); // 맵이 이미 열려있다면 즉시 적용
         } else {
-            state.userSettings = { layer_colors: {} };
+            state.userSettings = { layer_colors: {}, layer_styles: {} };
         }
     } catch (e) {
         console.warn("사용자 설정 로드 실패:", e);
-        state.userSettings = { layer_colors: {} };
+        state.userSettings = { layer_colors: {}, layer_styles: {} };
     }
 }
 
@@ -152,7 +156,7 @@ export async function performLogin(username, isAuto = false) {
     if (state.supabaseConfig) {
         // [추가] 로그인 시 테이블에 유저가 없으면 등록 (기존 유저는 ignore-duplicates로 설정 보존)
         try {
-            await callSupabaseDirect('user_settings', 'POST', { username: username, layer_colors: {} }, { 'Prefer': 'resolution=ignore-duplicates' });
+            await callSupabaseDirect('user_settings', 'POST', { username: username, layer_colors: {}, layer_styles: {} }, { 'Prefer': 'resolution=ignore-duplicates' });
         } catch (e) {
             console.warn("유저 자동 등록 실패:", e);
         }

@@ -653,6 +653,7 @@ let cadLayers = new Set();
 let cadLayerColors = {};
 let cadHiddenLayers = new Set();
 let memoMarkers = []; // [추가] 메모 마커 관리용 배열
+let currentPopup = null; // [추가] 현재 열린 팝업 추적용
 
 export async function initCadViewer() {
     const statusEl = document.getElementById('cadStatus');
@@ -730,9 +731,14 @@ export async function loadCadMap(projectId) {
     try {
         const files = await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.pmtiles&limit=1`);
         if (!files || files.length === 0) { statusEl.innerText = '이 프로젝트에는 변환된 PMTiles 파일이 없습니다.'; return; }
-        const filePath = files[0].file_path;
+        
+        const fileData = files[0];
+        const filePath = fileData.file_path;
+        // [수정] 캐시 무시를 위한 버전 쿼리 스트링 추가 (updated_at 시간값 사용)
+        const version = fileData.updated_at ? new Date(fileData.updated_at).getTime() : Date.now();
+        
         const baseUrl = state.r2Config.publicUrl.replace(/\/$/, '');
-        const fileUrl = `${baseUrl}/${filePath}`;
+        const fileUrl = `${baseUrl}/${filePath}?v=${version}`;
         const pmtilesUrl = `pmtiles://${fileUrl}`;
         const p = new pmtiles.PMTiles(fileUrl);
         let bounds = [[124, 33], [132, 43]];
@@ -746,9 +752,20 @@ export async function loadCadMap(projectId) {
                     cadLayers.add(l.id); 
                     // [수정] 프로젝트ID_레이어명 키로 색상 조회 (프로젝트별 독립 설정)
                     const storageKey = `${state.currentCadProjectId}_${l.id}`;
-                    if (state.userSettings?.layer_colors?.[storageKey]) {
+                    
+                    // [추가] layer_styles에서 통합 설정(색상, 가시성, 대시) 로드
+                    const savedStyle = state.userSettings?.layer_styles?.[storageKey];
+                    
+                    if (savedStyle) {
+                        // 1. 색상
+                        cadLayerColors[l.id] = savedStyle.color || getRandomColor();
+                        // 2. 가시성 (저장된 값이 false면 숨김 처리)
+                        if (savedStyle.visible === false) cadHiddenLayers.add(l.id);
+                    } else if (state.userSettings?.layer_colors?.[storageKey]) {
+                        // 하위 호환: layer_colors에만 값이 있는 경우
                         cadLayerColors[l.id] = state.userSettings.layer_colors[storageKey];
-                    } else if (!cadLayerColors[l.id]) {
+                    } else {
+                        // 기본값
                         cadLayerColors[l.id] = getRandomColor(); 
                     }
                 });
@@ -770,7 +787,9 @@ export async function loadCadMap(projectId) {
                 layers: [
                     // [수정] 배경지도 투명도를 1.0으로 변경하여 전체화면 시 어두워지는 현상 해결
                     { id: 'background-layer', type: 'raster', source: 'osm', paint: { 'raster-opacity': 1.0 } },
+                    // [복원] 단일 라인 레이어로 통합 (누락 방지)
                     { id: 'cad-lines', source: 'cad_source', 'source-layer': 'line', type: 'line', paint: { 'line-color': '#555555', 'line-width': 1.5 } },
+                    
                     { id: 'cad-points', source: 'cad_source', 'source-layer': 'point', type: 'circle', paint: { 'circle-color': '#FF0000', 'circle-radius': 3, 'circle-stroke-width': 1, 'circle-stroke-color': '#333333' } },
                     { id: 'cad-text', type: 'symbol', source: 'cad_source', 'source-layer': 'point', filter: ['has', 'text'], layout: { 'text-field': ['get', 'text'], 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-anchor': 'bottom-left', 'text-offset': [0, 0], 'text-font': ['Open Sans Regular'], 'text-rotate': ['get', 'rotation'], 'text-rotation-alignment': 'map' }, paint: { 'text-color': '#000000' } }
                 ]
@@ -847,11 +866,15 @@ function updateLayerDiscovery() {
         const layerName = f.properties.layer;
         if (layerName && !cadLayers.has(layerName)) {
             cadLayers.add(layerName);
-            // [수정] 프로젝트ID_레이어명 키로 색상 조회
             const storageKey = `${state.currentCadProjectId}_${layerName}`;
-            if (state.userSettings?.layer_colors?.[storageKey]) {
+            const savedStyle = state.userSettings?.layer_styles?.[storageKey];
+
+            if (savedStyle) {
+                cadLayerColors[layerName] = savedStyle.color || getRandomColor();
+                if (savedStyle.visible === false) cadHiddenLayers.add(layerName);
+            } else if (state.userSettings?.layer_colors?.[storageKey]) {
                 cadLayerColors[layerName] = state.userSettings.layer_colors[storageKey];
-            } else if (!cadLayerColors[layerName]) {
+            } else {
                 cadLayerColors[layerName] = getRandomColor();
             }
             updated = true;
@@ -878,68 +901,89 @@ function renderLayerList() {
     Array.from(cadLayers).sort().forEach(layer => {
         const color = cadLayerColors[layer]; const isChecked = !cadHiddenLayers.has(layer);
         const div = document.createElement('div'); div.className = 'layer-item';
-        div.innerHTML = `<input type="checkbox" ${isChecked ? 'checked' : ''} onchange="window.toggleLayer('${layer}', this.checked)"> <input type="color" class="layer-color-picker" value="${color}" onchange="window.changeLayerColor('${layer}', this.value)"> <span class="layer-name" title="${layer}">${layer}</span>`;
+        
+        // [수정] UI 간소화: 체크박스 | 색상 | 이름 (선 스타일 제거)
+        div.innerHTML = `
+            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="window.toggleLayer('${layer}', this.checked)" title="켜기/끄기">
+            <input type="color" class="layer-color-picker" value="${color}" onchange="window.changeLayerColor('${layer}', this.value)" title="색상 변경">
+            <span class="layer-name" title="${layer}" style="margin-left:5px;">${layer}</span>
+        `;
         listEl.appendChild(div);
     });
 }
 
-export function toggleLayer(layerName, isVisible) { if (isVisible) cadHiddenLayers.delete(layerName); else cadHiddenLayers.add(layerName); updateMapFilter(); }
+export function toggleLayer(layerName, isVisible) { 
+    if (isVisible) cadHiddenLayers.delete(layerName); else cadHiddenLayers.add(layerName); 
+    updateMapFilter(); 
+    saveUserStyles(layerName); // [추가] 상태 저장
+}
 
 export function changeLayerColor(layerName, newColor) { 
     cadLayerColors[layerName] = newColor; 
     updateMapStyle(); 
-    saveUserColors(layerName, newColor); // [추가] 저장
+    saveUserStyles(layerName); // [수정] 통합 저장 함수 사용
 }
 
 // [추가] 전체 레이어 색상 일괄 변경 함수
 export function changeAllLayerColors(newColor) {
     for (const layer of cadLayers) {
         cadLayerColors[layer] = newColor;
-        if (state.currentUser) { // 메모리 상의 설정도 업데이트
-            if (!state.userSettings.layer_colors) state.userSettings.layer_colors = {};
-            // [수정] 프로젝트ID_레이어명 키로 저장
-            const storageKey = `${state.currentCadProjectId}_${layer}`;
-            state.userSettings.layer_colors[storageKey] = newColor;
-        }
+        // 메모리 상의 설정 업데이트는 saveUserStyles에서 일괄 처리하거나 여기서 루프 돌며 처리
+        // 성능을 위해 여기서는 생략하고 개별 저장은 하지 않음 (너무 많은 요청 방지)
+        // 필요하다면 별도 일괄 저장 로직 구현 필요. 여기서는 UI 반영만 우선.
     }
     updateMapStyle();
     renderLayerList(); // 개별 색상 선택기들도 업데이트된 색상으로 다시 렌더링
-    saveUserColors(); // [추가] 일괄 저장
+    // saveUserStyles(); // 일괄 저장은 트래픽 문제로 보류하거나, 전체 저장 버튼을 따로 두는 것이 좋음
 }
 
-// [추가] 지연 로드된 사용자 설정 적용 함수
-export function reloadLayerColorsFromSettings() {
+// [수정] 지연 로드된 사용자 설정 적용 함수 (이름 변경 및 로직 확장)
+export function reloadLayerStylesFromSettings() {
     if (!cadMap || !state.currentCadProjectId) return;
     let updated = false;
     cadLayers.forEach(layer => {
         const storageKey = `${state.currentCadProjectId}_${layer}`;
-        if (state.userSettings?.layer_colors?.[storageKey]) {
+        const savedStyle = state.userSettings?.layer_styles?.[storageKey];
+        
+        if (savedStyle) {
+            if (savedStyle.color) cadLayerColors[layer] = savedStyle.color;
+            if (savedStyle.visible === false) cadHiddenLayers.add(layer); else cadHiddenLayers.delete(layer);
+            updated = true;
+        } else if (state.userSettings?.layer_colors?.[storageKey]) {
+            // 하위 호환
             cadLayerColors[layer] = state.userSettings.layer_colors[storageKey];
             updated = true;
         }
     });
     if (updated) {
         updateMapStyle();
+        updateMapFilter(); // 가시성 변경 반영
         renderLayerList();
     }
 }
 
-// [추가] 사용자 색상 설정 저장 함수 (Supabase Upsert)
-async function saveUserColors(layerName, newColor) {
+// [수정] 사용자 스타일 통합 저장 함수 (색상, 가시성, 대시)
+async function saveUserStyles(layerName) {
     if (!state.currentUser || !state.supabaseConfig) return;
     
-    if (layerName && newColor) {
-        if (!state.userSettings.layer_colors) state.userSettings.layer_colors = {};
-        // [수정] 프로젝트ID_레이어명 키로 저장
+    if (layerName) {
+        if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+        
         const storageKey = `${state.currentCadProjectId}_${layerName}`;
-        state.userSettings.layer_colors[storageKey] = newColor;
+        
+        // 현재 상태를 객체로 저장
+        state.userSettings.layer_styles[storageKey] = {
+            color: cadLayerColors[layerName],
+            visible: !cadHiddenLayers.has(layerName)
+        };
     }
 
     try {
         // Supabase Upsert (Insert or Update)
         await callSupabaseDirect('user_settings', 'POST', {
             username: state.currentUser,
-            layer_colors: state.userSettings.layer_colors
+            layer_styles: state.userSettings.layer_styles, // [추가] 스타일 컬럼 저장
+            // layer_colors: state.userSettings.layer_colors // 레거시 유지를 원하면 주석 해제
         }, { 'Prefer': 'resolution=merge-duplicates' }, { keepalive: true }); // [수정] keepalive 추가
     } catch (e) {
         console.error("색상 저장 실패:", e);
@@ -950,16 +994,24 @@ export function toggleLayerPanel() { const panel = document.getElementById('cadL
 
 function updateMapFilter() {
     if (!cadMap) return;
+    
+    // [복원] 단순 필터링 (숨김 레이어 제외)
     if (cadHiddenLayers.size === 0) {
         if (cadMap.getLayer('cad-lines')) cadMap.setFilter('cad-lines', null);
-        if (cadMap.getLayer('cad-points')) cadMap.setFilter('cad-points', null);
-        if (cadMap.getLayer('cad-text')) cadMap.setFilter('cad-text', ['has', 'text']);
-        return;
+    } else {
+        const filterExpr = ['!in', 'layer', ...Array.from(cadHiddenLayers)];
+        if (cadMap.getLayer('cad-lines')) cadMap.setFilter('cad-lines', filterExpr);
     }
-    const filterExpr = ['!in', 'layer', ...Array.from(cadHiddenLayers)];
-    if (cadMap.getLayer('cad-lines')) cadMap.setFilter('cad-lines', filterExpr);
-    if (cadMap.getLayer('cad-points')) cadMap.setFilter('cad-points', filterExpr);
-    if (cadMap.getLayer('cad-text')) cadMap.setFilter('cad-text', ['all', ['has', 'text'], filterExpr]);
+
+    // 4. 포인트 및 텍스트 레이어 (스타일 무관, 숨김 여부만 체크)
+    const hiddenArr = Array.from(cadHiddenLayers);
+    const commonFilter = hiddenArr.length > 0 ? ['!in', 'layer', ...hiddenArr] : null;
+
+    if (cadMap.getLayer('cad-points')) cadMap.setFilter('cad-points', commonFilter);
+    if (cadMap.getLayer('cad-text')) {
+        const textFilter = commonFilter ? ['all', ['has', 'text'], commonFilter] : ['has', 'text'];
+        cadMap.setFilter('cad-text', textFilter);
+    }
 }
 
 function updateMapStyle() {
@@ -968,8 +1020,9 @@ function updateMapStyle() {
     for (const [layer, color] of Object.entries(cadLayerColors)) matchExpr.push(layer, color);
     matchExpr.push('#cccccc');
     
-    // [수정] 원본 색상 무시하고 사용자 설정(또는 랜덤) 색상만 적용
+    // [복원] 단일 레이어 색상 적용
     if (cadMap.getLayer('cad-lines')) cadMap.setPaintProperty('cad-lines', 'line-color', matchExpr);
+
     if (cadMap.getLayer('cad-points')) cadMap.setPaintProperty('cad-points', 'circle-color', matchExpr);
 }
 
@@ -982,6 +1035,7 @@ export function cleanupCadViewer() {
     // [추가] 메모 마커 초기화
     memoMarkers.forEach(m => m.remove());
     memoMarkers = [];
+    currentPopup = null;
 }
 
 // 전체화면 상태 변경 감지 리스너
@@ -1097,6 +1151,12 @@ async function handleMapClick(e) {
 
 // 메모 팝업 열기
 function openMemoPopup(feature) {
+    // [추가] 이미 열린 팝업이 있다면 제거 (중복 방지)
+    if (currentPopup) {
+        currentPopup.remove();
+        currentPopup = null;
+    }
+
     const coords = feature.geometry.coordinates; // [lon, lat]
     const layer = feature.properties.layer || 'unknown';
     
@@ -1138,6 +1198,13 @@ function openMemoPopup(feature) {
         .setLngLat(coords)
         .setDOMContent(popupContent)
         .addTo(cadMap);
+
+    currentPopup = popup;
+    popup.on('close', () => {
+        if (currentPopup === popup) {
+            currentPopup = null;
+        }
+    });
 
     // [추가] 팝업 내 textarea 입력 불가 문제 해결 (이벤트 전파 차단)
     const textarea = popupContent.querySelector('#popupMemoInput');

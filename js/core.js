@@ -69,6 +69,7 @@ export async function callSupabaseDirect(endpoint, method = 'GET', body = null, 
             'Content-Type': 'application/json',
             ...extraHeaders
         },
+        cache: 'no-store', // [추가] 모바일 브라우저 등에서 API 응답 캐싱 방지 (항상 최신 데이터 조회)
         ...fetchOptions
     };
     if (body) options.body = JSON.stringify(body);
