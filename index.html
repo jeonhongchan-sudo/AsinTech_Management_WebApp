@@ -56,6 +56,18 @@
     .layer-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; }
     .layer-color-picker { width: 20px; height: 20px; border: none; padding: 0; cursor: pointer; }
     .layer-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* [추가] 지도 팝업 닫기 버튼(X) 크기 확대 (모바일 터치 개선) */
+    .maplibregl-popup-close-button {
+        font-size: 24px !important;
+        width: 40px !important;
+        height: 40px !important;
+        right: 5px !important;
+        top: 5px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
   </style>
 </head>
 <body>
@@ -73,7 +85,7 @@
     <div class="nav-tabs" id="mainTabs">
       <button class="nav-tab active" onclick="switchTab('cadViewer')">Map Viewer</button>
       <button class="nav-tab" onclick="switchTab('memos')">메모관리</button>
-      <button class="nav-tab" onclick="switchTab('projects')">사진 관리</button>
+      <button class="nav-tab" onclick="switchTab('projects')">사진 Url</button>
       <button class="nav-tab" onclick="switchTab('guidelines')">지침서</button>      
     </div>
     
@@ -82,10 +94,6 @@
 
       <!-- 1. 프로젝트 탭 -->
       <div id="projects-tab" class="tab-content">
-        <div class="form-group" style="display: flex; gap: 10px;">
-          <input type="text" id="newProjectName" placeholder="새 프로젝트 이름 입력" style="flex: 1;">
-          <button id="createProjectBtn" class="btn btn-primary" onclick="createProject()">생성</button>
-        </div>
         <h3 style="margin: 20px 0 10px; border-bottom: 1px solid #eee; padding-bottom: 10px;">프로젝트 목록</h3>
         <div id="projectsList">
           <div class="empty-state"><span class="spinner"></span> 로딩 중...</div>
@@ -104,28 +112,11 @@
                 <button class="btn btn-outline active" id="btnViewGrid" onclick="toggleViewMode('grid')" title="썸네일 보기">▦</button>
                 <button class="btn btn-outline" id="btnViewList" onclick="toggleViewMode('list')" title="리스트 보기">☰</button>
             </div>
-            <button class="btn btn-info" onclick="triggerUploadForCurrent()">📤 추가</button>
           </div>
         </div>
         <div id="pmPhotoContainer" class="photo-container grid-view"></div>
       </div>
       
-      <!-- 3. 업로드 탭 -->
-      <div id="upload-tab" class="tab-content">
-        <button class="btn btn-secondary" onclick="backToProjectFromUpload()" style="margin-bottom:15px;">← 뒤로가기</button>
-        <div class="form-group">
-          <label>프로젝트 선택</label>
-          <select id="uploadProjectSelect"></select>
-        </div>
-        <div class="file-upload-wrapper" id="dropZone" onclick="document.getElementById('fileInput').click()">
-          <input type="file" id="fileInput" accept="image/*" multiple onchange="handleFiles(this.files)" style="display:none">
-          <p style="font-size: 18px; margin-bottom: 5px;">📁 클릭 또는 파일 드래그</p>
-          <p style="color: #666; font-size: 13px;">여러 장 선택 가능</p>
-        </div>
-        <div id="selectedFiles" style="margin-top: 15px;"></div>
-        <button class="btn btn-primary" onclick="uploadPhotos()" style="margin-top: 20px; width: 100%;">선택한 사진 업로드 시작</button>
-      </div>
-
       <!-- 4. 앱뷰어 탭 -->
       <div id="cadViewer-tab" class="tab-content active">
         <div class="cad-controls">

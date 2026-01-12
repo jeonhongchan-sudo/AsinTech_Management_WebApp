@@ -1,23 +1,16 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation } from './viewers.js';
-import { loadProjects, createProject, deleteProject, renameProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, renamePhoto, setupDragDrop, handleFiles, uploadPhotos, backToProjectFromUpload, triggerUploadForCurrent, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageUpload, toggleMemoArchiveMode, searchArchivedMemos } from './managers.js';
+import { loadProjects, deleteProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageUpload, toggleMemoArchiveMode, searchArchivedMemos } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 지원용)
 window.switchTab = switchTab;
-window.createProject = createProject;
 window.deleteProject = deleteProject;
-window.renameProject = renameProject;
 window.exportCSV = exportCSV;
 window.openPhotoManager = openPhotoManager;
 window.closePhotoManager = closePhotoManager;
 window.toggleViewMode = toggleViewMode;
 window.deletePhoto = deletePhoto;
-window.renamePhoto = renamePhoto;
-window.handleFiles = handleFiles;
-window.uploadPhotos = uploadPhotos;
-window.backToProjectFromUpload = backToProjectFromUpload;
-window.triggerUploadForCurrent = triggerUploadForCurrent;
 window.openLightbox = openLightbox;
 window.closeLightbox = closeLightbox;
 window.navigateLightbox = navigateLightbox;
@@ -248,7 +241,6 @@ document.addEventListener('DOMContentLoaded', function() {
       loadProjects(); 
   });
 
-  setupDragDrop();
   
   document.addEventListener('keydown', function(event) {
     if (document.getElementById('lightboxOverlay').style.display === 'flex') {

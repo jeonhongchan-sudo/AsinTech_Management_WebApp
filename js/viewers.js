@@ -1067,25 +1067,17 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
             const marker = new maplibregl.Marker({ color: color, scale: 0.8 })
                 .setLngLat([memo.lon, memo.lat]);
 
-            const popupDiv = document.createElement('div');
+            // [수정] 마커 클릭 시 조회 팝업 대신 편집(작성) 팝업을 열도록 변경
+            // 사용자가 "북마크를 눌러도 메모 작성 팝업 안으로 사진이 들어가게 해달라"고 요청함.
+            marker.getElement().addEventListener('click', (e) => {
+                e.stopPropagation(); // 지도 클릭 이벤트 전파 방지
+                const feature = {
+                    geometry: { coordinates: [memo.lon, memo.lat] },
+                    properties: { layer: memo.layer || 'unknown' }
+                };
+                openMemoPopup(feature);
+            });
             
-            let btnHtml = '';
-            if (isMine) {
-                btnHtml = `<button class="btn btn-danger" style="width:100%; padding:2px; font-size:11px;" onclick="window.deleteMemo('${memo.id}')">삭제</button>`;
-            }
-            
-            // [추가] 이미지 미리보기
-            let imgHtml = '';
-            if (memo.image_url) {
-                imgHtml = `<div style="margin-bottom:5px;"><img src="${memo.image_url}" style="max-width:100%; max-height:100px; border-radius:4px; cursor:pointer;" onclick="window.open('${memo.image_url}')"></div>`;
-            }
-
-            popupDiv.innerHTML = `<div style="font-size:11px; color:#888; margin-bottom:3px;">${memo.username || '-'} | ${new Date(memo.created_at).toLocaleDateString()} ${memo.is_public ? '(공개)' : '🔒'}</div>
-                                  ${imgHtml}
-                                  <div style="font-size:13px; margin-bottom:8px; white-space:pre-wrap;">${memo.content}</div>
-                                  ${btnHtml}`;
-
-            marker.setPopup(new maplibregl.Popup({ offset: 25 }).setDOMContent(popupDiv));
             marker.addTo(cadMap);
             memoMarkers.push(marker);
         });
@@ -1170,8 +1162,10 @@ function openMemoPopup(feature) {
     const memoId = existingMemo ? existingMemo.id : null; // [추가] 수정 시 ID 전달
     const isPublic = existingMemo ? existingMemo.is_public : false; // [추가] 기존 공개 여부
     const existingImgUrl = existingMemo ? existingMemo.image_url : '';
+    
+    // [수정] PC/모바일 모두 첨부 형태(썸네일)로 표시하고 클릭 시 원본 보기 적용
     const existingImgHtml = existingImgUrl ? `<div style="position:relative; display:inline-block; margin-bottom:5px;">
-        <img src="${existingImgUrl}" style="max-width:100%; max-height:100px; border-radius:4px;">
+        <img src="${existingImgUrl}" style="max-width:100%; max-height:100px; border-radius:4px; cursor:pointer;" onclick="window.open('${existingImgUrl}', '_blank')" title="크게 보기">
         <button onclick="window.clearMemoImage('popupMemoPreview', 'popupMemoUrl', 'popupMemoFile', 'popupMemoCamera')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:12px; line-height:1; display:flex; align-items:center; justify-content:center;">&times;</button>
     </div>` : '';
     
