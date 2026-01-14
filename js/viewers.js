@@ -1032,6 +1032,7 @@ export function cleanupCadViewer() {
     state.currentCadProjectId = null; // [추가] 초기화
     document.getElementById('cadLayerPanel').style.display = 'none';
     document.getElementById('cadLayerToggleBtn').style.display = 'none';
+    state.projectPhotos = []; // [추가] 사진 목록 초기화
     // [추가] 메모 마커 초기화
     memoMarkers.forEach(m => m.remove());
     memoMarkers = [];
@@ -1084,6 +1085,20 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
     } catch (e) {
         console.warn("메모 로드 실패 (테이블이 없을 수 있음):", e);
         state.memos = [];
+    }
+}
+
+// [추가] 프로젝트의 전체 사진 목록 로드 (자동 매칭용)
+async function loadProjectPhotos() {
+    if (!state.currentCadProjectId || !state.supabaseConfig) return;
+    try {
+        // photos 테이블에서 파일명과 URL만 조회 (가볍게)
+        const data = await callSupabaseDirect(`photos?project_folder_id=eq.${state.currentCadProjectId}&select=file_name,file_url`);
+        state.projectPhotos = data || [];
+        console.log(`[AutoMatch] Loaded ${state.projectPhotos.length} photos for matching.`);
+    } catch (e) {
+        console.warn("[AutoMatch] Failed to load photos:", e);
+        state.projectPhotos = [];
     }
 }
 
@@ -1162,6 +1177,42 @@ function openMemoPopup(feature) {
     const memoId = existingMemo ? existingMemo.id : null; // [추가] 수정 시 ID 전달
     const isPublic = existingMemo ? existingMemo.is_public : false; // [추가] 기존 공개 여부
     const existingImgUrl = existingMemo ? existingMemo.image_url : '';
+
+    // -----------------------------------------------------------
+    // [추가] 자동 사진 매칭 로직 (photo_linker_tool.py 참조)
+    // -----------------------------------------------------------
+    let matchedPhotosHtml = '';
+    const pointText = (feature.properties.text || '').trim(); // PMTiles의 text 속성
+
+    if (pointText && state.projectPhotos.length > 0) {
+        const matched = state.projectPhotos.filter(p => {
+            const fName = p.file_name || '';
+            // 확장자 제거한 파일명 베이스
+            const baseName = fName.includes('.') ? fName.substring(0, fName.lastIndexOf('.')) : fName;
+            
+            // 매칭 기준 (Python 스크립트 로직 이식)
+            // 1. 완전 일치: point_name == file_name_base
+            // 2. 부분 포함: file_name_base in point_name (파일명이 포인트명에 포함됨)
+            // 3. 접두사: file_name_base.startswith(point_name + '-')
+            return (pointText === baseName) || 
+                   (pointText.includes(baseName)) || 
+                   (baseName.startsWith(pointText + '-'));
+        });
+
+        if (matched.length > 0) {
+            matchedPhotosHtml = `<div style="margin-bottom:8px; padding:5px; background:#f8f9fa; border-radius:4px; border:1px solid #eee;">
+                <div style="font-size:11px; font-weight:bold; color:#007bff; margin-bottom:4px;">📸 관련 사진 (${matched.length})</div>
+                <div style="display:flex; gap:4px; overflow-x:auto; padding-bottom:2px;">
+                    ${matched.map(p => {
+                        if (!p.file_url) return '';
+                        const fullUrl = p.file_url;
+                        return `<img src="${fullUrl}" onclick="window.open('${fullUrl}', '_blank')" style="width:40px; height:40px; object-fit:cover; border-radius:3px; cursor:pointer; border:1px solid #ddd;" title="${p.file_name}">`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
+    }
+    // -----------------------------------------------------------
     
     // [수정] PC/모바일 모두 첨부 형태(썸네일)로 표시하고 클릭 시 원본 보기 적용
     const existingImgHtml = existingImgUrl ? `<div style="position:relative; display:inline-block; margin-bottom:5px;">
@@ -1172,6 +1223,7 @@ function openMemoPopup(feature) {
     const popupContent = document.createElement('div');
     popupContent.style.width = '200px';
     popupContent.innerHTML = `
+        ${matchedPhotosHtml} <!-- 자동 매칭된 사진 영역 -->
         <h4 style="margin:0 0 5px 0; font-size:14px;">메모 작성</h4>
         <textarea id="popupMemoInput" style="width:100%; height:80px; margin-bottom:5px; font-size:13px;">${content}</textarea>
         <div style="display:flex; gap:5px; margin-bottom:5px;">
@@ -1230,5 +1282,6 @@ function openMemoPopup(feature) {
 const originalLoadCadMap = loadCadMap;
 loadCadMap = async function(projectId) {
     await originalLoadCadMap(projectId);
+    loadProjectPhotos(); // [추가] 사진 목록 로드 (비동기)
     setupMapInteraction();
 };

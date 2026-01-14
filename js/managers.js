@@ -1,5 +1,5 @@
 // e:\Program\SelfProgram\아신테크\js\managers.js
-import { state, callApi, callSupabaseDirect, showAlert, generateUUID } from './core.js';
+import { state, callApi, callSupabaseDirect, showAlert, generateUUID, R2_BASE_URL } from './core.js';
 import { switchTab } from './main.js';
 
 // --- Project Manager ---
@@ -64,7 +64,7 @@ function renderPhotos(res) {
    state.currentPhotosData = res.photos;
    let html = state.currentViewMode === 'grid' ? '' : '<table class="list-view-table"><thead><tr><th>#</th><th>파일명</th><th>날짜</th><th>관리</th></tr></thead><tbody>';
    res.photos.forEach((p, i) => {
-       const thumbnailUrl = (p.url && p.url.includes('.r2.dev')) ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=s400`;
+       const thumbnailUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=s400`;
        if(state.currentViewMode === 'grid') {
            html += `<div class="photo-card"><div class="photo-thumb" onclick="window.openLightbox(${i})"><img src="${thumbnailUrl}" loading="lazy" alt="${p.fileName}"></div><div class="photo-details"><div class="photo-name">${p.fileName}</div><div class="photo-actions"><button class="btn btn-danger" onclick="window.deletePhoto('${p.fileId}')">삭제</button></div></div></div>`;
        } else {
@@ -91,8 +91,8 @@ export function closeLightbox() { document.getElementById('lightboxOverlay').sty
 export function navigateLightbox(d) { const n = state.currentLightboxIndex + d; if(n >= 0 && n < state.currentPhotosData.length) { state.currentLightboxIndex = n; updateLightboxImage(); } }
 function updateLightboxImage() { 
     const p = state.currentPhotosData[state.currentLightboxIndex]; 
-    const fullImageUrl = (p.url && p.url.includes('.r2.dev')) ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=w1920-h1080`;
-    document.getElementById('lightboxImg').src = fullImageUrl; document.getElementById('lightboxDownloadBtn').href = p.url; 
+    const fullImageUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=w1920-h1080`;
+    document.getElementById('lightboxImg').src = fullImageUrl; document.getElementById('lightboxDownloadBtn').href = fullImageUrl; 
 }
 
 // --- Admin Manager ---

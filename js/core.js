@@ -18,7 +18,8 @@ export const state = {
     adminUser: null,        // [추가] 관리자 ID (API로 수신)
     currentCadProjectId: null, // [추가] 현재 Map Viewer의 프로젝트 ID
     memos: [],              // [추가] 현재 프로젝트의 메모 목록
-    isMemoArchiveMode: false // [추가] 메모 아카이브 조회 모드 여부
+    isMemoArchiveMode: false, // [추가] 메모 아카이브 조회 모드 여부
+    projectPhotos: []       // [추가] 현재 프로젝트의 전체 사진 목록 (자동 매칭용)
 };
 
 // 유틸리티 함수
