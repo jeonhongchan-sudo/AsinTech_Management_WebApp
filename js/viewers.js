@@ -1220,6 +1220,18 @@ function openMemoPopup(feature) {
         <button onclick="window.clearMemoImage('popupMemoPreview', 'popupMemoUrl', 'popupMemoFile', 'popupMemoCamera')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:12px; line-height:1; display:flex; align-items:center; justify-content:center;">&times;</button>
     </div>` : '';
     
+    // [추가] 좌표 및 체인리지 정보 표시 HTML 생성
+    let infoHtml = '';
+    const props = feature.properties || {};
+    if (props.tm_x !== undefined && props.tm_y !== undefined) {
+        infoHtml += `<div style="margin-top:10px; padding-top:8px; border-top:1px solid #eee; font-size:11px; color:#555; line-height:1.4;">`;
+        infoHtml += `<div><strong>좌표(TM):</strong> ${props.tm_x}, ${props.tm_y}</div>`;
+        if (props.chainage) {
+            infoHtml += `<div><strong>Chainage:</strong> ${props.chainage}</div>`;
+        }
+        infoHtml += `</div>`;
+    }
+
     const popupContent = document.createElement('div');
     popupContent.style.width = '200px';
     popupContent.innerHTML = `
@@ -1238,6 +1250,7 @@ function openMemoPopup(feature) {
             <input type="checkbox" id="popupMemoPublic" ${isPublic ? 'checked' : ''}> 공개 메모 (다른 사용자와 공유)
         </label>
         <button id="popupMemoSaveBtn" class="btn btn-primary" style="width:100%; padding:5px; font-size:12px;">저장</button>
+        ${infoHtml}
     `;
 
     const popup = new maplibregl.Popup({ closeOnClick: false })
