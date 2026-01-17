@@ -1284,7 +1284,7 @@ function openMemoPopup(feature) {
     const tmapDestName = encodeURIComponent(`${lat.toFixed(6)}, ${lon.toFixed(6)}`);
 
     const mapLinksHtml = `<div id="map-links" style="margin-top:10px; padding-top:8px; border-top:1px solid #eee; display:flex; justify-content:space-around; gap:5px;">
-        <a href="tmap://route?rGoName=${tmapDestName}&rGoX=${lon}&rGoY=${lat}" target="_blank" class="btn btn-outline" style="flex:1; padding: 4px; font-size:11px;">T맵</a>
+        <a href="tmap://route?goalname=${tmapDestName}&goalx=${lon}&goaly=${lat}" target="_blank" class="btn btn-outline" style="flex:1; padding: 4px; font-size:11px;">T맵</a>
         <a href="https://map.kakao.com/link/map/${kakaoDestName},${lat},${lon}" target="_blank" class="btn btn-outline" style="flex:1; padding: 4px; font-size:11px; background-color:#FFEB00; color:#3C1E1E; border-color:#FFEB00;">카카오</a>
         <a href="https://m.map.naver.com/map.nhn?lat=${lat}&lng=${lon}&level=12&pin=1" target="_blank" class="btn btn-outline" style="flex:1; padding: 4px; font-size:11px; background-color:#03C75A; color:white; border-color:#03C75A;">네이버</a>
     </div>`;
