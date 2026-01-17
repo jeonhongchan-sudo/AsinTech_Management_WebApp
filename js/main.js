@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation } from './viewers.js';
-import { loadProjects, deleteProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageSelect, removeMemoImage, removeExistingMemoImage, toggleMemoArchiveMode, searchArchivedMemos, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter } from './managers.js';
+import { loadProjects, deleteProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageSelect, removeMemoImage, removeExistingMemoImage, toggleMemoArchiveMode, searchArchivedMemos, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter, fetchAvailableJobs } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 지원용)
 window.switchTab = switchTab;
@@ -45,6 +45,7 @@ window.addJob = addJob; // [추가]
 window.deleteJob = deleteJob; // [추가]
 window.toggleSurveyFilterMode = toggleSurveyFilterMode; // [추가]
 window.downloadSurveyMemosCSV = downloadSurveyMemosCSV; // [추가]
+window.fetchAvailableJobs = fetchAvailableJobs; // [추가]
 window.openJobSelectionModal = openJobSelectionModal; // [추가]
 window.closeJobSelectionModal = closeJobSelectionModal; // [추가]
 window.selectJobFilter = selectJobFilter; // [추가]

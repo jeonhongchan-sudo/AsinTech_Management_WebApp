@@ -1200,6 +1200,8 @@ function openMemoPopup(feature) {
     }
 
     const coords = feature.geometry.coordinates; // [lon, lat]
+    const lon = coords[0];
+    const lat = coords[1];
     const layer = feature.properties.layer || 'unknown';
     
     // 기존 메모 찾기 (좌표 기준, 약간의 오차 허용)
@@ -1274,6 +1276,13 @@ function openMemoPopup(feature) {
         infoHtml += `</div>`;
     }
 
+    // [추가] 외부 지도 앱 바로가기 링크 HTML 생성
+    const mapLinksHtml = `<div id="map-links" style="margin-top:10px; padding-top:8px; border-top:1px solid #eee; display:flex; justify-content:space-around; gap:5px;">
+        <a href="tmap://route?rGoName=메모위치&rGoX=${lon}&rGoY=${lat}" target="_blank" class="btn btn-outline" style="flex:1; padding: 4px; font-size:11px;">T맵</a>
+        <a href="https://map.kakao.com/link/map/메모위치,${lat},${lon}" target="_blank" class="btn btn-outline" style="flex:1; padding: 4px; font-size:11px; background-color:#FFEB00; color:#3C1E1E; border-color:#FFEB00;">카카오</a>
+        <a href="https://m.map.naver.com/map.nhn?lat=${lat}&lng=${lon}&level=12&pin=1" target="_blank" class="btn btn-outline" style="flex:1; padding: 4px; font-size:11px; background-color:#03C75A; color:white; border-color:#03C75A;">네이버</a>
+    </div>`;
+
     // [추가] Job 리스트 옵션 생성
     // [수정] 초기에는 로딩 표시, 팝업 생성 후 비동기로 채움
     let jobOptions = '<option value="">로딩 중...</option>';
@@ -1317,6 +1326,7 @@ function openMemoPopup(feature) {
         </label>
         <button id="popupMemoSaveBtn" class="btn btn-primary" style="width:100%; padding:5px; font-size:12px;">저장</button>
         ${infoHtml}
+        ${mapLinksHtml}
     `;
 
     const popup = new maplibregl.Popup({ closeOnClick: false })
