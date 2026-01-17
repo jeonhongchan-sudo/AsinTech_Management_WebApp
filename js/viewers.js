@@ -1030,6 +1030,7 @@ export function cleanupCadViewer() {
     if (cadMap) { cadMap.remove(); cadMap = null; }
     state.r2Config = null; cadLayers.clear(); cadLayerColors = {}; cadHiddenLayers.clear();
     state.currentCadProjectId = null; // [추가] 초기화
+    state.highlightedMemoId = null; // [추가] 강조 메모 초기화
     document.getElementById('cadLayerPanel').style.display = 'none';
     document.getElementById('cadLayerToggleBtn').style.display = 'none';
     state.projectPhotos = []; // [추가] 사진 목록 초기화
@@ -1057,15 +1058,34 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
     try {
         // [수정] 내 메모 또는(OR) 공개된 메모만 조회
         const user = state.currentUser ? encodeURIComponent(state.currentUser) : 'anonymous';
-        const data = await callSupabaseDirect(`memos?project_id=eq.${state.currentCadProjectId}&or=(is_public.eq.true,username.eq.${user})&select=*`);
+        
+        // [추가] 조사 메모 필터링 적용
+        let query = `memos?project_id=eq.${state.currentCadProjectId}&or=(is_public.eq.true,username.eq.${user})&select=*`;
+        if (state.isSurveyFilterMode) {
+            let filterPart = `&is_survey=eq.true`;
+            if (state.selectedJobFilter) {
+                filterPart += `&job_name=eq.${encodeURIComponent(state.selectedJobFilter)}`;
+            }
+            query = `memos?project_id=eq.${state.currentCadProjectId}&or=(is_public.eq.true,username.eq.${user})${filterPart}&select=*`;
+        }
+        const data = await callSupabaseDirect(query);
         state.memos = data || [];
         
         // [추가] 지도에 마커 표시
         state.memos.forEach(memo => {
             // 내 메모는 노란색, 타인 메모(공개)는 파란색 등으로 구분 가능
             const isMine = memo.username === state.currentUser;
-            const color = isMine ? '#FFC107' : '#007bff'; 
-            const marker = new maplibregl.Marker({ color: color, scale: 0.8 })
+            const isHighlighted = memo.id === state.highlightedMemoId; // [추가] 강조 여부 확인
+            
+            // [수정] 강조된 메모는 빨간색 및 크기 확대
+            let color = isMine ? '#FFC107' : '#007bff'; 
+            let scale = 0.8;
+            if (isHighlighted) {
+                color = '#dc3545'; // 빨간색 (강조)
+                scale = 1.2;       // 크기 확대
+            }
+
+            const marker = new maplibregl.Marker({ color: color, scale: scale })
                 .setLngLat([memo.lon, memo.lat]);
 
             // [수정] 마커 클릭 시 조회 팝업 대신 편집(작성) 팝업을 열도록 변경
@@ -1080,6 +1100,11 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
             });
             
             marker.addTo(cadMap);
+            
+            // [추가] 강조된 마커는 z-index를 높여서 맨 위로 표시
+            if (isHighlighted) {
+                marker.getElement().style.zIndex = '1000';
+            }
             memoMarkers.push(marker);
         });
     } catch (e) {
@@ -1176,7 +1201,12 @@ function openMemoPopup(feature) {
     const content = existingMemo ? existingMemo.content : '';
     const memoId = existingMemo ? existingMemo.id : null; // [추가] 수정 시 ID 전달
     const isPublic = existingMemo ? existingMemo.is_public : false; // [추가] 기존 공개 여부
-    const existingImgUrl = existingMemo ? existingMemo.image_url : '';
+    const isSurvey = existingMemo ? existingMemo.is_survey : false; // [추가] 기존 조사 여부
+    const jobName = existingMemo ? existingMemo.job_name : ''; // [추가] 기존 Job 명
+    const tmX = existingMemo ? existingMemo.tm_x : (feature.properties.tm_x || ''); // [추가] TM X
+    const tmY = existingMemo ? existingMemo.tm_y : (feature.properties.tm_y || ''); // [추가] TM Y
+    const chainage = existingMemo ? existingMemo.chainage : (feature.properties.chainage || ''); // [추가] Chainage
+    const existingImgUrls = existingMemo && existingMemo.image_url ? existingMemo.image_url.split(',') : [];
 
     // -----------------------------------------------------------
     // [추가] 자동 사진 매칭 로직 (photo_linker_tool.py 참조)
@@ -1214,22 +1244,41 @@ function openMemoPopup(feature) {
     }
     // -----------------------------------------------------------
     
-    // [수정] PC/모바일 모두 첨부 형태(썸네일)로 표시하고 클릭 시 원본 보기 적용
-    const existingImgHtml = existingImgUrl ? `<div style="position:relative; display:inline-block; margin-bottom:5px;">
-        <img src="${existingImgUrl}" style="max-width:100%; max-height:100px; border-radius:4px; cursor:pointer;" onclick="window.open('${existingImgUrl}', '_blank')" title="크게 보기">
-        <button onclick="window.clearMemoImage('popupMemoPreview', 'popupMemoUrl', 'popupMemoFile', 'popupMemoCamera')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:12px; line-height:1; display:flex; align-items:center; justify-content:center;">&times;</button>
-    </div>` : '';
+    // [수정] 기존 이미지 여러 장 표시
+    let existingImgHtml = '';
+    if (existingImgUrls.length > 0) {
+        existingImgHtml = `<div style="display:flex; gap:5px; flex-wrap:wrap; margin-bottom:5px;">`;
+        existingImgUrls.forEach(url => {
+            if(!url.trim()) return;
+            existingImgHtml += `<div class="existing-img-wrapper" style="position:relative; display:inline-block;"><img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd; cursor:pointer;" onclick="window.open('${url}', '_blank')"><button onclick="window.removeExistingMemoImage('${url}', 'popupMemoPreview', 'popupMemoUrl')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:12px; line-height:1; display:flex; align-items:center; justify-content:center;">&times;</button></div>`;
+        });
+        existingImgHtml += `</div>`;
+    }
     
     // [추가] 좌표 및 체인리지 정보 표시 HTML 생성
     let infoHtml = '';
     const props = feature.properties || {};
-    if (props.tm_x !== undefined && props.tm_y !== undefined) {
+    if (props.chainage) {
         infoHtml += `<div style="margin-top:10px; padding-top:8px; border-top:1px solid #eee; font-size:11px; color:#555; line-height:1.4;">`;
-        infoHtml += `<div><strong>좌표(TM):</strong> ${props.tm_x}, ${props.tm_y}</div>`;
-        if (props.chainage) {
-            infoHtml += `<div><strong>Chainage:</strong> ${props.chainage}</div>`;
-        }
+        infoHtml += `<div><strong>Chainage:</strong> ${props.chainage}</div>`;
         infoHtml += `</div>`;
+    }
+
+    // [추가] Job 리스트 옵션 생성
+    const savedJobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+    let jobOptions = '<option value="">Job 선택</option>';
+    savedJobs.forEach(j => {
+        const selected = j === jobName ? 'selected' : '';
+        jobOptions += `<option value="${j}" ${selected}>${j}</option>`;
+    });
+    const jobDisplay = isSurvey ? 'block' : 'none';
+
+    // [추가] 조사 메모인 경우 공개 메모 체크박스 상태 설정
+    let publicAttr = '';
+    if (isSurvey) {
+        publicAttr = 'checked disabled';
+    } else {
+        publicAttr = isPublic ? 'checked' : '';
     }
 
     const popupContent = document.createElement('div');
@@ -1242,12 +1291,23 @@ function openMemoPopup(feature) {
             <button class="btn btn-info" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoFile').click()" title="파일 선택">📁</button>
             <button class="btn btn-secondary" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoCamera').click()" title="사진 촬영">📷</button>
         </div>
-        <input type="file" id="popupMemoFile" accept="image/*" style="display:none" onchange="window.handleMemoImageUpload(this, 'popupMemoPreview', 'popupMemoUrl')">
-        <input type="file" id="popupMemoCamera" accept="image/*" capture="environment" style="display:none" onchange="window.handleMemoImageUpload(this, 'popupMemoPreview', 'popupMemoUrl')">
-        <div id="popupMemoPreview" style="margin-bottom:5px; min-height:10px;">${existingImgHtml}</div>
-        <input type="hidden" id="popupMemoUrl" value="${existingImgUrl || ''}">
+        <!-- [수정] multiple 속성 추가 및 핸들러 변경 -->
+        <input type="file" id="popupMemoFile" accept="image/*" multiple style="display:none" onchange="window.handleMemoImageSelect(this, 'popupMemoPreview')">
+        <input type="file" id="popupMemoCamera" accept="image/*" capture="environment" multiple style="display:none" onchange="window.handleMemoImageSelect(this, 'popupMemoPreview')">
+        
+        <div id="popupMemoPreview" style="margin-bottom:5px; min-height:10px; max-height:150px; overflow-y:auto;">
+            ${existingImgHtml}
+            <!-- 새 이미지는 여기에 추가됨 -->
+        </div>
+        <input type="hidden" id="popupMemoUrl" value="${existingImgUrls.join(',')}">
         <label style="font-size:12px; display:flex; align-items:center; margin-bottom:5px;">
-            <input type="checkbox" id="popupMemoPublic" ${isPublic ? 'checked' : ''}> 공개 메모 (다른 사용자와 공유)
+            <input type="checkbox" id="popupMemoSurvey" ${isSurvey ? 'checked' : ''}> 조사 메모
+        </label>
+        <div id="popupMemoJobContainer" style="display:${jobDisplay}; margin-bottom:5px; padding-left:5px;">
+             <select id="popupMemoJobSelect" style="width:100%; padding:5px; font-size:12px; border:1px solid #ddd; border-radius:4px;">${jobOptions}</select>
+        </div>
+        <label style="font-size:12px; display:flex; align-items:center; margin-bottom:5px;">
+            <input type="checkbox" id="popupMemoPublic" ${publicAttr}> 공개 메모 (다른 사용자와 공유)
         </label>
         <button id="popupMemoSaveBtn" class="btn btn-primary" style="width:100%; padding:5px; font-size:12px;">저장</button>
         ${infoHtml}
@@ -1257,6 +1317,9 @@ function openMemoPopup(feature) {
         .setLngLat(coords)
         .setDOMContent(popupContent)
         .addTo(cadMap);
+
+    // [추가] 팝업 열릴 때 전역 파일 배열 초기화
+    window.currentMemoFiles = [];
 
     currentPopup = popup;
     popup.on('close', () => {
@@ -1273,17 +1336,35 @@ function openMemoPopup(feature) {
         setTimeout(() => textarea.focus(), 100); // 팝업 열린 후 포커스
     }
 
+    // [추가] 조사 메모 체크 시 Job 선택 박스 토글
+    popupContent.querySelector('#popupMemoSurvey').addEventListener('change', (e) => {
+        const isChecked = e.target.checked;
+        popupContent.querySelector('#popupMemoJobContainer').style.display = isChecked ? 'block' : 'none';
+        
+        // [추가] 조사 메모 체크 시 공개 메모 강제 설정
+        const pubChk = popupContent.querySelector('#popupMemoPublic');
+        if (isChecked) {
+            pubChk.checked = true;
+            pubChk.disabled = true;
+        } else {
+            pubChk.disabled = false;
+        }
+    });
+
     popupContent.querySelector('#popupMemoSaveBtn').onclick = async () => {
         const newContent = popupContent.querySelector('#popupMemoInput').value;
         const newIsPublic = popupContent.querySelector('#popupMemoPublic').checked; // [추가] 공개 여부 값
-        const imageUrl = popupContent.querySelector('#popupMemoUrl').value;
+        const newIsSurvey = popupContent.querySelector('#popupMemoSurvey').checked; // [추가] 조사 여부 값
+        const newJobName = popupContent.querySelector('#popupMemoJobSelect').value; // [추가] Job 값
+        const existingImages = popupContent.querySelector('#popupMemoUrl').value; // 기존 이미지 URL들
+        const files = window.currentMemoFiles || []; // 새 파일들
         
         if (!newContent.trim()) return alert("내용을 입력하세요.");
         
         // managers.js의 saveMemo 호출 (window 객체 통해 접근하거나 직접 구현)
         if (window.saveMemo) {
             // [수정] memoId를 함께 전달하여 수정/신규 구분
-            await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, imageUrl || null);
+            await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, existingImages, newIsSurvey, newJobName, tmX, tmY, chainage, files);
             popup.remove();
         } else {
             alert("저장 기능 오류");

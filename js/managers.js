@@ -219,7 +219,17 @@ export async function loadMemoList() {
         // 2. 메모 전체 조회 (내 메모 또는 공개된 메모)
         // [수정] 특정 프로젝트 필터(project_id=eq...)를 제거하여 전체 조회
         const user = state.currentUser ? encodeURIComponent(state.currentUser) : 'anonymous';
-        const data = await callSupabaseDirect(`memos?or=(is_public.eq.true,username.eq.${user})&select=*&order=created_at.desc`);
+        
+        // [수정] 조사 메모 필터링 적용
+        let query = `memos?or=(is_public.eq.true,username.eq.${user})&select=*&order=created_at.desc`;
+        if (state.isSurveyFilterMode) {
+            let filterPart = `&is_survey=eq.true`;
+            if (state.selectedJobFilter) {
+                filterPart += `&job_name=eq.${encodeURIComponent(state.selectedJobFilter)}`;
+            }
+            query = `memos?or=(is_public.eq.true,username.eq.${user})${filterPart}&select=*&order=created_at.desc`;
+        }
+        const data = await callSupabaseDirect(query);
         
         // 3. 데이터 병합
         state.memos = (data || []).map(m => ({
@@ -255,7 +265,7 @@ function renderMemoListUI() {
         // 일반 메모는 lon, lat이 0이거나 null일 수 있음
         let locBtn = '';
         if (m.lon !== 0 && m.lat !== 0) {
-            locBtn = `<button class="btn btn-info" style="padding:2px 5px; font-size:11px; margin-right:5px;" onclick="window.viewMemoOnMap('${m.project_id}', ${m.lon}, ${m.lat})">위치</button>`;
+            locBtn = `<button class="btn btn-info" style="padding:2px 5px; font-size:11px; margin-right:5px;" onclick="window.viewMemoOnMap('${m.project_id}', ${m.lon}, ${m.lat}, '${m.id}')">위치</button>`;
         }
 
         // [추가] 사진 아이콘 표시
@@ -264,9 +274,15 @@ function renderMemoListUI() {
             imgIcon = `<a href="${m.image_url}" target="_blank" style="text-decoration:none; margin-right:5px;" title="사진 보기">📷</a>`;
         }
 
+        // [추가] Job 이름 뱃지 표시
+        let jobBadge = '';
+        if (m.is_survey && m.job_name) {
+            jobBadge = `<span style="background:#ffc107; color:#000; padding:2px 5px; border-radius:4px; font-size:11px; margin-right:5px; font-weight:bold;">[${m.job_name}]</span>`;
+        }
+
         html += `<tr>
             <td data-label="프로젝트">${m.projectName}</td>
-            <td data-label="내용" class="memo-content" style="white-space:normal; max-width:300px;">${publicIcon} ${imgIcon}${m.content}</td>
+            <td data-label="내용" class="memo-content" style="white-space:normal; max-width:300px;">${publicIcon} ${jobBadge}${imgIcon}${m.content}</td>
             <td data-label="작성자">${m.username || '-'}</td>
             <td data-label="날짜">${new Date(m.created_at).toLocaleString()}</td>
             <td data-label="관리">${locBtn}${deleteBtn}</td>
@@ -276,43 +292,107 @@ function renderMemoListUI() {
     container.innerHTML = html;
 }
 
-export async function saveMemo(projectId, lon, lat, content, layer, memoId = null, isPublic = false, imageUrl = null) {
+// [수정] 메모 저장 함수 (비동기 백그라운드 처리 적용)
+// files: 업로드할 파일 객체 배열 (없으면 null)
+// existingImages: 기존에 저장된 이미지 URL 문자열 (콤마 구분)
+export async function saveMemo(projectId, lon, lat, content, layer, memoId = null, isPublic = false, existingImages = null, isSurvey = false, jobName = null, tmX = null, tmY = null, chainage = null, files = []) {
     if (!state.supabaseConfig) {
         showAlert("설정 로드 실패. 페이지를 새로고침하세요.", "error");
         return;
     }
+
+    // [추가] 조사 메모는 항상 공개 상태로 설정
+    if (isSurvey) isPublic = true;
+
+    // UI 즉시 피드백 (백그라운드 작업 시작 알림)
+    showAlert("메모 저장 및 업로드를 시작합니다...", "info");
+
+    // 백그라운드 작업 실행 (await 하지 않음)
+    processMemoSaveBackground({
+        projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files
+    });
+}
+
+// [추가] 백그라운드 메모 저장 및 업로드 처리 함수
+async function processMemoSaveBackground(data) {
+    const { projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files } = data;
+    const user = state.currentUser || 'anonymous';
+    
     try {
-        const user = state.currentUser || 'anonymous';
-        
+        let finalImageUrls = existingImages ? existingImages.split(',').filter(u => u.trim() !== '') : [];
+
+        // 1. 새 파일이 있다면 순차적으로 업로드 (Queue 처리)
+        if (files && files.length > 0) {
+            const total = files.length;
+            for (let i = 0; i < total; i++) {
+                const file = files[i];
+                // 진행 상황 표시 (선택적)
+                // console.log(`Uploading image ${i + 1}/${total}...`);
+                
+                try {
+                    const base64 = await resizeImage(file);
+                    const res = await callApi('uploadToDrive', { 
+                        fileName: file.name, 
+                        fileData: base64, 
+                        mimeType: file.type 
+                    });
+                    
+                    if (res.success) {
+                        finalImageUrls.push(res.url);
+                    } else {
+                        console.error(`이미지 업로드 실패 (${file.name}):`, res.error);
+                    }
+                } catch (err) {
+                    console.error(`이미지 처리 중 오류 (${file.name}):`, err);
+                }
+            }
+        }
+
+        // 2. DB 저장 (업로드된 URL들을 콤마로 연결)
+        const imageUrlString = finalImageUrls.join(',');
+
         if (memoId) {
-            // [추가] 기존 메모 수정 (UPDATE)
+            // UPDATE
             await callSupabaseDirect(`memos?id=eq.${memoId}`, 'PATCH', {
                 content: content,
                 is_public: isPublic,
                 updated_at: new Date().toISOString(),
-                image_url: imageUrl // [추가] 이미지 URL 업데이트 (있을 경우)
+                image_url: imageUrlString,
+                is_survey: isSurvey,
+                job_name: jobName,
+                tm_x: tmX,
+                tm_y: tmY,
+                chainage: chainage
             });
-            showAlert("메모가 수정되었습니다.");
+            showAlert("메모 수정 및 업로드 완료!");
         } else {
-            // [기존] 신규 메모 저장 (INSERT)
+            // INSERT
             await callSupabaseDirect('memos', 'POST', {
                 project_id: projectId,
                 lon: lon,
                 lat: lat,
                 content: content,
                 layer: layer,
-                username: user, // [수정] 콤마 추가
+                username: user,
                 is_public: isPublic,
-                image_url: imageUrl // [추가] 이미지 URL 저장
+                image_url: imageUrlString,
+                is_survey: isSurvey,
+                job_name: jobName,
+                tm_x: tmX,
+                tm_y: tmY,
+                chainage: chainage
             });
-            showAlert("메모가 저장되었습니다.");
+            showAlert("메모 저장 및 업로드 완료!");
         }
 
-        loadMemoList(); // 목록 탭 갱신
-        // [추가] 지도 상의 메모 마커 갱신
+        // 3. UI 갱신
+        loadMemoList();
         if (window.loadMapMemos) window.loadMapMemos();
-        
-    } catch (e) { showAlert("메모 저장 실패: " + e.message, "error"); }
+
+    } catch (e) {
+        console.error("백그라운드 저장 실패:", e);
+        showAlert("저장 중 오류가 발생했습니다: " + e.message, "error");
+    }
 }
 
 export async function deleteMemo(id) {
@@ -359,13 +439,22 @@ export async function openGeneralMemoModal() {
     const select = document.getElementById('memoProjectSelect');
     const content = document.getElementById('memoContentInput');
     const publicCheck = document.getElementById('memoPublicCheck'); // [추가]
+    const surveyCheck = document.getElementById('memoSurveyCheck'); // [추가]
+    const jobContainer = document.getElementById('memoJobContainer'); // [추가]
+    const jobSelect = document.getElementById('memoJobSelect'); // [추가]
     const preview = document.getElementById('memoImagePreview');
-    const urlInput = document.getElementById('memoImageUrl');
+    // const urlInput = document.getElementById('memoImageUrl'); // [수정] 더 이상 사용 안 함
     
     content.value = '';
     if(publicCheck) publicCheck.checked = true; // 기본값: 공개
+    if(surveyCheck) surveyCheck.checked = false; // 기본값: 미체크
+    if(jobContainer) jobContainer.style.display = 'none'; // 기본값: 숨김
     if(preview) preview.innerHTML = '';
-    if(urlInput) urlInput.value = '';
+    // if(urlInput) urlInput.value = '';
+    
+    // [추가] 전역 파일 배열 초기화
+    window.currentMemoFiles = [];
+
     select.innerHTML = '<option>로딩 중...</option>';
     modal.style.display = 'flex';
 
@@ -382,59 +471,113 @@ export async function openGeneralMemoModal() {
                 select.appendChild(opt);
             });
         }
+
+        // [추가] Job 리스트 로드
+        const jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+        jobSelect.innerHTML = '<option value="">Job 선택</option>';
+        jobs.forEach(j => {
+            jobSelect.innerHTML += `<option value="${j}">${j}</option>`;
+        });
+
+        // [추가] 조사 메모 체크 시 Job 선택 표시
+        surveyCheck.onchange = (e) => {
+            const isChecked = e.target.checked;
+            jobContainer.style.display = isChecked ? 'block' : 'none';
+            // [추가] 조사 메모는 항상 공개
+            if (isChecked) {
+                publicCheck.checked = true;
+                publicCheck.disabled = true;
+            } else {
+                publicCheck.disabled = false;
+            }
+        };
+
     } catch (e) {
         select.innerHTML = '<option>로드 실패</option>';
     }
 }
 
-// [추가] 메모 사진 삭제(초기화) 함수
-export function clearMemoImage(previewId, urlInputId, ...fileInputIds) {
-    const preview = document.getElementById(previewId);
-    const urlInput = document.getElementById(urlInputId);
-    if (preview) preview.innerHTML = '';
-    if (urlInput) urlInput.value = '';
-    fileInputIds.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
+// [추가] 메모 사진 삭제(목록에서 제거) 함수
+export function removeMemoImage(index, previewId) {
+    if (window.currentMemoFiles) {
+        window.currentMemoFiles.splice(index, 1);
+        renderMemoImages(previewId);
+    }
 }
 
-// [추가] 메모 사진 즉시 업로드 및 미리보기 핸들러
-export async function handleMemoImageUpload(input, previewId, urlInputId) {
+// [추가] 기존 이미지(URL) 삭제 함수
+export function removeExistingMemoImage(urlToRemove, previewId, hiddenInputId) {
+    const hiddenInput = document.getElementById(hiddenInputId);
+    if (hiddenInput) {
+        let urls = hiddenInput.value.split(',').filter(u => u.trim() !== '');
+        urls = urls.filter(u => u !== urlToRemove);
+        hiddenInput.value = urls.join(',');
+        
+        // UI 갱신 (단순히 해당 요소를 지우거나 전체 다시 그리기)
+        // 여기서는 간단히 부모 요소를 찾아서 지움
+        const btn = event.target; // 클릭된 버튼
+        const wrapper = btn.closest('.existing-img-wrapper');
+        if (wrapper) wrapper.remove();
+    }
+}
+
+// [추가] 메모 사진 선택 및 미리보기 핸들러 (업로드 X, 로컬 미리보기 O)
+export function handleMemoImageSelect(input, previewId) {
     if (!input.files || input.files.length === 0) return;
     
-    const file = input.files[0];
-    const previewEl = document.getElementById(previewId);
-    const urlInputEl = document.getElementById(urlInputId);
+    if (!window.currentMemoFiles) window.currentMemoFiles = [];
     
-    // 로딩 표시
-    previewEl.innerHTML = '<div class="spinner"></div> 업로드 중...';
-    
-    try {
-        // 리사이징
-        const base64 = await resizeImage(file);
-        
-        // GAS 업로드
-        const res = await callApi('uploadToDrive', { 
-            fileName: file.name, 
-            fileData: base64, 
-            mimeType: file.type 
-        });
+    // 선택된 파일들을 배열에 추가
+    Array.from(input.files).forEach(file => {
+        window.currentMemoFiles.push(file);
+    });
 
-        if (res.success) {
-            // 성공 시 미리보기 및 URL 저장
-            previewEl.innerHTML = `<div style="position:relative; display:inline-block; margin-top:5px;">
-                <img src="${res.url}" style="max-width:100%; max-height:150px; border-radius:4px; cursor:pointer;" onclick="window.open('${res.url}', '_blank')" title="크게 보기">
-                <button onclick="window.clearMemoImage('${previewId}', '${urlInputId}', '${input.id}')" style="position:absolute; top:-8px; right:-8px; background:#dc3545; color:white; border:2px solid white; border-radius:50%; width:24px; height:24px; cursor:pointer; font-weight:bold; font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 4px rgba(0,0,0,0.2);" title="사진 삭제">&times;</button>
-            </div>`;
-            if (urlInputEl) urlInputEl.value = res.url;
-        } else {
-            throw new Error(res.error || "업로드 실패");
-        }
-    } catch (e) {
-        console.error(e);
-        previewEl.innerHTML = `<span style="color:red;">업로드 실패: ${e.message}</span>`;
-        input.value = ''; // 초기화
+    // 미리보기 렌더링
+    renderMemoImages(previewId);
+    
+    // 입력 초기화 (같은 파일 다시 선택 가능하도록)
+    input.value = '';
+}
+
+// [추가] 선택된 사진들 미리보기 렌더링
+function renderMemoImages(previewId) {
+    const preview = document.getElementById(previewId);
+    if (!preview) return;
+
+    // 기존 내용 중 "새로 추가된 파일" 영역만 갱신하거나 전체 갱신
+    // 여기서는 기존 URL 이미지는 건드리지 않고, 새 파일 영역만 다시 그림
+    // 하지만 편의상 preview 컨테이너 안에 "기존 이미지"와 "새 이미지"를 구분해서 넣는 게 좋음.
+    // 뷰어 로직에서 preview 영역을 초기화할 때 기존 이미지를 넣어주므로, 여기서는 append 하거나 별도 영역 관리 필요.
+    // 간단하게: preview 요소 안에 `new-images-container`가 없으면 만들고, 거기를 갱신.
+    
+    let newContainer = preview.querySelector('.new-images-container');
+    if (!newContainer) {
+        newContainer = document.createElement('div');
+        newContainer.className = 'new-images-container';
+        newContainer.style.display = 'flex';
+        newContainer.style.gap = '5px';
+        newContainer.style.flexWrap = 'wrap';
+        newContainer.style.marginTop = '5px';
+        preview.appendChild(newContainer);
+    }
+    
+    newContainer.innerHTML = '';
+    
+    if (window.currentMemoFiles) {
+        window.currentMemoFiles.forEach((file, index) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const div = document.createElement('div');
+                div.style.position = 'relative';
+                div.style.display = 'inline-block';
+                div.innerHTML = `
+                    <img src="${e.target.result}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd;">
+                    <button onclick="window.removeMemoImage(${index}, '${previewId}')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:18px; height:18px; font-size:12px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">&times;</button>
+                `;
+                newContainer.appendChild(div);
+            };
+            reader.readAsDataURL(file);
+        });
     }
 }
 
@@ -443,23 +586,172 @@ export async function saveGeneralMemo() {
     const projectId = document.getElementById('memoProjectSelect').value;
     const content = document.getElementById('memoContentInput').value;
     const isPublic = document.getElementById('memoPublicCheck').checked; // [추가] 공개 여부 확인
-    const imageUrl = document.getElementById('memoImageUrl').value; // [수정] 업로드된 URL 사용
+    const isSurvey = document.getElementById('memoSurveyCheck').checked; // [추가] 조사 메모 여부 확인
+    const jobName = document.getElementById('memoJobSelect').value; // [추가] Job 값
+    // const imageUrl = document.getElementById('memoImageUrl').value; // [수정] 사용 안 함
+    
+    // [추가] 파일 목록 가져오기
+    const files = window.currentMemoFiles || [];
     
     if (!projectId) return alert("프로젝트를 선택하세요.");
     if (!content.trim()) return alert("내용을 입력하세요.");
 
     // 일반 메모는 좌표를 0, 0으로 저장 (DB 스키마가 Not Null인 경우 대비)
-    await saveMemo(projectId, 0, 0, content, '일반메모', null, isPublic, imageUrl || null); 
+    // imageUrl 인자는 null로 전달 (새 파일은 files로 전달)
+    await saveMemo(projectId, 0, 0, content, '일반메모', null, isPublic, null, isSurvey, jobName, null, null, null, files); 
     document.getElementById('memoModal').style.display = 'none';
+    window.currentMemoFiles = []; // 초기화
 }
 
 // window 객체에 바인딩 (viewers.js의 popup에서 호출)
 window.saveMemo = saveMemo;
 window.openGeneralMemoModal = openGeneralMemoModal; // [추가]
 window.saveGeneralMemo = saveGeneralMemo; // [추가]
-window.handleMemoImageUpload = handleMemoImageUpload; // [추가]
+window.handleMemoImageSelect = handleMemoImageSelect; // [추가]
+window.removeMemoImage = removeMemoImage; // [추가]
+window.removeExistingMemoImage = removeExistingMemoImage; // [추가]
 window.resizeImage = resizeImage; // [추가] viewers.js 등에서 사용
-window.clearMemoImage = clearMemoImage; // [추가]
+// window.clearMemoImage = clearMemoImage; // [삭제]
+
+// [추가] Job 관리자 기능
+export function openJobManager() {
+    document.getElementById('jobManagerModal').style.display = 'flex';
+    renderJobManagerList();
+}
+
+export function closeJobManager() {
+    document.getElementById('jobManagerModal').style.display = 'none';
+}
+
+export function addJob() {
+    const input = document.getElementById('newJobInput');
+    const val = input.value.trim();
+    if(!val) return alert("Job 이름을 입력하세요.");
+    
+    const jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+    if(jobs.includes(val)) return alert("이미 존재하는 Job입니다.");
+    
+    jobs.push(val);
+    localStorage.setItem('asin_jobs', JSON.stringify(jobs));
+    input.value = '';
+    renderJobManagerList();
+}
+
+export function deleteJob(job) {
+    if(!confirm(`'${job}'을(를) 삭제하시겠습니까?`)) return;
+    let jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+    jobs = jobs.filter(j => j !== job);
+    localStorage.setItem('asin_jobs', JSON.stringify(jobs));
+    renderJobManagerList();
+}
+
+function renderJobManagerList() {
+    const list = document.getElementById('jobManagerList');
+    const jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+    let html = '';
+    jobs.forEach(j => {
+        html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px; border-bottom:1px solid #eee;"><span>${j}</span><button class="btn btn-danger" style="padding:2px 8px; font-size:12px;" onclick="window.deleteJob('${j}')">삭제</button></div>`;
+    });
+    list.innerHTML = html || '<div style="text-align:center; padding:10px; color:#999;">등록된 Job이 없습니다.</div>';
+}
+
+// [추가] 조사 메모 필터 모드 토글
+export function toggleSurveyFilterMode() {
+    if (state.isSurveyFilterMode) {
+        // 이미 필터 중이면 해제
+        state.isSurveyFilterMode = false;
+        state.selectedJobFilter = null;
+        updateFilterButtonUI();
+        loadMemoList();
+        if (window.loadMapMemos) window.loadMapMemos();
+    } else {
+        // 필터 켜기 -> Job 선택 모달 열기
+        openJobSelectionModal();
+    }
+}
+
+// [추가] Job 선택 모달 열기
+export function openJobSelectionModal() {
+    const modal = document.getElementById('jobSelectionModal');
+    const list = document.getElementById('jobSelectionList');
+    const jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+    
+    let html = `<button class="btn btn-outline" style="width:100%; margin-bottom:5px; text-align:left; padding:10px;" onclick="window.selectJobFilter(null)"><strong>전체 조사 메모 보기</strong></button>`;
+    
+    if (jobs.length > 0) {
+        jobs.forEach(j => {
+            html += `<button class="btn btn-outline" style="width:100%; margin-bottom:5px; text-align:left; padding:10px;" onclick="window.selectJobFilter('${j}')">${j}</button>`;
+        });
+    } else {
+        html += `<div style="padding:15px; color:#666; text-align:center; background:#f9f9f9; border-radius:4px;">등록된 Job이 없습니다.<br><small>'👷' 버튼을 눌러 Job을 추가하세요.</small></div>`;
+    }
+    
+    list.innerHTML = html;
+    modal.style.display = 'flex';
+}
+
+export function closeJobSelectionModal() {
+    document.getElementById('jobSelectionModal').style.display = 'none';
+}
+
+export function selectJobFilter(jobName) {
+    state.isSurveyFilterMode = true;
+    state.selectedJobFilter = jobName;
+    closeJobSelectionModal();
+    updateFilterButtonUI();
+    loadMemoList();
+    if (window.loadMapMemos) window.loadMapMemos();
+}
+
+function updateFilterButtonUI() {
+    const btn = document.getElementById('btnToggleSurveyFilter');
+    if (state.isSurveyFilterMode) {
+        btn.classList.add('active');
+        btn.style.background = '#ffc107'; // Warning color (조사 테마색)
+        btn.style.color = '#000';
+        btn.innerText = state.selectedJobFilter ? `📋 ${state.selectedJobFilter}` : `📋 조사(전체)`;
+    } else {
+        btn.classList.remove('active');
+        btn.style.background = '';
+        btn.style.color = '';
+        btn.innerText = `📋 필터`;
+    }
+}
+
+// [추가] 조사 메모 CSV 다운로드
+export function downloadSurveyMemosCSV() {
+    if (!state.memos || state.memos.length === 0) {
+        return alert("다운로드할 메모가 없습니다.");
+    }
+
+    let csvContent = "\uFEFF"; // BOM (한글 깨짐 방지)
+    csvContent += "프로젝트,tm_x,tm_y,메모내용,Chainage,작성자,Job,조사날짜,조사여부\n";
+
+    state.memos.forEach(m => {
+        const content = (m.content || '').replace(/"/g, '""'); // 따옴표 이스케이프
+        const row = [
+            `"${m.projectName}"`,
+            `"${m.tm_x || ''}"`,
+            `"${m.tm_y || ''}"`,
+            `"${content}"`,
+            `"${m.chainage || ''}"`,
+            `"${m.username}"`,
+            `"${m.job_name || ''}"`,
+            `"${new Date(m.created_at).toLocaleString()}"`,
+            `"${m.is_survey ? 'O' : 'X'}"`
+        ];
+        csvContent += row.join(",") + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `survey_memos_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
 
 // [추가] 메모 아카이브 모드 토글
 export function toggleMemoArchiveMode() {
@@ -494,7 +786,7 @@ export async function searchArchivedMemos() {
     container.innerHTML = '<span class="spinner"></span> 아카이브 조회 중...';
     
     try {
-        const res = await callApi('searchArchivedMemos', { keyword: keyword });
+        const res = await callApi('searchArchivedMemos', { keyword: keyword, username: state.currentUser });
         if (res.success) {
             // 프로젝트 이름 매핑 시도 (현재 로드된 프로젝트 목록 활용)
             const pMap = {};

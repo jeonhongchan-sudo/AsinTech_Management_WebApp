@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation } from './viewers.js';
-import { loadProjects, deleteProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageUpload, toggleMemoArchiveMode, searchArchivedMemos } from './managers.js';
+import { loadProjects, deleteProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageSelect, removeMemoImage, removeExistingMemoImage, toggleMemoArchiveMode, searchArchivedMemos, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 지원용)
 window.switchTab = switchTab;
@@ -33,13 +33,40 @@ window.deleteUser = deleteUser;
 window.renameUser = renameUser;
 window.loadMemoList = loadMemoList; // [추가]
 window.deleteMemo = deleteMemo; // [추가]
-window.handleMemoImageUpload = handleMemoImageUpload; // [추가] 메모 사진 업로드 핸들러
+window.handleMemoImageSelect = handleMemoImageSelect; // [추가] 메모 사진 선택 핸들러
+window.removeMemoImage = removeMemoImage; // [추가]
+window.removeExistingMemoImage = removeExistingMemoImage; // [추가]
 window.toggleMemoArchiveMode = toggleMemoArchiveMode; // [추가] 아카이브 모드 토글
 window.searchArchivedMemos = searchArchivedMemos; // [추가] 아카이브 검색
 window.loadMapMemos = loadMapMemos; // [추가] 지도 메모 갱신용
+window.openJobManager = openJobManager; // [추가]
+window.closeJobManager = closeJobManager; // [추가]
+window.addJob = addJob; // [추가]
+window.deleteJob = deleteJob; // [추가]
+window.toggleSurveyFilterMode = toggleSurveyFilterMode; // [추가]
+window.downloadSurveyMemosCSV = downloadSurveyMemosCSV; // [추가]
+window.openJobSelectionModal = openJobSelectionModal; // [추가]
+window.closeJobSelectionModal = closeJobSelectionModal; // [추가]
+window.selectJobFilter = selectJobFilter; // [추가]
+
+// [추가] 모바일 메모 메뉴 토글
+window.toggleMemoMenu = function() {
+    const actions = document.getElementById('memoActions');
+    actions.classList.toggle('show');
+};
+
+// [추가] 메뉴 외부 클릭 시 닫기
+document.addEventListener('click', function(e) {
+    const actions = document.getElementById('memoActions');
+    const btn = document.querySelector('.mobile-menu-btn');
+    if (actions && actions.classList.contains('show') && !actions.contains(e.target) && (!btn || !btn.contains(e.target))) {
+        actions.classList.remove('show');
+    }
+});
 
 // [수정] 메모 위치로 이동 (프로젝트 로드 -> 탭 전환 -> 지도 이동)
-window.viewMemoOnMap = async function(projectId, lon, lat) {
+window.viewMemoOnMap = async function(projectId, lon, lat, memoId) {
+    state.highlightedMemoId = memoId; // [추가] 강조할 메모 ID 설정
     switchTab('cadViewer');
     
     // 현재 로드된 프로젝트가 해당 메모의 프로젝트와 다르면 로드
@@ -48,6 +75,9 @@ window.viewMemoOnMap = async function(projectId, lon, lat) {
         const select = document.getElementById('cadProjectSelect');
         if(select) select.value = projectId;
         await window.loadCadMap(projectId);
+    } else {
+        // [추가] 이미 로드된 프로젝트라면 마커 스타일 갱신을 위해 메모 다시 로드
+        if (window.loadMapMemos) await window.loadMapMemos();
     }
     
     // 지도 로드 후 이동 (약간의 지연 필요할 수 있음)

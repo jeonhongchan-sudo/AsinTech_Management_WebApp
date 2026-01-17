@@ -19,7 +19,12 @@ export const state = {
     currentCadProjectId: null, // [추가] 현재 Map Viewer의 프로젝트 ID
     memos: [],              // [추가] 현재 프로젝트의 메모 목록
     isMemoArchiveMode: false, // [추가] 메모 아카이브 조회 모드 여부
-    projectPhotos: []       // [추가] 현재 프로젝트의 전체 사진 목록 (자동 매칭용)
+    isSurveyFilterMode: false, // [추가] 조사 메모 필터 모드 여부
+    highlightedMemoId: null,   // [추가] 지도에서 강조할 메모 ID
+    selectedJobFilter: null,   // [추가] 선택된 Job 필터 (null이면 전체 조사 메모)
+    projectPhotos: [],      // [추가] 현재 프로젝트의 전체 사진 목록 (자동 매칭용)
+    uploadQueue: [],        // [추가] 백그라운드 업로드 큐
+    isUploading: false      // [추가] 업로드 진행 중 여부
 };
 
 // 유틸리티 함수
