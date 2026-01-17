@@ -197,6 +197,9 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
     display: none; /* PC에서는 숨김 */
 }
 
+/* [추가] 버튼 라벨 (기본 숨김) */
+.btn-label { display: none; }
+
 @media (max-width: 768px) {
     .mobile-menu-btn {
         display: block;
@@ -229,6 +232,9 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
         text-align: left;
         justify-content: flex-start;
     }
+
+    /* [추가] 모바일 메뉴 내 버튼 라벨 표시 */
+    .btn-label { display: inline; margin-left: 8px; font-size: 14px; font-weight: normal; }
 
     /* 아카이브 검색 영역 모바일 대응 */
     #archiveSearchArea {

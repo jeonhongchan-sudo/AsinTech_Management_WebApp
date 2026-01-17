@@ -473,7 +473,7 @@ export async function openGeneralMemoModal() {
         }
 
         // [추가] Job 리스트 로드
-        const jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+        const jobs = state.jobs || JSON.parse(localStorage.getItem('asin_jobs') || '[]');
         jobSelect.innerHTML = '<option value="">Job 선택</option>';
         jobs.forEach(j => {
             jobSelect.innerHTML += `<option value="${j}">${j}</option>`;
@@ -623,31 +623,47 @@ export function closeJobManager() {
     document.getElementById('jobManagerModal').style.display = 'none';
 }
 
-export function addJob() {
+export async function addJob() {
     const input = document.getElementById('newJobInput');
     const val = input.value.trim();
     if(!val) return alert("Job 이름을 입력하세요.");
     
-    const jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
-    if(jobs.includes(val)) return alert("이미 존재하는 Job입니다.");
+    if (!state.jobs) state.jobs = [];
+    if(state.jobs.includes(val)) return alert("이미 존재하는 Job입니다.");
     
-    jobs.push(val);
-    localStorage.setItem('asin_jobs', JSON.stringify(jobs));
+    state.jobs.push(val);
+    localStorage.setItem('asin_jobs', JSON.stringify(state.jobs));
+    await saveJobsToDB(); // [추가] DB 동기화
     input.value = '';
     renderJobManagerList();
 }
 
-export function deleteJob(job) {
+export async function deleteJob(job) {
     if(!confirm(`'${job}'을(를) 삭제하시겠습니까?`)) return;
-    let jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
-    jobs = jobs.filter(j => j !== job);
-    localStorage.setItem('asin_jobs', JSON.stringify(jobs));
+    state.jobs = state.jobs.filter(j => j !== job);
+    localStorage.setItem('asin_jobs', JSON.stringify(state.jobs));
+    await saveJobsToDB(); // [추가] DB 동기화
     renderJobManagerList();
+}
+
+// [추가] Job 리스트 DB 저장 (user_settings 테이블 활용)
+async function saveJobsToDB() {
+    if (!state.currentUser || !state.supabaseConfig) return;
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    
+    state.userSettings.layer_styles['__GLOBAL_JOBS__'] = state.jobs;
+    
+    try {
+        await callSupabaseDirect('user_settings', 'POST', {
+            username: state.currentUser,
+            layer_styles: state.userSettings.layer_styles
+        }, { 'Prefer': 'resolution=merge-duplicates' });
+    } catch (e) { console.error("Job sync failed:", e); }
 }
 
 function renderJobManagerList() {
     const list = document.getElementById('jobManagerList');
-    const jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+    const jobs = state.jobs || [];
     let html = '';
     jobs.forEach(j => {
         html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px; border-bottom:1px solid #eee;"><span>${j}</span><button class="btn btn-danger" style="padding:2px 8px; font-size:12px;" onclick="window.deleteJob('${j}')">삭제</button></div>`;
@@ -674,7 +690,7 @@ export function toggleSurveyFilterMode() {
 export function openJobSelectionModal() {
     const modal = document.getElementById('jobSelectionModal');
     const list = document.getElementById('jobSelectionList');
-    const jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+    const jobs = state.jobs || [];
     
     let html = `<button class="btn btn-outline" style="width:100%; margin-bottom:5px; text-align:left; padding:10px;" onclick="window.selectJobFilter(null)"><strong>전체 조사 메모 보기</strong></button>`;
     

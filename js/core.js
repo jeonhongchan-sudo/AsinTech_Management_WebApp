@@ -23,6 +23,7 @@ export const state = {
     highlightedMemoId: null,   // [추가] 지도에서 강조할 메모 ID
     selectedJobFilter: null,   // [추가] 선택된 Job 필터 (null이면 전체 조사 메모)
     projectPhotos: [],      // [추가] 현재 프로젝트의 전체 사진 목록 (자동 매칭용)
+    jobs: [],               // [추가] Job 리스트 (DB 동기화)
     uploadQueue: [],        // [추가] 백그라운드 업로드 큐
     isUploading: false      // [추가] 업로드 진행 중 여부
 };

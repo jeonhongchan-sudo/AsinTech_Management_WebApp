@@ -1275,7 +1275,7 @@ function openMemoPopup(feature) {
     }
 
     // [추가] Job 리스트 옵션 생성
-    const savedJobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+    const savedJobs = state.jobs || JSON.parse(localStorage.getItem('asin_jobs') || '[]');
     let jobOptions = '<option value="">Job 선택</option>';
     savedJobs.forEach(j => {
         const selected = j === jobName ? 'selected' : '';
