@@ -433,6 +433,26 @@ export function resizeImage(file, maxWidth = 1024, quality = 0.6) {
     });
 }
 
+// [추가] 사용 가능한 모든 Job 목록 가져오기 (DB memos + user_settings)
+export async function fetchAvailableJobs() {
+    const jobsSet = new Set();
+
+    if (state.supabaseConfig) {
+        try {
+            // [수정] jobs 테이블에서 Job 목록 조회 (메모 유무와 상관없이 조회됨)
+            const data = await callSupabaseDirect('jobs?select=job_name&order=created_at.desc');
+            if (data) {
+                data.forEach(row => {
+                    if (row.job_name) jobsSet.add(row.job_name);
+                });
+            }
+        } catch (e) {
+            console.warn("Failed to fetch jobs:", e);
+        }
+    }
+    return Array.from(jobsSet).sort();
+}
+
 // [추가] 일반 메모 작성 모달 열기
 export async function openGeneralMemoModal() {
     const modal = document.getElementById('memoModal');
@@ -473,7 +493,7 @@ export async function openGeneralMemoModal() {
         }
 
         // [추가] Job 리스트 로드
-        const jobs = state.jobs || JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+        const jobs = await fetchAvailableJobs(); // [수정] DB 조회 함수 사용
         jobSelect.innerHTML = '<option value="">Job 선택</option>';
         jobs.forEach(j => {
             jobSelect.innerHTML += `<option value="${j}">${j}</option>`;
@@ -623,47 +643,44 @@ export function closeJobManager() {
     document.getElementById('jobManagerModal').style.display = 'none';
 }
 
+// [수정] Job 추가 (jobs 테이블에 저장)
 export async function addJob() {
     const input = document.getElementById('newJobInput');
     const val = input.value.trim();
     if(!val) return alert("Job 이름을 입력하세요.");
     
-    if (!state.jobs) state.jobs = [];
-    if(state.jobs.includes(val)) return alert("이미 존재하는 Job입니다.");
-    
-    state.jobs.push(val);
-    localStorage.setItem('asin_jobs', JSON.stringify(state.jobs));
-    await saveJobsToDB(); // [추가] DB 동기화
-    input.value = '';
-    renderJobManagerList();
+    try {
+        // jobs 테이블에 insert
+        await callSupabaseDirect('jobs', 'POST', { 
+            job_name: val, 
+            created_by: state.currentUser || 'anonymous' 
+        });
+        input.value = '';
+        renderJobManagerList(); // 목록 갱신
+    } catch (e) {
+        alert("Job 추가 실패 (중복된 이름일 수 있습니다): " + e.message);
+    }
 }
 
+// [수정] Job 삭제 (jobs 테이블에서 삭제)
 export async function deleteJob(job) {
     if(!confirm(`'${job}'을(를) 삭제하시겠습니까?`)) return;
-    state.jobs = state.jobs.filter(j => j !== job);
-    localStorage.setItem('asin_jobs', JSON.stringify(state.jobs));
-    await saveJobsToDB(); // [추가] DB 동기화
-    renderJobManagerList();
-}
-
-// [추가] Job 리스트 DB 저장 (user_settings 테이블 활용)
-async function saveJobsToDB() {
-    if (!state.currentUser || !state.supabaseConfig) return;
-    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
-    
-    state.userSettings.layer_styles['__GLOBAL_JOBS__'] = state.jobs;
     
     try {
-        await callSupabaseDirect('user_settings', 'POST', {
-            username: state.currentUser,
-            layer_styles: state.userSettings.layer_styles
-        }, { 'Prefer': 'resolution=merge-duplicates' });
-    } catch (e) { console.error("Job sync failed:", e); }
+        await callSupabaseDirect(`jobs?job_name=eq.${encodeURIComponent(job)}`, 'DELETE');
+        renderJobManagerList(); // 목록 갱신
+    } catch (e) {
+        alert("삭제 실패: " + e.message);
+    }
 }
 
-function renderJobManagerList() {
+// [수정] Job 관리자 목록 렌더링 (DB 조회)
+async function renderJobManagerList() {
     const list = document.getElementById('jobManagerList');
-    const jobs = state.jobs || [];
+    list.innerHTML = '<div style="text-align:center; padding:10px;">로딩 중...</div>';
+    
+    const jobs = await fetchAvailableJobs(); // DB에서 최신 목록 가져오기
+    
     let html = '';
     jobs.forEach(j => {
         html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px; border-bottom:1px solid #eee;"><span>${j}</span><button class="btn btn-danger" style="padding:2px 8px; font-size:12px;" onclick="window.deleteJob('${j}')">삭제</button></div>`;
@@ -687,11 +704,14 @@ export function toggleSurveyFilterMode() {
 }
 
 // [추가] Job 선택 모달 열기
-export function openJobSelectionModal() {
+export async function openJobSelectionModal() { // [수정] async 추가
     const modal = document.getElementById('jobSelectionModal');
     const list = document.getElementById('jobSelectionList');
-    const jobs = state.jobs || [];
     
+    list.innerHTML = '<div style="text-align:center; padding:20px;"><span class="spinner"></span> 로딩 중...</div>';
+    modal.style.display = 'flex';
+
+    const jobs = await fetchAvailableJobs(); // [수정] DB 조회 함수 사용
     let html = `<button class="btn btn-outline" style="width:100%; margin-bottom:5px; text-align:left; padding:10px;" onclick="window.selectJobFilter(null)"><strong>전체 조사 메모 보기</strong></button>`;
     
     if (jobs.length > 0) {
@@ -703,7 +723,6 @@ export function openJobSelectionModal() {
     }
     
     list.innerHTML = html;
-    modal.style.display = 'flex';
 }
 
 export function closeJobSelectionModal() {

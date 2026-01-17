@@ -1275,12 +1275,8 @@ function openMemoPopup(feature) {
     }
 
     // [추가] Job 리스트 옵션 생성
-    const savedJobs = state.jobs || JSON.parse(localStorage.getItem('asin_jobs') || '[]');
-    let jobOptions = '<option value="">Job 선택</option>';
-    savedJobs.forEach(j => {
-        const selected = j === jobName ? 'selected' : '';
-        jobOptions += `<option value="${j}" ${selected}>${j}</option>`;
-    });
+    // [수정] 초기에는 로딩 표시, 팝업 생성 후 비동기로 채움
+    let jobOptions = '<option value="">로딩 중...</option>';
     const jobDisplay = isSurvey ? 'block' : 'none';
 
     // [추가] 조사 메모인 경우 공개 메모 체크박스 상태 설정
@@ -1327,6 +1323,21 @@ function openMemoPopup(feature) {
         .setLngLat(coords)
         .setDOMContent(popupContent)
         .addTo(cadMap);
+
+    // [추가] 비동기로 Job 리스트 로드 및 적용
+    if (window.fetchAvailableJobs) {
+        window.fetchAvailableJobs().then(jobs => {
+            const select = popupContent.querySelector('#popupMemoJobSelect');
+            if (select) {
+                let opts = '<option value="">Job 선택</option>';
+                jobs.forEach(j => {
+                    const selected = j === jobName ? 'selected' : '';
+                    opts += `<option value="${j}" ${selected}>${j}</option>`;
+                });
+                select.innerHTML = opts;
+            }
+        });
+    }
 
     // [추가] 팝업 열릴 때 전역 파일 배열 초기화
     window.currentMemoFiles = [];

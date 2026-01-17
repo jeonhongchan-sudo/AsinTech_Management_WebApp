@@ -123,13 +123,13 @@ async function fetchUserSettings(username) {
                 layer_styles: data[0].layer_styles || {} // [추가] 스타일 설정 로드
             };
             
-            // [추가] Job 리스트 로드 (DB -> LocalStorage 순)
-            if (state.userSettings.layer_styles['__GLOBAL_JOBS__']) {
-                state.jobs = state.userSettings.layer_styles['__GLOBAL_JOBS__'];
-                localStorage.setItem('asin_jobs', JSON.stringify(state.jobs)); // 로컬 백업
-            } else {
-                state.jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
-            }
+            // [삭제] Job 리스트는 이제 jobs 테이블에서 직접 관리하므로 user_settings에서 로드할 필요 없음
+            // if (state.userSettings.layer_styles['__GLOBAL_JOBS__']) {
+            //     state.jobs = state.userSettings.layer_styles['__GLOBAL_JOBS__'];
+            //     localStorage.setItem('asin_jobs', JSON.stringify(state.jobs)); // 로컬 백업
+            // } else {
+            //     state.jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
+            // }
             reloadLayerStylesFromSettings(); // 맵이 이미 열려있다면 즉시 적용
         } else {
             state.userSettings = { layer_colors: {}, layer_styles: {} };
