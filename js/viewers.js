@@ -926,15 +926,25 @@ export function changeLayerColor(layerName, newColor) {
 
 // [추가] 전체 레이어 색상 일괄 변경 함수
 export function changeAllLayerColors(newColor) {
+    // [추가] 사용자 설정 객체 초기화 확인
+    if (!state.userSettings) state.userSettings = {};
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+
     for (const layer of cadLayers) {
         cadLayerColors[layer] = newColor;
-        // 메모리 상의 설정 업데이트는 saveUserStyles에서 일괄 처리하거나 여기서 루프 돌며 처리
-        // 성능을 위해 여기서는 생략하고 개별 저장은 하지 않음 (너무 많은 요청 방지)
-        // 필요하다면 별도 일괄 저장 로직 구현 필요. 여기서는 UI 반영만 우선.
+        
+        // [수정] 메모리 상의 설정 업데이트 (저장용)
+        const storageKey = `${state.currentCadProjectId}_${layer}`;
+        const isVisible = !cadHiddenLayers.has(layer);
+        
+        state.userSettings.layer_styles[storageKey] = {
+            color: newColor,
+            visible: isVisible
+        };
     }
     updateMapStyle();
     renderLayerList(); // 개별 색상 선택기들도 업데이트된 색상으로 다시 렌더링
-    // saveUserStyles(); // 일괄 저장은 트래픽 문제로 보류하거나, 전체 저장 버튼을 따로 두는 것이 좋음
+    saveUserStyles(); // [수정] 변경된 설정을 DB에 일괄 저장
 }
 
 // [수정] 지연 로드된 사용자 설정 적용 함수 (이름 변경 및 로직 확장)
