@@ -1004,24 +1004,25 @@ export function toggleLayerPanel() { const panel = document.getElementById('cadL
 
 function updateMapFilter() {
     if (!cadMap) return;
-    
-    // [복원] 단순 필터링 (숨김 레이어 제외)
-    if (cadHiddenLayers.size === 0) {
-        if (cadMap.getLayer('cad-lines')) cadMap.setFilter('cad-lines', null);
-    } else {
-        const filterExpr = ['!in', 'layer', ...Array.from(cadHiddenLayers)];
-        if (cadMap.getLayer('cad-lines')) cadMap.setFilter('cad-lines', filterExpr);
-    }
 
-    // 4. 포인트 및 텍스트 레이어 (스타일 무관, 숨김 여부만 체크)
+    // 레이어 목록에서 체크 해제된 레이어를 숨기기 위한 기본 필터
     const hiddenArr = Array.from(cadHiddenLayers);
     const commonFilter = hiddenArr.length > 0 ? ['!in', 'layer', ...hiddenArr] : null;
 
-    if (cadMap.getLayer('cad-points')) cadMap.setFilter('cad-points', commonFilter);
+    // 1. 라인과 텍스트는 사용자의 가시성 설정(commonFilter)만 따름
+    if (cadMap.getLayer('cad-lines')) cadMap.setFilter('cad-lines', commonFilter);
     if (cadMap.getLayer('cad-text')) {
         const textFilter = commonFilter ? ['all', ['has', 'text'], commonFilter] : ['has', 'text'];
         cadMap.setFilter('cad-text', textFilter);
     }
+
+    // 2. 포인트(마커)는 사용자의 가시성 설정에 더해, 'Text_to_Pline' 레이어를 항상 제외
+    const pointExclusionFilter = ['!=', 'layer', 'Text_to_Pline'];
+    const finalPointFilter = commonFilter
+        ? ['all', commonFilter, pointExclusionFilter]
+        : pointExclusionFilter;
+
+    if (cadMap.getLayer('cad-points')) cadMap.setFilter('cad-points', finalPointFilter);
 }
 
 function updateMapStyle() {
@@ -1154,6 +1155,18 @@ function setupMapInteraction() {
 // 지도 클릭 핸들러 (스냅 기능 포함)
 async function handleMapClick(e) {
     if (!state.currentCadProjectId) return;
+
+    // [추가] 'Text_to_Pline' 레이어는 시각적으로만 표시하고 상호작용(클릭)은 막음
+    const clickBbox = [[e.point.x - 2, e.point.y - 2], [e.point.x + 2, e.point.y + 2]];
+    const featuresUnderClick = cadMap.queryRenderedFeatures(clickBbox, { layers: ['cad-lines', 'cad-text'] });
+    const isNonInteractive = featuresUnderClick.some(f => f.properties.layer === 'Text_to_Pline');
+    if (isNonInteractive) {
+        if (currentPopup) {
+            currentPopup.remove();
+            currentPopup = null;
+        }
+        return; // 상호작용 중단
+    }
 
     // 1. 스냅 (Snap) - 클릭 지점 주변의 포인트 피처 검색
     const snapRadius = 15; // 픽셀 단위 검색 반경
