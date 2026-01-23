@@ -25,7 +25,10 @@ export const state = {
     projectPhotos: [],      // [추가] 현재 프로젝트의 전체 사진 목록 (자동 매칭용)
     jobs: [],               // [추가] Job 리스트 (DB 동기화)
     uploadQueue: [],        // [추가] 백그라운드 업로드 큐
-    isUploading: false      // [추가] 업로드 진행 중 여부
+    isUploading: false,     // [추가] 업로드 진행 중 여부
+    isDistanceMode: false,  // [추가] 거리 측정 모드 활성화 여부
+    distanceStartPoint: null, // [추가] 거리 측정 시작점 {lon, lat}
+    distanceMarkers: []     // [추가] 거리 측정용 마커/팝업 관리 배열
 };
 
 // 유틸리티 함수

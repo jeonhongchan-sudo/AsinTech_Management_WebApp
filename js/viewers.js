@@ -1049,6 +1049,7 @@ export function cleanupCadViewer() {
     memoMarkers.forEach(m => m.remove());
     memoMarkers = [];
     currentPopup = null;
+    clearDistanceMeasurement(); // [추가] 거리 측정 초기화
 }
 
 // 전체화면 상태 변경 감지 리스너
@@ -1199,6 +1200,12 @@ async function handleMapClick(e) {
             geometry: { coordinates: [e.lngLat.lng, e.lngLat.lat] },
             properties: { layer: '사용자 지정' }
         };
+    }
+
+    // [추가] 거리 측정 모드일 경우 분기 처리
+    if (state.isDistanceMode) {
+        handleDistanceClick(targetFeature.geometry.coordinates);
+        return;
     }
 
     openMemoPopup(targetFeature);
@@ -1420,6 +1427,130 @@ function openMemoPopup(feature) {
             alert("저장 기능 오류");
         }
     };
+}
+
+// [추가] 거리 측정 모드 토글
+export function toggleDistanceMode() {
+    state.isDistanceMode = !state.isDistanceMode;
+    const btn = document.getElementById('btnDistanceMeasure');
+    const statusEl = document.getElementById('cadStatus');
+    
+    if (state.isDistanceMode) {
+        btn.classList.add('active');
+        btn.style.backgroundColor = '#ffc107'; // 활성화 색상
+        statusEl.innerText = '거리 측정: 첫 번째 지점을 선택하세요.';
+        cadMap.getCanvas().style.cursor = 'crosshair'; // 커서 변경
+    } else {
+        btn.classList.remove('active');
+        btn.style.backgroundColor = '';
+        statusEl.innerText = '도면 로드 완료';
+        cadMap.getCanvas().style.cursor = '';
+        clearDistanceMeasurement();
+    }
+}
+
+// [추가] 거리 측정 클릭 핸들러
+function handleDistanceClick(coords) {
+    const lon = coords[0];
+    const lat = coords[1];
+    const statusEl = document.getElementById('cadStatus');
+
+    // 1. 시작점이 없는 경우 (첫 번째 클릭)
+    if (!state.distanceStartPoint) {
+        state.distanceStartPoint = { lon, lat };
+        
+        // 시작점 마커 표시
+        const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8 })
+            .setLngLat([lon, lat])
+            .addTo(cadMap);
+        state.distanceMarkers.push(startMarker);
+        
+        statusEl.innerText = '거리 측정: 두 번째 지점을 선택하세요.';
+    } 
+    // 2. 시작점이 있는 경우 (두 번째 클릭 -> 거리 계산)
+    else {
+        const start = state.distanceStartPoint;
+        const end = { lon, lat };
+        
+        // 끝점 마커 표시
+        const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8 })
+            .setLngLat([lon, lat])
+            .addTo(cadMap);
+        state.distanceMarkers.push(endMarker);
+
+        // 거리 계산 (MapLibre LngLat 객체 활용)
+        const from = new maplibregl.LngLat(start.lon, start.lat);
+        const to = new maplibregl.LngLat(end.lon, end.lat);
+        const distance = from.distanceTo(to); // 미터 단위 반환
+        
+        // 선 그리기 (GeoJSON Source & Layer 추가)
+        const lineId = `dist-line-${Date.now()}`;
+        cadMap.addSource(lineId, {
+            'type': 'geojson',
+            'data': {
+                'type': 'Feature',
+                'properties': {},
+                'geometry': {
+                    'type': 'LineString',
+                    'coordinates': [[start.lon, start.lat], [end.lon, end.lat]]
+                }
+            }
+        });
+        cadMap.addLayer({
+            'id': lineId,
+            'type': 'line',
+            'source': lineId,
+            'layout': { 'line-join': 'round', 'line-cap': 'round' },
+            'paint': { 'line-color': '#000000', 'line-width': 3, 'line-dasharray': [2, 2] }
+        });
+        // 레이어 ID 저장 (삭제용)
+        state.distanceMarkers.push({ type: 'layer', id: lineId });
+
+        // 결과 팝업 표시 (중간 지점 또는 끝점)
+        // [수정] 커스텀 닫기 버튼 (빨간색, 우측 상단)
+        const popupContent = document.createElement('div');
+        popupContent.style.cssText = 'padding-right: 20px; position: relative; min-width: 60px;';
+        popupContent.innerHTML = `<div style="font-weight:bold; font-size:14px;">${distance.toFixed(2)}m</div>`;
+
+        const closeBtn = document.createElement('button');
+        closeBtn.innerHTML = '×';
+        closeBtn.style.cssText = 'position: absolute; top: -5px; right: -5px; background: #dc3545; color: white; border: none; border-radius: 4px; width: 20px; height: 20px; font-size: 18px; line-height: 1; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center;';
+        
+        popupContent.appendChild(closeBtn);
+
+        const popup = new maplibregl.Popup({ closeOnClick: false, closeButton: false, offset: 10 })
+            .setLngLat([end.lon, end.lat])
+            .setDOMContent(popupContent)
+            .addTo(cadMap);
+        
+        closeBtn.onclick = (e) => {
+            e.stopPropagation();
+            clearDistanceMeasurement();
+        };
+
+        state.distanceMarkers.push(popup);
+
+        // 상태 초기화 (연속 측정을 위해 시작점 리셋)
+        state.distanceStartPoint = null;
+        statusEl.innerText = `측정 완료: ${distance.toFixed(2)}m. 다시 측정하려면 첫 지점을 선택하세요.`;
+    }
+}
+
+// [추가] 거리 측정 초기화 (마커, 선 제거)
+function clearDistanceMeasurement() {
+    state.distanceStartPoint = null;
+    
+    if (state.distanceMarkers) {
+        state.distanceMarkers.forEach(item => {
+            if (item.remove) {
+                item.remove(); // Marker, Popup 제거
+            } else if (item.type === 'layer') {
+                if (cadMap && cadMap.getLayer(item.id)) cadMap.removeLayer(item.id);
+                if (cadMap && cadMap.getSource(item.id)) cadMap.removeSource(item.id);
+            }
+        });
+    }
+    state.distanceMarkers = [];
 }
 
 // loadCadMap 완료 시 인터랙션 설정 호출
