@@ -5,9 +5,9 @@ import { switchTab } from './main.js';
 // --- Project Manager ---
 export function loadProjects() {
   if (state.supabaseConfig) {
-      callSupabaseDirect('projects?select=*&order=created_at.desc')
+      callSupabaseDirect('cad_projects?select=*&order=created_at.desc')
           .then(data => {
-              const projects = data.map(row => ({ name: row.project_name, id: row.folder_id, createdDate: row.created_at, status: row.status }));
+              const projects = data.map(row => ({ name: row.name, id: row.id, createdDate: row.created_at, status: row.status }));
               renderProjectList({ success: true, projects: projects });
           })
           .catch(err => {
@@ -49,7 +49,7 @@ export function closePhotoManager() { state.currentProjectId = null; document.ge
 export function loadPhotos(id) {
   document.getElementById('pmPhotoContainer').innerHTML = '<span class="spinner"></span> 로딩 중...';
   if (state.supabaseConfig) {
-      callSupabaseDirect(`photos?project_folder_id=eq.${id}&select=*&order=created_at.desc`)
+      callSupabaseDirect(`photos?cad_project_id=eq.${id}&select=*&order=created_at.desc`)
           .then(data => {
               const photos = data.map(row => ({ fileName: row.file_name, url: row.file_url, fileId: row.file_id, uploadDate: row.created_at }));
               renderPhotos({ success: true, photos: photos });

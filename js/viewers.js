@@ -1130,7 +1130,7 @@ async function loadProjectPhotos() {
     if (!state.currentCadProjectId || !state.supabaseConfig) return;
     try {
         // photos 테이블에서 파일명과 URL만 조회 (가볍게)
-        const data = await callSupabaseDirect(`photos?project_folder_id=eq.${state.currentCadProjectId}&select=file_name,file_url`);
+        const data = await callSupabaseDirect(`photos?cad_project_id=eq.${state.currentCadProjectId}&select=file_name,file_url`);
         state.projectPhotos = data || [];
         console.log(`[AutoMatch] Loaded ${state.projectPhotos.length} photos for matching.`);
     } catch (e) {
