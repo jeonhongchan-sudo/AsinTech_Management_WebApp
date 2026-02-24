@@ -1322,6 +1322,20 @@ function openMemoPopup(feature) {
         publicAttr = isPublic ? 'checked' : '';
     }
 
+    // [추가] 삭제 권한 로직: 본인 글이거나 공개된 글이면 삭제 가능
+    const isMine = existingMemo ? (existingMemo.username === state.currentUser) : true;
+    const canDelete = existingMemo ? (isMine || isPublic) : false;
+
+    let actionButtonsHtml = '';
+    if (memoId && canDelete) {
+        actionButtonsHtml = `<div style="display:flex; gap:5px;">
+            <button id="popupMemoDeleteBtn" class="btn btn-danger" style="flex:1; padding:5px; font-size:12px;">삭제</button>
+            <button id="popupMemoSaveBtn" class="btn btn-primary" style="flex:1; padding:5px; font-size:12px;">수정</button>
+        </div>`;
+    } else {
+        actionButtonsHtml = `<button id="popupMemoSaveBtn" class="btn btn-primary" style="width:100%; padding:5px; font-size:12px;">저장</button>`;
+    }
+
     const popupContent = document.createElement('div');
     popupContent.style.width = '200px';
     popupContent.innerHTML = `
@@ -1350,7 +1364,7 @@ function openMemoPopup(feature) {
         <label style="font-size:12px; display:flex; align-items:center; margin-bottom:5px;">
             <input type="checkbox" id="popupMemoPublic" ${publicAttr}> 공개 메모 (다른 사용자와 공유)
         </label>
-        <button id="popupMemoSaveBtn" class="btn btn-primary" style="width:100%; padding:5px; font-size:12px;">저장</button>
+        ${actionButtonsHtml}
         ${infoHtml}
         ${mapLinksHtml}
     `;
@@ -1407,6 +1421,22 @@ function openMemoPopup(feature) {
             pubChk.disabled = false;
         }
     });
+
+    // [추가] 삭제 버튼 이벤트 핸들러
+    const delBtn = popupContent.querySelector('#popupMemoDeleteBtn');
+    if (delBtn) {
+        delBtn.onclick = async () => {
+            if(confirm("정말로 이 메모를 삭제하시겠습니까?")) {
+                try {
+                    await callSupabaseDirect(`memos?id=eq.${memoId}`, 'DELETE');
+                    if(window.loadMemoList) window.loadMemoList(); // 목록 갱신
+                    if(window.loadMapMemos) window.loadMapMemos(); // 지도 마커 갱신
+                    popup.remove(); // 팝업 닫기
+                    showAlert("메모가 삭제되었습니다.");
+                } catch (e) { console.error(e); alert("삭제 실패: " + e.message); }
+            }
+        };
+    }
 
     popupContent.querySelector('#popupMemoSaveBtn').onclick = async () => {
         const newContent = popupContent.querySelector('#popupMemoInput').value;
