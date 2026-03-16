@@ -787,6 +787,14 @@ export async function loadCadMap(projectId) {
                 layers: [
                     // [수정] 배경지도 투명도를 1.0으로 변경하여 전체화면 시 어두워지는 현상 해결
                     { id: 'background-layer', type: 'raster', source: 'osm', paint: { 'raster-opacity': 1.0 } },
+                    // [추가] 폭이 있는 폴리라인을 변환한 Polygon 레이어
+                    { 
+                        id: 'cad-polygons', 
+                        source: 'cad_source', 
+                        'source-layer': 'polygon', // tippecanoe에서 지정한 레이어 이름
+                        type: 'fill', 
+                        paint: { 'fill-color': '#888888', 'fill-opacity': 1 } 
+                    },
                     // [복원] 단일 라인 레이어로 통합 (누락 방지)
                     { id: 'cad-lines', source: 'cad_source', 'source-layer': 'line', type: 'line', paint: { 'line-color': '#555555', 'line-width': 1.5 } },
                     
@@ -860,7 +868,7 @@ function updateCadStyle() {
 
 function updateLayerDiscovery() {
     if (!cadMap) return;
-    const features = cadMap.queryRenderedFeatures({ layers: ['cad-lines', 'cad-points'] });
+    const features = cadMap.queryRenderedFeatures({ layers: ['cad-lines', 'cad-points', 'cad-polygons'] });
     let updated = false;
     features.forEach(f => {
         const layerName = f.properties.layer;
@@ -1011,6 +1019,7 @@ function updateMapFilter() {
 
     // 1. 라인과 텍스트는 사용자의 가시성 설정(commonFilter)만 따름
     if (cadMap.getLayer('cad-lines')) cadMap.setFilter('cad-lines', commonFilter);
+    if (cadMap.getLayer('cad-polygons')) cadMap.setFilter('cad-polygons', commonFilter);
     if (cadMap.getLayer('cad-text')) {
         const textFilter = commonFilter ? ['all', ['has', 'text'], commonFilter] : ['has', 'text'];
         cadMap.setFilter('cad-text', textFilter);
@@ -1033,6 +1042,7 @@ function updateMapStyle() {
     
     // [복원] 단일 레이어 색상 적용
     if (cadMap.getLayer('cad-lines')) cadMap.setPaintProperty('cad-lines', 'line-color', matchExpr);
+    if (cadMap.getLayer('cad-polygons')) cadMap.setPaintProperty('cad-polygons', 'fill-color', matchExpr);
 
     if (cadMap.getLayer('cad-points')) cadMap.setPaintProperty('cad-points', 'circle-color', matchExpr);
 }
