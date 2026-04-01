@@ -937,6 +937,12 @@ export function toggleLayer(layerName, isVisible) {
 }
 
 export function changeLayerColor(layerName, newColor) { 
+    const storageKey = `${state.currentCadProjectId}_${layerName}`;
+    // state 객체 초기화 확인 및 즉시 반영
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    if (!state.userSettings.layer_styles[storageKey]) state.userSettings.layer_styles[storageKey] = {};
+    state.userSettings.layer_styles[storageKey].color = newColor;
+
     cadLayerColors[layerName] = newColor; 
     updateMapStyle(); 
     saveUserStyles(layerName); // [수정] 통합 저장 함수 사용
@@ -945,6 +951,8 @@ export function changeLayerColor(layerName, newColor) {
 // [추가] 선 굵기 변경 함수
 export function changeLayerWidth(layerName, newWidth) {
     const storageKey = `${state.currentCadProjectId}_${layerName}`;
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    if (!state.userSettings.layer_styles[storageKey]) state.userSettings.layer_styles[storageKey] = {};
     state.userSettings.layer_styles[storageKey].width = newWidth;
     updateMapStyle();
     saveUserStyles(layerName);
