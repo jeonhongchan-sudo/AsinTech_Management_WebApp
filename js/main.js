@@ -1,9 +1,9 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
-import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeAllLayerColors, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
+import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
 import { loadProjects, deleteProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageSelect, removeMemoImage, removeExistingMemoImage, toggleMemoArchiveMode, searchArchivedMemos, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter, fetchAvailableJobs } from './managers.js';
 
-// 전역 함수 바인딩 (HTML onclick 속성 지원용)
+// 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
 window.deleteProject = deleteProject;
 window.exportCSV = exportCSV;
@@ -16,10 +16,12 @@ window.closeLightbox = closeLightbox;
 window.navigateLightbox = navigateLightbox;
 window.selectGuideline = selectGuideline;
 window.toggleFullScreen = toggleFullScreen;
+window.changeLayerWidth = changeLayerWidth; // [추가] 선 굵기 변경 함수
 window.loadCadMap = loadCadMap;
 window.toggleLayer = toggleLayer;
 window.changeLayerColor = changeLayerColor;
 window.changeAllLayerColors = changeAllLayerColors;
+window.changeAllLayerWidths = changeAllLayerWidths; // [추가] 전체 굵기 변경 함수 바인딩
 window.toggleLayerPanel = toggleLayerPanel;
 window.toggleBackgroundMap = toggleBackgroundMap;
 window.toggleMarkers = toggleMarkers;
