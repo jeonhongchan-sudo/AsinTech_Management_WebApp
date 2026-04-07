@@ -759,7 +759,7 @@ export async function loadCadMap(projectId) {
             renderWorldCopies: false, maxZoom: 24, localIdeographFontFamily: "'Noto Sans KR', sans-serif",
             validateStyle: false, boxZoom: false, dragRotate: false, doubleClickZoom: false,
             style: {
-                version: 8, glyphs: "https://orangemug.github.io/font-glyphs/glyphs/{fontstack}/{range}.pbf",
+                version: 8, glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
                 sources: {
                     'cad_source': { type: 'vector', url: pmtilesUrl, attribution: '© AsinTech Map Viewer', maxzoom: maxDataZoom },
                     'osm': { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '&copy; OpenStreetMap', maxzoom: 19 }
@@ -779,7 +779,8 @@ export async function loadCadMap(projectId) {
                     { id: 'cad-lines', source: 'cad_source', 'source-layer': 'line', type: 'line', paint: { 'line-color': '#555555', 'line-width': 1.5 } },
                     
                     { id: 'cad-points', source: 'cad_source', 'source-layer': 'point', type: 'circle', paint: { 'circle-color': '#FF0000', 'circle-radius': 3, 'circle-stroke-width': 1, 'circle-stroke-color': '#333333' } },
-                    { id: 'cad-text', type: 'symbol', source: 'cad_source', 'source-layer': 'point', filter: ['has', 'text'], layout: { 'text-field': ['get', 'text'], 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-anchor': 'bottom-left', 'text-offset': [0, 0], 'text-font': ['Open Sans Regular'], 'text-rotate': ['get', 'rotation'], 'text-rotation-alignment': 'map' }, paint: { 'text-color': '#000000' } }
+                    { id: 'cad-text', type: 'symbol', source: 'cad_source', 'source-layer': 'point', filter: ['has', 'text'], layout: { 'text-field': ['get', 'text'], 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-anchor': 'bottom-left', 'text-offset': [0, 0], 'text-font': ['Open Sans Regular'], 'text-rotate': ['get', 'rotation'], 'text-rotation-alignment': 'map' }, paint: { 'text-color': '#000000' } },
+                    { id: 'cad-line-labels', type: 'symbol', source: 'cad_source', 'source-layer': 'line', layout: { 'symbol-placement': 'line', 'text-field': ['get', 'layer'], 'text-size': 12, 'text-rotation-alignment': 'map', 'text-anchor': 'center', 'text-justify': 'center', 'text-font': ['Open Sans Regular'], 'text-offset': [0, -1], 'text-allow-overlap': false, 'text-writing-mode': ['vertical'] }, paint: { 'text-color': '#000000' } }
                 ]
             },
         });
@@ -796,6 +797,9 @@ export async function loadCadMap(projectId) {
             
             const chkMarkers = document.getElementById('chkMarkers');
             if (chkMarkers) toggleMarkers(chkMarkers.checked);
+
+            const chkLineLabels = document.getElementById('chkLineLabels');
+            if (chkLineLabels) toggleLineLabels(chkLineLabels.checked);
 
             statusEl.innerText = '도면 로드 완료'; 
             
@@ -822,6 +826,15 @@ export function toggleMarkers(isVisible) {
         cadMap.setLayoutProperty('cad-points', 'visibility', isVisible ? 'visible' : 'none');
     }
 }
+
+// [추가] 선 레이어 명 토글 기능
+export function toggleLineLabels(isVisible) {
+    if (!cadMap || !cadMap.getLayer('cad-line-labels')) return;
+    cadMap.setLayoutProperty('cad-line-labels', 'visibility', isVisible ? 'visible' : 'none');
+}
+
+// [추가] 전역 함수 등록 (HTML에서 호출 가능하도록)
+window.toggleLineLabels = toggleLineLabels;
 
 /**
  * 배경지도 유무와 전체화면 상태에 따른 스타일 업데이트
