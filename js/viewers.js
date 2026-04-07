@@ -1086,6 +1086,23 @@ function updateMapFilter() {
 
 function updateMapStyle() {
     if (!cadMap) return;
+
+    // [수정] 레이어가 하나도 감지되지 않은 경우 match 표현식 생성 시 발생하는 오류 방지
+    if (cadLayers.size === 0) {
+        const defaultColor = '#cccccc';
+        const defaultWidth = 1.5;
+        if (cadMap.getLayer('cad-lines')) {
+            cadMap.setPaintProperty('cad-lines', 'line-color', defaultColor);
+            cadMap.setPaintProperty('cad-lines', 'line-width', defaultWidth);
+        }
+        if (cadMap.getLayer('cad-polygons')) cadMap.setPaintProperty('cad-polygons', 'fill-color', defaultColor);
+        if (cadMap.getLayer('cad-points')) {
+            cadMap.setPaintProperty('cad-points', 'circle-color', defaultColor);
+            cadMap.setPaintProperty('cad-points', 'circle-radius', defaultWidth);
+        }
+        return;
+    }
+
     const matchExpr = ['match', ['get', 'layer']];
     const widthMatchExpr = ['match', ['get', 'layer']]; // [추가] 굵기 매칭 표현식
 
