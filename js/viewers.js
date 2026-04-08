@@ -743,6 +743,8 @@ export async function loadCadMap(projectId) {
         const p = new pmtiles.PMTiles(fileUrl);
         let bounds = [[124, 33], [132, 43]];
         let maxDataZoom = 24;
+        const labelStyleKey = `${projectId}__LINE_LABEL_STYLE__`;
+        const savedLabelStyle = state.userSettings?.layer_styles?.[labelStyleKey] || { size: 12, color: '#000000' };
         try {
             const header = await p.getHeader();
             if (header) { bounds = [header.minLon, header.minLat, header.maxLon, header.maxLat]; maxDataZoom = header.maxZoom || 24; }
@@ -780,7 +782,7 @@ export async function loadCadMap(projectId) {
                     
                     { id: 'cad-points', source: 'cad_source', 'source-layer': 'point', type: 'circle', paint: { 'circle-color': '#FF0000', 'circle-radius': 3, 'circle-stroke-width': 1, 'circle-stroke-color': '#333333' } },
                     { id: 'cad-text', type: 'symbol', source: 'cad_source', 'source-layer': 'point', filter: ['has', 'text'], layout: { 'text-field': ['get', 'text'], 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-anchor': 'bottom-left', 'text-offset': [0, 0], 'text-font': ['Open Sans Regular'], 'text-rotate': ['get', 'rotation'], 'text-rotation-alignment': 'map' }, paint: { 'text-color': '#000000' } },
-                    { id: 'cad-line-labels', type: 'symbol', source: 'cad_source', 'source-layer': 'line', layout: { 'symbol-placement': 'line', 'text-field': ['get', 'layer'], 'text-size': 12, 'text-rotation-alignment': 'map', 'text-anchor': 'center', 'text-justify': 'center', 'text-font': ['Open Sans Regular'], 'text-offset': [0, -1], 'text-allow-overlap': false, 'text-writing-mode': ['vertical'] }, paint: { 'text-color': '#000000' } }
+                    { id: 'cad-line-labels', type: 'symbol', source: 'cad_source', 'source-layer': 'line', layout: { 'symbol-placement': 'line', 'text-field': ['get', 'layer'], 'text-size': savedLabelStyle.size || 12, 'text-rotation-alignment': 'map', 'text-anchor': 'center', 'text-justify': 'center', 'text-font': ['Open Sans Regular'], 'text-offset': [0, -1], 'text-allow-overlap': false, 'text-writing-mode': ['vertical'] }, paint: { 'text-color': savedLabelStyle.color || '#000000' } }
                 ]
             },
         });
@@ -910,6 +912,19 @@ function renderLayerList() {
     `;
     listEl.appendChild(globalDiv);
 
+    // [추가] 선 레이어명 스타일 변경 컨트롤
+    const labelStyleDiv = document.createElement('div');
+    labelStyleDiv.className = 'layer-item';
+    labelStyleDiv.style.cssText = 'border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; font-weight: bold; display: flex; align-items: center; justify-content: space-between;';
+    const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
+    const savedLabelStyle = state.userSettings.layer_styles?.[labelStyleKey] || { size: 12, color: '#000000' };
+    labelStyleDiv.innerHTML = `
+        <span style="flex:1;">선레이어명 스타일</span>
+        <input type="number" class="layer-width-input" value="${savedLabelStyle.size || 12}" min="1" max="50" step="1" onchange="window.changeLineLabelSize(parseInt(this.value))" title="글자 크기 변경" style="margin-right:5px;">
+        <input type="color" class="layer-color-picker" value="${savedLabelStyle.color || '#000000'}" onchange="window.changeLineLabelColor(this.value)" title="글자 색상 변경">
+    `;
+    listEl.appendChild(labelStyleDiv);
+
     Array.from(cadLayers).sort().forEach(layer => {
         const storageKey = `${state.currentCadProjectId}_${layer}`;
         const layerStyle = state.userSettings.layer_styles[storageKey] || {};
@@ -1014,6 +1029,32 @@ export function changeAllLayerWidths(newWidth) {
     saveUserStyles();
 }
 
+// [추가] 선 레이어명 글자 크기 변경 함수
+export function changeLineLabelSize(newSize) {
+    if (!cadMap || !cadMap.getLayer('cad-line-labels') || !state.currentCadProjectId) return;
+    cadMap.setLayoutProperty('cad-line-labels', 'text-size', newSize);
+    
+    const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    const style = state.userSettings.layer_styles[labelStyleKey] || { size: 12, color: '#000000' };
+    style.size = newSize;
+    state.userSettings.layer_styles[labelStyleKey] = style;
+    saveUserStyles();
+}
+
+// [추가] 선 레이어명 글자 색상 변경 함수
+export function changeLineLabelColor(newColor) {
+    if (!cadMap || !cadMap.getLayer('cad-line-labels') || !state.currentCadProjectId) return;
+    cadMap.setPaintProperty('cad-line-labels', 'text-color', newColor);
+    
+    const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    const style = state.userSettings.layer_styles[labelStyleKey] || { size: 12, color: '#000000' };
+    style.color = newColor;
+    state.userSettings.layer_styles[labelStyleKey] = style;
+    saveUserStyles();
+}
+
 // [수정] 지연 로드된 사용자 설정 적용 함수 (이름 변경 및 로직 확장)
 export function reloadLayerStylesFromSettings() {
     if (!cadMap || !state.currentCadProjectId) return;
@@ -1033,6 +1074,13 @@ export function reloadLayerStylesFromSettings() {
             updated = true;
         }
     });
+    // [추가] 프로젝트별 선 레이어명 스타일 적용
+    const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
+    const savedLabelStyle = state.userSettings?.layer_styles?.[labelStyleKey];
+    if (savedLabelStyle && cadMap.getLayer('cad-line-labels')) {
+        if (savedLabelStyle.size) cadMap.setLayoutProperty('cad-line-labels', 'text-size', savedLabelStyle.size);
+        if (savedLabelStyle.color) cadMap.setPaintProperty('cad-line-labels', 'text-color', savedLabelStyle.color);
+    }
     if (updated) {
         updateMapStyle();
         updateMapFilter(); // 가시성 변경 반영
