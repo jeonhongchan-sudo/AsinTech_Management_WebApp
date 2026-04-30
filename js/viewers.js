@@ -729,10 +729,11 @@ export async function loadCadMap(projectId) {
     document.getElementById('cadLayerPanel').style.display = 'none';
 
     try {
-        const files = await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.pmtiles&limit=1`);
+        const files = await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.pmtiles&select=*,source_crs&limit=1`);
         if (!files || files.length === 0) { statusEl.innerText = '이 프로젝트에는 변환된 PMTiles 파일이 없습니다.'; return; }
         
         const fileData = files[0];
+        state.currentProjectSourceCrs = fileData.source_crs || 'EPSG:5179';
         const filePath = fileData.file_path;
         // [수정] 캐시 무시를 위한 버전 쿼리 스트링 추가 (updated_at 시간값 사용)
         const version = fileData.updated_at ? new Date(fileData.updated_at).getTime() : Date.now();
@@ -1381,13 +1382,24 @@ function openMemoPopup(feature) {
 
     const content = existingMemo ? existingMemo.content : '';
     const memoId = existingMemo ? existingMemo.id : null; // [추가] 수정 시 ID 전달
-    const isPublic = existingMemo ? existingMemo.is_public : false; // [추가] 기존 공개 여부
+    const isPublic = existingMemo ? existingMemo.is_public : true; // [수정] 기본값: 공개 메모
     const isSurvey = existingMemo ? existingMemo.is_survey : false; // [추가] 기존 조사 여부
     const jobName = existingMemo ? existingMemo.job_name : ''; // [추가] 기존 Job 명
-    const tmX = existingMemo ? existingMemo.tm_x : (feature.properties.tm_x || ''); // [추가] TM X
-    const tmY = existingMemo ? existingMemo.tm_y : (feature.properties.tm_y || ''); // [추가] TM Y
+    let tmX = existingMemo ? existingMemo.tm_x : (feature.properties.tm_x || '');
+    let tmY = existingMemo ? existingMemo.tm_y : (feature.properties.tm_y || '');
     const chainage = existingMemo ? existingMemo.chainage : (feature.properties.chainage || ''); // [추가] Chainage
     const existingImgUrls = existingMemo && existingMemo.image_url ? existingMemo.image_url.split(',') : [];
+    
+    // [수정] TM 좌표가 없는 경우(빈 공간 등) WGS84 -> 프로젝트 원본 좌표계로 변환
+    if ((!tmX || !tmY) && typeof proj4 !== 'undefined') {
+        try {
+            const wgs84 = proj4('EPSG:4326');
+            const targetCrs = proj4(state.currentProjectSourceCrs || 'EPSG:5179');
+            const tmCoords = proj4(wgs84, targetCrs, [lon, lat]);
+            tmX = tmCoords[0].toFixed(2);
+            tmY = tmCoords[1].toFixed(2);
+        } catch (e) { console.warn("TM 변환 실패:", e); }
+    }
 
     // -----------------------------------------------------------
     // [추가] 자동 사진 매칭 로직 (photo_linker_tool.py 참조)
@@ -1443,6 +1455,10 @@ function openMemoPopup(feature) {
         infoHtml += `<div style="margin-top:10px; padding-top:8px; border-top:1px solid #eee; font-size:11px; color:#555; line-height:1.4;">`;
         infoHtml += `<div><strong>Chainage:</strong> ${props.chainage}</div>`;
         infoHtml += `</div>`;
+    } else if (tmX && tmY) { // [추가] TM 좌표가 있을 경우 표시
+        infoHtml += `<div style="margin-top:10px; padding-top:8px; border-top:1px solid #eee; font-size:11px; color:#555; line-height:1.4;">`;
+        infoHtml += `<div><strong>TM X:</strong> ${tmX}, <strong>TM Y:</strong> ${tmY}</div>`;
+        infoHtml += `</div>`;
     }
 
     // [수정] 외부 지도 앱 바로가기 링크
@@ -1488,8 +1504,12 @@ function openMemoPopup(feature) {
     const popupContent = document.createElement('div');
     popupContent.style.width = '200px';
     popupContent.innerHTML = `
+        <div id="quickJobPicker" style="margin-bottom:10px; padding:8px; background:#fff9db; border:1px solid #fab005; border-radius:6px; display:none;">
+            <div style="font-size:11px; font-weight:bold; color:#f08c00; margin-bottom:5px; display:flex; align-items:center; gap:3px;">👷 빠른 조사 설정 (Job 선택)</div>
+            <div class="job-chips" style="display:flex; gap:4px; flex-wrap:wrap; max-height:80px; overflow-y:auto;">
+            </div>
+        </div>
         ${matchedPhotosHtml} <!-- 자동 매칭된 사진 영역 -->
-        <h4 style="margin:0 0 5px 0; font-size:14px;">메모 작성</h4>
         <textarea id="popupMemoInput" style="width:100%; height:80px; margin-bottom:5px; font-size:13px;">${content}</textarea>
         <div style="display:flex; gap:5px; margin-bottom:5px;">
             <button class="btn btn-info" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoFile').click()" title="파일 선택">📁</button>
@@ -1526,7 +1546,45 @@ function openMemoPopup(feature) {
     // [추가] 비동기로 Job 리스트 로드 및 적용
     if (window.fetchAvailableJobs) {
         window.fetchAvailableJobs().then(jobs => {
+            const picker = popupContent.querySelector('#quickJobPicker');
+            const chipsCont = popupContent.querySelector('.job-chips');
             const select = popupContent.querySelector('#popupMemoJobSelect');
+
+            // 빠른 선택 칩(Chips) 생성
+            if (jobs && jobs.length > 0) {
+                picker.style.display = 'block';
+                jobs.forEach(j => {
+                    const btn = document.createElement('button');
+                    btn.innerText = j;
+                    btn.className = 'btn btn-outline';
+                    btn.style.cssText = 'padding:2px 8px; font-size:11px; border-radius:12px; border-color:#fab005; color:#e67e22; background:white;';
+                    
+                    if (j === jobName) {
+                        btn.style.background = '#fab005';
+                        btn.style.color = '#fff';
+                    }
+
+                    btn.onclick = () => {
+                        const surveyChk = popupContent.querySelector('#popupMemoSurvey');
+                        const jobCont = popupContent.querySelector('#popupMemoJobContainer');
+                        const pubChk = popupContent.querySelector('#popupMemoPublic');
+
+                        // 자동 설정 로직
+                        surveyChk.checked = true;
+                        jobCont.style.display = 'block';
+                        select.value = j;
+                        pubChk.checked = true;
+                        pubChk.disabled = true;
+
+                        // UI 피드백 (하이라이트)
+                        chipsCont.querySelectorAll('button').forEach(b => { b.style.background = 'white'; b.style.color = '#e67e22'; });
+                        btn.style.background = '#fab005';
+                        btn.style.color = '#fff';
+                    };
+                    chipsCont.appendChild(btn);
+                });
+            }
+
             if (select) {
                 let opts = '<option value="">Job 선택</option>';
                 jobs.forEach(j => {

@@ -295,7 +295,7 @@ function renderMemoListUI() {
 // [수정] 메모 저장 함수 (비동기 백그라운드 처리 적용)
 // files: 업로드할 파일 객체 배열 (없으면 null)
 // existingImages: 기존에 저장된 이미지 URL 문자열 (콤마 구분)
-export async function saveMemo(projectId, lon, lat, content, layer, memoId = null, isPublic = false, existingImages = null, isSurvey = false, jobName = null, tmX = null, tmY = null, chainage = null, files = []) {
+export async function saveMemo(projectId, lon, lat, content, layer, memoId = null, isPublic = true, existingImages = null, isSurvey = false, jobName = null, tmX = null, tmY = null, chainage = null, files = []) {
     if (!state.supabaseConfig) {
         showAlert("설정 로드 실패. 페이지를 새로고침하세요.", "error");
         return;
