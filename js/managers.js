@@ -308,8 +308,8 @@ export async function saveMemo(projectId, lon, lat, content, layer, memoId = nul
     // UI 즉시 피드백 (백그라운드 작업 시작 알림)
     showAlert("메모 저장 및 업로드를 시작합니다...", "info");
 
-    // 백그라운드 작업 실행 (await 하지 않음)
-    // [수정] processMemoSaveBackground를 한 번만 호출하고 await
+    // [수정] 중복 호출 제거: processMemoSaveBackground를 한 번만 호출하고 그 결과를 await 합니다.
+    console.log("[SaveMemo] Starting background process with files:", files?.length);
     return await processMemoSaveBackground({
         projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files
     });
@@ -319,18 +319,19 @@ export async function saveMemo(projectId, lon, lat, content, layer, memoId = nul
 async function processMemoSaveBackground(data) {
     const { projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files } = data;
     const user = state.currentUser || 'anonymous';
+    console.log("[BackgroundSave] Received data:", { memoId, existingImages, newFiles: files?.length });
     
     try {
-        let finalImageUrls = existingImages ? existingImages.split(',').filter(u => u.trim() !== '') : [];
+        // [수정] 기존 이미지 URL 처리 강화 (null, undefined 문자열 방지)
+        let finalImageUrls = (existingImages && existingImages !== "undefined" && existingImages !== "null") 
+            ? existingImages.split(',').filter(u => u.trim() !== '') 
+            : [];
 
         // 1. 새 파일이 있다면 순차적으로 업로드 (Queue 처리)
         if (files && files.length > 0) {
             const total = files.length;
             for (let i = 0; i < total; i++) {
                 const file = files[i];
-                // 진행 상황 표시 (선택적)
-                // console.log(`Uploading image ${i + 1}/${total}...`);
-                
                 try {
                     const base64 = await resizeImage(file);
                     const res = await callApi('uploadToDrive', { 
@@ -339,7 +340,8 @@ async function processMemoSaveBackground(data) {
                         mimeType: file.type 
                     });
                     
-                    if (res.success) {
+                    if (res.success && res.url) {
+                        console.log(`[Upload] Success: ${file.name} -> ${res.url}`);
                         finalImageUrls.push(res.url);
                     } else {
                         console.error(`이미지 업로드 실패 (${file.name}):`, res.error);
@@ -352,6 +354,7 @@ async function processMemoSaveBackground(data) {
 
         // 2. DB 저장 (업로드된 URL들을 콤마로 연결)
         const imageUrlString = finalImageUrls.join(',');
+        console.log("[SupabaseSave] Final Image URLs:", imageUrlString);
 
         // [추가] 숫자형 데이터 검증 (NaN 방지)
         // JavaScript의 isNaN("")은 false를 반환하므로 trim() 체크 추가
