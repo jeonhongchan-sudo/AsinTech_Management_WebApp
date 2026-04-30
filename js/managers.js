@@ -270,10 +270,13 @@ function renderMemoListUI() {
 
         // [추가] 사진 아이콘 표시
         let imgIcon = '';
-        // [수정] m.image_url이 존재하기만 하면 아이콘을 표시하도록 조건 완화 (예전 코드 방식 참고)
-        if (m.image_url && m.image_url !== "null" && m.image_url !== "undefined" && m.image_url.trim() !== "") { 
-            const firstUrl = String(m.image_url).split(',')[0].trim();
+        // [수정] image_url이 존재하는지 더 확실하게 체크 (공백 제거 후 10자 이상)
+        const rawImageUrl = m.image_url ? String(m.image_url).trim() : "";
+        if (rawImageUrl && rawImageUrl !== "null" && rawImageUrl !== "undefined" && rawImageUrl.length > 10) {
+            const firstUrl = rawImageUrl.split(',')[0].trim();
             imgIcon = `<a href="${firstUrl}" target="_blank" style="text-decoration:none; margin-right:5px;" title="사진 보기">📷</a>`;
+        } else {
+            // console.log(`[IconCheck] Memo ${m.id} has no valid image_url:`, m.image_url);
         }
         // [추가] Job 이름 뱃지 표시
         let jobBadge = '';
@@ -321,17 +324,18 @@ async function processMemoSaveBackground(data) {
     
     try {
         // 1. 기존 이미지 URL 정리 (잘못된 문자열 유입 방지)
-        let finalImageUrls = (existingImages && existingImages !== "undefined" && existingImages !== "null") 
+        let finalImageUrls = (existingImages && typeof existingImages === 'string' && existingImages !== "null" && existingImages !== "undefined") 
             ? existingImages.split(',').map(u => u.trim()).filter(u => u !== "") 
             : [];
+        
+        console.log("[Save] Starting with existing images:", finalImageUrls);
 
         // 2. 새 사진 파일 업로드 (순차 처리)
         if (files && files.length > 0) {
-            const total = files.length;
-            for (let i = 0; i < total; i++) {
+            console.log(`[Save] Uploading ${files.length} new files...`);
+            for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 try {
-                    // resizeImage는 core.js 혹은 managers.js에 정의된 유틸리티
                     const base64 = await resizeImage(file);
                     const res = await callApi('uploadToDrive', { 
                         fileName: file.name, 
@@ -340,19 +344,26 @@ async function processMemoSaveBackground(data) {
                     });
                     
                     if (res.success && res.url) {
-                        // [수정] 드라이브에 업로드된 URL을 배열에 확실히 추가
-                        finalImageUrls.push(res.url);
+                        finalImageUrls.push(res.url.trim());
+                        console.log(`[Upload Success] ${i+1}/${files.length}:`, res.url);
                     } else {
-                        console.error(`이미지 업로드 실패 (${file.name}):`, res.error);
+                        // [수정] 업로드 실패 시 저장을 중단하여 DB에 빈 값이 들어가는 것을 방지
+                        const errorMsg = `사진 업로드에 실패했습니다: ${res.error}\n(드라이브 권한을 확인하세요)`;
+                        console.error("[Upload Error]", errorMsg);
+                        showAlert(errorMsg, "error");
+                        return false; // 저장 프로세스 중단
                     }
                 } catch (err) {
                     console.error(`이미지 처리 중 오류 (${file.name}):`, err);
+                    return false;
                 }
             }
         }
 
         // 3. 최종 이미지 URL 문자열 생성
-        const imageUrlString = finalImageUrls.join(',');
+        // [수정] 배열이 비어있을 경우 명확히 null 처리를 하거나 빈 문자열 유지
+        const imageUrlString = finalImageUrls.length > 0 ? finalImageUrls.map(u => String(u).trim()).filter(u => u !== "").join(',') : "";
+        console.log("[Save] Final payload image_url:", imageUrlString);
 
         // 4. 데이터 타입 검증 (NaN 및 타입 오류 방지)
         const validTmX = (tmX !== null && tmX !== "" && !isNaN(tmX)) ? parseFloat(tmX) : null;
@@ -391,8 +402,8 @@ async function processMemoSaveBackground(data) {
         }
 
         // 6. UI 및 상태 갱신
-        loadMemoList();
-        if (window.loadMapMemos) window.loadMapMemos();
+        await loadMemoList(); // [수정] 데이터 로드가 끝날 때까지 대기
+        if (window.loadMapMemos) await window.loadMapMemos();
         
         // 전역 파일 배열 초기화 및 성공 반환
         window.currentMemoFiles = [];
@@ -592,26 +603,17 @@ export function handleMemoImageSelect(input, previewId) {
 
 // [추가] 선택된 사진들 미리보기 렌더링
 function renderMemoImages(previewId) {
-    // [수정] 팝업이 동적으로 생성되므로 document.getElementById로 못 찾는 경우를 위해 전체 팝업 영역 검색
+    // [개선] 일반적인 방법으로 못 찾을 경우 MapLibre 팝업 내부를 강제로 뒤집니다.
     let preview = document.getElementById(previewId);
     if (!preview) {
-        const popups = document.querySelectorAll('.maplibregl-popup');
+        const popups = document.querySelectorAll('.maplibregl-popup-content');
         for (let p of popups) {
             const target = p.querySelector(`#${previewId}`);
             if (target) { preview = target; break; }
         }
     }
-    
-    if (!preview) {
-        const popups = document.querySelectorAll('.maplibregl-popup-content'); // MapLibre 특정 클래스 재검색
-        for (let p of popups) {
-            const found = p.querySelector(`#${previewId}`);
-            if (found) { preview = found; break; }
-        }
-    }
 
     if (!preview) {
-        console.warn("미리보기 컨테이너를 찾을 수 없습니다:", previewId);
         return;
     }
 
@@ -636,12 +638,12 @@ function renderMemoImages(previewId) {
     
     if (window.currentMemoFiles) {
         window.currentMemoFiles.forEach((file, index) => {
-            // [개선] FileReader 대신 ObjectURL을 사용하여 즉각적인 미리보기 제공 (managers.txt 방식보다 빠름)
-            const url = URL.createObjectURL(file);
+            // [개선] 전역 URL 객체 참조 충돌 방지를 위해 window.URL 명시
+            const url = (window.URL || window.webkitURL).createObjectURL(file);
             const div = document.createElement('div');
             div.style.cssText = 'position:relative; display:inline-block;';
             div.innerHTML = `
-                <img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd;">
+                <img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd;" onload="window.URL.revokeObjectURL(this.src)">
                 <button onclick="window.removeMemoImage(${index}, '${previewId}')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:18px; height:18px; font-size:12px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">&times;</button>
             `;
             newContainer.appendChild(div);

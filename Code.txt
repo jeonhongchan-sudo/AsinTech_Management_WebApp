@@ -563,8 +563,21 @@ function uploadToDrive(fileName, fileData, mimeType) {
     const decoded = Utilities.base64Decode(fileData);
     const blob = Utilities.newBlob(decoded, mimeType, fileName);
     const file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    return { success: true, url: `https://lh3.googleusercontent.com/d/${file.getId()}`, fileId: file.getId() };
+    
+    // [수정] 공유 권한 설정 시 발생할 수 있는 '액세스 거부' 에러 격리
+    // 조직의 보안 정책에 따라 public 공유가 막혀 있어도 파일 자체는 생성되었으므로 URL을 반환하도록 함
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (e) {
+      // 공유 설정 실패해도 무시하고 진행 (파일 ID는 이미 생성됨)
+      Logger.log("공유 권한 설정 실패 (무시됨): " + e.toString());
+    }
+    
+    const fileId = file.getId();
+    // [수정] 더 안정적이고 표준적인 구글 드라이브 직접 보기 URL 형식 사용
+    const url = "https://drive.google.com/uc?export=view&id=" + fileId;
+    
+    return { success: true, url: url, fileId: fileId };
   } catch (e) { return { success: false, error: '드라이브 업로드 실패: ' + e.toString() }; }
 }
 

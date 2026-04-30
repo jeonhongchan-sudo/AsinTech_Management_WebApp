@@ -1228,13 +1228,22 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
             if (state.selectedJobFilter) {
                 filterPart += `&job_name=eq.${encodeURIComponent(state.selectedJobFilter)}`;
             }
-            query = `memos?project_id=eq.${state.currentCadProjectId}&or=(is_public.eq.true,username.eq.${user})${filterPart}&select=*`;
+            query = `memos?project_id=eq.${state.currentCadProjectId}&or=(is_public.eq.true,username.eq.${user})${filterPart}&select=*&order=created_at.desc`;
         }
         const data = await callSupabaseDirect(query);
-        state.memos = data || [];
+        
+        // [수정] state.memos 전체를 덮어쓰지 않고 현재 프로젝트 데이터만 업데이트하거나 병합
+        const projectMemos = data || [];
+        if (state.memos && state.memos.length > 0) {
+            // 기존 메모 목록에서 현재 프로젝트 것만 교체
+            const otherMemos = state.memos.filter(m => m.project_id !== state.currentCadProjectId);
+            state.memos = [...projectMemos, ...otherMemos];
+        } else {
+            state.memos = projectMemos;
+        }
         
         // [추가] 지도에 마커 표시
-        state.memos.forEach(memo => {
+        projectMemos.forEach(memo => {
             // 내 메모는 노란색, 타인 메모(공개)는 파란색 등으로 구분 가능
             const isMine = memo.username === state.currentUser;
             const isHighlighted = memo.id === state.highlightedMemoId; // [추가] 강조 여부 확인
@@ -1375,9 +1384,10 @@ function openMemoPopup(feature) {
     const layer = feature.properties.layer || 'unknown';
     
     // 기존 메모 찾기 (좌표 기준, 약간의 오차 허용)
+    // [수정] 좌표 매칭 허용 오차를 0.0000001에서 0.00005(약 5m)로 완화하여 안정성 확보
     const existingMemo = state.memos.find(m => 
-        Math.abs(m.lon - coords[0]) < 0.0000001 && 
-        Math.abs(m.lat - coords[1]) < 0.0000001
+        Math.abs(m.lon - coords[0]) < 0.00005 && 
+        Math.abs(m.lat - coords[1]) < 0.00005
     );
 
     const content = existingMemo ? existingMemo.content : '';
@@ -1645,13 +1655,13 @@ function openMemoPopup(feature) {
         };
     }
 
-    popupContent.querySelector('#popupMemoSaveBtn').onclick = async () => {
-        const saveBtn = popupContent.querySelector('#popupMemoSaveBtn');
+    const saveBtn = popupContent.querySelector('#popupMemoSaveBtn');
+    if (saveBtn) {
+        saveBtn.onclick = async () => {
         const newContent = popupContent.querySelector('#popupMemoInput').value;
-        const newIsPublic = popupContent.querySelector('#popupMemoPublic').checked; // [추가] 공개 여부 값
-        const newIsSurvey = popupContent.querySelector('#popupMemoSurvey').checked; // [추가] 조사 여부 값
-        const newJobName = popupContent.querySelector('#popupMemoJobSelect').value; // [추가] Job 값
-        // [수정] 기존 이미지 URL을 가져올 때 빈 값이나 잘못된 문자열 정제
+        const newIsPublic = popupContent.querySelector('#popupMemoPublic').checked;
+        const newIsSurvey = popupContent.querySelector('#popupMemoSurvey').checked;
+        const newJobName = popupContent.querySelector('#popupMemoJobSelect').value;
         let existingImages = popupContent.querySelector('#popupMemoUrl').value; 
         
         const files = (window.currentMemoFiles && window.currentMemoFiles.length > 0) ? [...window.currentMemoFiles] : []; // 새 파일들 복사
@@ -1677,6 +1687,7 @@ function openMemoPopup(feature) {
             alert("저장 기능 오류");
         }
     };
+    }
 }
 
 // [추가] 거리 측정 모드 토글
