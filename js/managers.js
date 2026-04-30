@@ -305,11 +305,10 @@ export async function saveMemo(projectId, lon, lat, content, layer, memoId = nul
     // [추가] 조사 메모는 항상 공개 상태로 설정
     if (isSurvey) isPublic = true;
 
-    // UI 즉시 피드백 (백그라운드 작업 시작 알림)
     showAlert("메모 저장 및 업로드를 시작합니다...", "info");
 
-    // [수정] 중복 호출 제거: processMemoSaveBackground를 한 번만 호출하고 그 결과를 await 합니다.
-    console.log("[SaveMemo] Starting background process with files:", files?.length);
+    // [수정] 중복 호출 제거 및 단일 진입점 확보: 한 번만 호출하고 그 결과를 기다립니다.
+    console.log("[SaveMemo] Starting save process. Files:", files?.length);
     return await processMemoSaveBackground({
         projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files
     });
@@ -319,15 +318,14 @@ export async function saveMemo(projectId, lon, lat, content, layer, memoId = nul
 async function processMemoSaveBackground(data) {
     const { projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files } = data;
     const user = state.currentUser || 'anonymous';
-    console.log("[BackgroundSave] Received data:", { memoId, existingImages, newFiles: files?.length });
     
     try {
-        // [수정] 기존 이미지 URL 처리 강화 (null, undefined 문자열 방지)
+        // 1. 기존 이미지 URL 정리 (잘못된 문자열 유입 방지)
         let finalImageUrls = (existingImages && existingImages !== "undefined" && existingImages !== "null") 
             ? existingImages.split(',').filter(u => u.trim() !== '') 
             : [];
 
-        // 1. 새 파일이 있다면 순차적으로 업로드 (Queue 처리)
+        // 2. 새 사진 파일 업로드 (순차 처리)
         if (files && files.length > 0) {
             const total = files.length;
             for (let i = 0; i < total; i++) {
@@ -341,7 +339,7 @@ async function processMemoSaveBackground(data) {
                     });
                     
                     if (res.success && res.url) {
-                        console.log(`[Upload] Success: ${file.name} -> ${res.url}`);
+                        console.log(`[Upload Success] ${file.name} -> ${res.url}`);
                         finalImageUrls.push(res.url);
                     } else {
                         console.error(`이미지 업로드 실패 (${file.name}):`, res.error);
@@ -352,61 +350,56 @@ async function processMemoSaveBackground(data) {
             }
         }
 
-        // 2. DB 저장 (업로드된 URL들을 콤마로 연결)
+        // 3. 최종 이미지 URL 문자열 생성
         const imageUrlString = finalImageUrls.join(',');
-        console.log("[SupabaseSave] Final Image URLs:", imageUrlString);
 
-        // [추가] 숫자형 데이터 검증 (NaN 방지)
-        // JavaScript의 isNaN("")은 false를 반환하므로 trim() 체크 추가
+        // 4. 데이터 타입 검증 (NaN 및 타입 오류 방지)
         const validTmX = (tmX !== null && tmX !== "" && !isNaN(tmX)) ? parseFloat(tmX) : null;
         const validTmY = (tmY !== null && tmY !== "" && !isNaN(tmY)) ? parseFloat(tmY) : null;
+        const validLon = (lon !== null && lon !== "" && !isNaN(lon)) ? parseFloat(lon) : 0;
+        const validLat = (lat !== null && lat !== "" && !isNaN(lat)) ? parseFloat(lat) : 0;
+
+        // 5. Supabase 페이로드 구성
+        const payload = {
+            project_id: projectId,
+            lon: validLon,
+            lat: validLat,
+            content: content,
+            layer: layer,
+            username: user,
+            is_public: isPublic,
+            image_url: imageUrlString,
+            is_survey: isSurvey,
+            job_name: jobName,
+            tm_x: validTmX,
+            tm_y: validTmY,
+            chainage: chainage,
+            updated_at: new Date().toISOString()
+        };
 
         if (memoId) {
-            // UPDATE
-            await callSupabaseDirect(`memos?id=eq.${memoId}`, 'PATCH', {
-                content: content,
-                is_public: isPublic,
-                updated_at: new Date().toISOString(),
-                image_url: imageUrlString,
-                is_survey: isSurvey,
-                job_name: jobName,
-                tm_x: validTmX,
-                tm_y: validTmY,
-                chainage: chainage
-            });
-            showAlert("메모 수정 및 업로드 완료!");
+            // 기존 메모 수정 (UPDATE)
+            await callSupabaseDirect(`memos?id=eq.${memoId}`, 'PATCH', payload);
+            showAlert("메모가 수정되었습니다.");
         } else {
-            // INSERT
-            await callSupabaseDirect('memos', 'POST', {
-                project_id: projectId,
-                lon: lon,
-                lat: lat,
-                content: content,
-                layer: layer,
-                username: user,
-                is_public: isPublic,
-                image_url: imageUrlString,
-                is_survey: isSurvey,
-                job_name: jobName,
-                tm_x: validTmX,
-                tm_y: validTmY,
-                chainage: chainage
-            });
-            showAlert("메모 저장 및 업로드 완료!");
+            // 신규 메모 생성 (INSERT)
+            payload.created_at = new Date().toISOString();
+            await callSupabaseDirect('memos', 'POST', payload);
+            showAlert("새 메모가 저장되었습니다.");
         }
 
-        // 3. UI 갱신
+        // 6. UI 및 상태 갱신
         loadMemoList();
         if (window.loadMapMemos) window.loadMapMemos();
         
-        // [추가] 업로드 완료 후 전역 파일 배열 초기화
+        // 전역 파일 배열 초기화 및 성공 반환
         window.currentMemoFiles = [];
-        return true; // 성공적으로 저장됨
+        return true; 
 
     } catch (e) {
         console.error("백그라운드 저장 실패:", e);
         showAlert("저장 중 오류가 발생했습니다: " + e.message, "error");
-        return false; // 저장 실패
+        return false;
     }
 }
 
