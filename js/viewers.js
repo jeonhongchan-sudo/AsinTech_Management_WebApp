@@ -1396,8 +1396,10 @@ function openMemoPopup(feature) {
             const wgs84 = proj4('EPSG:4326');
             const targetCrs = proj4(state.currentProjectSourceCrs || 'EPSG:5179');
             const tmCoords = proj4(wgs84, targetCrs, [lon, lat]);
-            tmX = tmCoords[0].toFixed(2);
-            tmY = tmCoords[1].toFixed(2);
+            if (tmCoords && !isNaN(tmCoords[0])) {
+                tmX = tmCoords[0].toFixed(3);
+                tmY = tmCoords[1].toFixed(3);
+            }
         } catch (e) { console.warn("TM 변환 실패:", e); }
     }
 
@@ -1454,10 +1456,6 @@ function openMemoPopup(feature) {
     if (props.chainage) {
         infoHtml += `<div style="margin-top:10px; padding-top:8px; border-top:1px solid #eee; font-size:11px; color:#555; line-height:1.4;">`;
         infoHtml += `<div><strong>Chainage:</strong> ${props.chainage}</div>`;
-        infoHtml += `</div>`;
-    } else if (tmX && tmY) { // [추가] TM 좌표가 있을 경우 표시
-        infoHtml += `<div style="margin-top:10px; padding-top:8px; border-top:1px solid #eee; font-size:11px; color:#555; line-height:1.4;">`;
-        infoHtml += `<div><strong>TM X:</strong> ${tmX}, <strong>TM Y:</strong> ${tmY}</div>`;
         infoHtml += `</div>`;
     }
 

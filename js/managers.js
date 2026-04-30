@@ -271,7 +271,8 @@ function renderMemoListUI() {
         // [추가] 사진 아이콘 표시
         let imgIcon = '';
         if (m.image_url) {
-            imgIcon = `<a href="${m.image_url}" target="_blank" style="text-decoration:none; margin-right:5px;" title="사진 보기">📷</a>`;
+            const firstUrl = m.image_url.split(',')[0]; // 여러 장일 경우 첫 번째 사진 연결
+            imgIcon = `<a href="${firstUrl}" target="_blank" style="text-decoration:none; margin-right:5px;" title="사진 보기">📷</a>`;
         }
 
         // [추가] Job 이름 뱃지 표시
@@ -351,6 +352,10 @@ async function processMemoSaveBackground(data) {
         // 2. DB 저장 (업로드된 URL들을 콤마로 연결)
         const imageUrlString = finalImageUrls.join(',');
 
+        // [추가] 숫자형 데이터 검증 (NaN 방지)
+        const validTmX = (tmX && !isNaN(tmX)) ? parseFloat(tmX) : null;
+        const validTmY = (tmY && !isNaN(tmY)) ? parseFloat(tmY) : null;
+
         if (memoId) {
             // UPDATE
             await callSupabaseDirect(`memos?id=eq.${memoId}`, 'PATCH', {
@@ -360,8 +365,8 @@ async function processMemoSaveBackground(data) {
                 image_url: imageUrlString,
                 is_survey: isSurvey,
                 job_name: jobName,
-                tm_x: tmX,
-                tm_y: tmY,
+                tm_x: validTmX,
+                tm_y: validTmY,
                 chainage: chainage
             });
             showAlert("메모 수정 및 업로드 완료!");
@@ -378,8 +383,8 @@ async function processMemoSaveBackground(data) {
                 image_url: imageUrlString,
                 is_survey: isSurvey,
                 job_name: jobName,
-                tm_x: tmX,
-                tm_y: tmY,
+                tm_x: validTmX,
+                tm_y: validTmY,
                 chainage: chainage
             });
             showAlert("메모 저장 및 업로드 완료!");
@@ -398,10 +403,31 @@ async function processMemoSaveBackground(data) {
 export async function deleteMemo(id) {
     if(!confirm("메모를 삭제하시겠습니까?")) return;
     try {
+        // [추가] 삭제 전 메모 정보(이미지 URL) 확인
+        const memo = state.memos.find(m => m.id === id);
+        
+        // 1. 구글 드라이브 파일 삭제 (이미지가 있는 경우)
+        if (memo && memo.image_url) {
+            const urls = memo.image_url.split(',');
+            for (const url of urls) {
+                // URL에서 구글 드라이브 파일 ID 추출 (다양한 형식 대응)
+                const fileIdMatch = url.match(/(?:id=|\/d\/|d\/)([a-zA-Z0-9_-]{25,})/);
+                if (fileIdMatch && fileIdMatch[1]) {
+                    try {
+                        await callApi('deletePhoto', { fileId: fileIdMatch[1] });
+                    } catch (err) {
+                        console.warn("드라이브 파일 삭제 실패 (무시하고 진행):", url);
+                    }
+                }
+            }
+        }
+
+        // 2. DB 레코드 삭제
         await callSupabaseDirect(`memos?id=eq.${id}`, 'DELETE');
-        loadMemoList(); // 목록 갱신
-        // [추가] 지도 상의 메모 마커 갱신
+        
+        loadMemoList();
         if (window.loadMapMemos) window.loadMapMemos();
+        showAlert("메모와 첨부 사진이 삭제되었습니다.");
     } catch (e) { showAlert("삭제 실패", "error"); }
 }
 
