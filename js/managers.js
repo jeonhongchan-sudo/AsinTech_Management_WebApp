@@ -312,6 +312,10 @@ export async function saveMemo(projectId, lon, lat, content, layer, memoId = nul
     processMemoSaveBackground({
         projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files
     });
+    // [수정] processMemoSaveBackground의 성공 여부를 반환하도록 변경
+    return await processMemoSaveBackground({
+        projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files
+    });
 }
 
 // [추가] 백그라운드 메모 저장 및 업로드 처리 함수
@@ -353,8 +357,9 @@ async function processMemoSaveBackground(data) {
         const imageUrlString = finalImageUrls.join(',');
 
         // [추가] 숫자형 데이터 검증 (NaN 방지)
-        const validTmX = (tmX && !isNaN(tmX)) ? parseFloat(tmX) : null;
-        const validTmY = (tmY && !isNaN(tmY)) ? parseFloat(tmY) : null;
+        // JavaScript의 isNaN("")은 false를 반환하므로 trim() 체크 추가
+        const validTmX = (tmX !== null && tmX !== "" && !isNaN(tmX)) ? parseFloat(tmX) : null;
+        const validTmY = (tmY !== null && tmY !== "" && !isNaN(tmY)) ? parseFloat(tmY) : null;
 
         if (memoId) {
             // UPDATE
@@ -393,10 +398,15 @@ async function processMemoSaveBackground(data) {
         // 3. UI 갱신
         loadMemoList();
         if (window.loadMapMemos) window.loadMapMemos();
+        
+        // [추가] 업로드 완료 후 전역 파일 배열 초기화
+        window.currentMemoFiles = [];
+        return true; // 성공적으로 저장됨
 
     } catch (e) {
         console.error("백그라운드 저장 실패:", e);
         showAlert("저장 중 오류가 발생했습니다: " + e.message, "error");
+        return false; // 저장 실패
     }
 }
 

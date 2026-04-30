@@ -1601,6 +1601,8 @@ function openMemoPopup(feature) {
     popup.on('close', () => {
         if (currentPopup === popup) {
             currentPopup = null;
+            // [추가] 팝업 닫힐 때 선택된 파일들 초기화
+            window.currentMemoFiles = [];
         }
     });
 
@@ -1649,15 +1651,19 @@ function openMemoPopup(feature) {
         const newIsSurvey = popupContent.querySelector('#popupMemoSurvey').checked; // [추가] 조사 여부 값
         const newJobName = popupContent.querySelector('#popupMemoJobSelect').value; // [추가] Job 값
         const existingImages = popupContent.querySelector('#popupMemoUrl').value; // 기존 이미지 URL들
-        const files = window.currentMemoFiles || []; // 새 파일들
+        const files = (window.currentMemoFiles && window.currentMemoFiles.length > 0) ? [...window.currentMemoFiles] : []; // 새 파일들 복사
         
         if (!newContent.trim()) return alert("내용을 입력하세요.");
         
         // managers.js의 saveMemo 호출 (window 객체 통해 접근하거나 직접 구현)
         if (window.saveMemo) {
             // [수정] memoId를 함께 전달하여 수정/신규 구분
-            await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, existingImages, newIsSurvey, newJobName, tmX, tmY, chainage, files);
-            popup.remove();
+            const saveSuccess = await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, existingImages, newIsSurvey, newJobName, tmX, tmY, chainage, files);
+            
+            if (saveSuccess) { // 저장 성공 시에만 팝업 닫기
+                window.currentMemoFiles = []; // 전달 후 즉시 초기화
+                popup.remove();
+            }
         } else {
             alert("저장 기능 오류");
         }
