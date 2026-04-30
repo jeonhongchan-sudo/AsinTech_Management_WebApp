@@ -309,10 +309,7 @@ export async function saveMemo(projectId, lon, lat, content, layer, memoId = nul
     showAlert("메모 저장 및 업로드를 시작합니다...", "info");
 
     // 백그라운드 작업 실행 (await 하지 않음)
-    processMemoSaveBackground({
-        projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files
-    });
-    // [수정] processMemoSaveBackground의 성공 여부를 반환하도록 변경
+    // [수정] processMemoSaveBackground를 한 번만 호출하고 await
     return await processMemoSaveBackground({
         projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files
     });
