@@ -1517,11 +1517,11 @@ function openMemoPopup(feature) {
         <input type="file" id="popupMemoFile" accept="image/*" multiple style="display:none" onchange="window.handleMemoImageSelect(this, 'popupMemoPreview')">
         <input type="file" id="popupMemoCamera" accept="image/*" capture="environment" multiple style="display:none" onchange="window.handleMemoImageSelect(this, 'popupMemoPreview')">
         
-        <div id="popupMemoPreview" style="margin-bottom:5px; min-height:10px; max-height:150px; overflow-y:auto;">
+        <div id="popupMemoPreview" class="memo-preview-container" style="margin-bottom:5px; min-height:10px; max-height:150px; overflow-y:auto;">
             ${existingImgHtml}
             <!-- 새 이미지는 여기에 추가됨 -->
         </div>
-        <input type="hidden" id="popupMemoUrl" value="${existingImgUrls.join(',')}">
+        <input type="hidden" id="popupMemoUrl" value="${existingImgUrls.filter(u => u.trim() !== '').join(',')}">
         <label style="font-size:12px; display:flex; align-items:center; margin-bottom:5px;">
             <input type="checkbox" id="popupMemoSurvey" ${isSurvey ? 'checked' : ''}> 조사 메모
         </label>
@@ -1531,7 +1531,7 @@ function openMemoPopup(feature) {
         <label style="font-size:12px; display:flex; align-items:center; margin-bottom:5px;">
             <input type="checkbox" id="popupMemoPublic" ${publicAttr}> 공개 메모 (다른 사용자와 공유)
         </label>
-        ${actionButtonsHtml}
+        <div id="popupMemoActionButtons">${actionButtonsHtml}</div>
         ${infoHtml}
         ${mapLinksHtml}
     `;
@@ -1646,23 +1646,32 @@ function openMemoPopup(feature) {
     }
 
     popupContent.querySelector('#popupMemoSaveBtn').onclick = async () => {
+        const saveBtn = popupContent.querySelector('#popupMemoSaveBtn');
         const newContent = popupContent.querySelector('#popupMemoInput').value;
         const newIsPublic = popupContent.querySelector('#popupMemoPublic').checked; // [추가] 공개 여부 값
         const newIsSurvey = popupContent.querySelector('#popupMemoSurvey').checked; // [추가] 조사 여부 값
         const newJobName = popupContent.querySelector('#popupMemoJobSelect').value; // [추가] Job 값
-        const existingImages = popupContent.querySelector('#popupMemoUrl').value; // 기존 이미지 URL들
+        // [수정] 기존 이미지 URL을 가져올 때 빈 값이나 잘못된 문자열 정제
+        let existingImages = popupContent.querySelector('#popupMemoUrl').value; 
+        
         const files = (window.currentMemoFiles && window.currentMemoFiles.length > 0) ? [...window.currentMemoFiles] : []; // 새 파일들 복사
         
         if (!newContent.trim()) return alert("내용을 입력하세요.");
         
         // managers.js의 saveMemo 호출 (window 객체 통해 접근하거나 직접 구현)
         if (window.saveMemo) {
+            saveBtn.disabled = true;
+            saveBtn.innerText = "저장 중...";
+
             // [수정] memoId를 함께 전달하여 수정/신규 구분
             const saveSuccess = await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, existingImages, newIsSurvey, newJobName, tmX, tmY, chainage, files);
             
             if (saveSuccess) { // 저장 성공 시에만 팝업 닫기
                 window.currentMemoFiles = []; // 전달 후 즉시 초기화
                 popup.remove();
+            } else {
+                saveBtn.disabled = false;
+                saveBtn.innerText = memoId ? "수정" : "저장";
             }
         } else {
             alert("저장 기능 오류");

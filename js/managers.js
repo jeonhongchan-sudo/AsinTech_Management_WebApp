@@ -270,11 +270,11 @@ function renderMemoListUI() {
 
         // [추가] 사진 아이콘 표시
         let imgIcon = '';
-        if (m.image_url) {
-            const firstUrl = m.image_url.split(',')[0]; // 여러 장일 경우 첫 번째 사진 연결
+        // [수정] m.image_url이 존재하기만 하면 아이콘을 표시하도록 조건 완화 (예전 코드 방식 참고)
+        if (m.image_url && m.image_url !== "null" && m.image_url !== "undefined" && m.image_url.trim() !== "") { 
+            const firstUrl = String(m.image_url).split(',')[0].trim();
             imgIcon = `<a href="${firstUrl}" target="_blank" style="text-decoration:none; margin-right:5px;" title="사진 보기">📷</a>`;
         }
-
         // [추가] Job 이름 뱃지 표시
         let jobBadge = '';
         if (m.is_survey && m.job_name) {
@@ -307,11 +307,11 @@ export async function saveMemo(projectId, lon, lat, content, layer, memoId = nul
 
     showAlert("메모 저장 및 업로드를 시작합니다...", "info");
 
-    // [수정] 중복 호출 제거 및 단일 진입점 확보: 한 번만 호출하고 그 결과를 기다립니다.
-    console.log("[SaveMemo] Starting save process. Files:", files?.length);
-    return await processMemoSaveBackground({
+    // [수정] 백그라운드 처리 결과를 명확히 반환하여 viewers.js에서 팝업이 닫히도록 제어
+    const saveResult = await processMemoSaveBackground({
         projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files
     });
+    return saveResult;
 }
 
 // [추가] 백그라운드 메모 저장 및 업로드 처리 함수
@@ -322,7 +322,7 @@ async function processMemoSaveBackground(data) {
     try {
         // 1. 기존 이미지 URL 정리 (잘못된 문자열 유입 방지)
         let finalImageUrls = (existingImages && existingImages !== "undefined" && existingImages !== "null") 
-            ? existingImages.split(',').filter(u => u.trim() !== '') 
+            ? existingImages.split(',').map(u => u.trim()).filter(u => u !== "") 
             : [];
 
         // 2. 새 사진 파일 업로드 (순차 처리)
@@ -331,15 +331,16 @@ async function processMemoSaveBackground(data) {
             for (let i = 0; i < total; i++) {
                 const file = files[i];
                 try {
+                    // resizeImage는 core.js 혹은 managers.js에 정의된 유틸리티
                     const base64 = await resizeImage(file);
                     const res = await callApi('uploadToDrive', { 
                         fileName: file.name, 
                         fileData: base64, 
-                        mimeType: file.type 
+                        mimeType: "image/jpeg" 
                     });
                     
                     if (res.success && res.url) {
-                        console.log(`[Upload Success] ${file.name} -> ${res.url}`);
+                        // [수정] 드라이브에 업로드된 URL을 배열에 확실히 추가
                         finalImageUrls.push(res.url);
                     } else {
                         console.error(`이미지 업로드 실패 (${file.name}):`, res.error);
@@ -356,6 +357,7 @@ async function processMemoSaveBackground(data) {
         // 4. 데이터 타입 검증 (NaN 및 타입 오류 방지)
         const validTmX = (tmX !== null && tmX !== "" && !isNaN(tmX)) ? parseFloat(tmX) : null;
         const validTmY = (tmY !== null && tmY !== "" && !isNaN(tmY)) ? parseFloat(tmY) : null;
+        // [수정] lon, lat이 0으로 저장되어 리스트에서 '위치' 버튼이 안나오는 문제 방지
         const validLon = (lon !== null && lon !== "" && !isNaN(lon)) ? parseFloat(lon) : 0;
         const validLat = (lat !== null && lat !== "" && !isNaN(lat)) ? parseFloat(lat) : 0;
 
@@ -590,10 +592,30 @@ export function handleMemoImageSelect(input, previewId) {
 
 // [추가] 선택된 사진들 미리보기 렌더링
 function renderMemoImages(previewId) {
-    const preview = document.getElementById(previewId);
-    if (!preview) return;
+    // [수정] 팝업이 동적으로 생성되므로 document.getElementById로 못 찾는 경우를 위해 전체 팝업 영역 검색
+    let preview = document.getElementById(previewId);
+    if (!preview) {
+        const popups = document.querySelectorAll('.maplibregl-popup');
+        for (let p of popups) {
+            const target = p.querySelector(`#${previewId}`);
+            if (target) { preview = target; break; }
+        }
+    }
+    
+    if (!preview) {
+        const popups = document.querySelectorAll('.maplibregl-popup-content'); // MapLibre 특정 클래스 재검색
+        for (let p of popups) {
+            const found = p.querySelector(`#${previewId}`);
+            if (found) { preview = found; break; }
+        }
+    }
 
-    // 기존 내용 중 "새로 추가된 파일" 영역만 갱신하거나 전체 갱신
+    if (!preview) {
+        console.warn("미리보기 컨테이너를 찾을 수 없습니다:", previewId);
+        return;
+    }
+
+    // 기존 내용 중 "새로 추가된 파일" 영역만 갱신
     // 여기서는 기존 URL 이미지는 건드리지 않고, 새 파일 영역만 다시 그림
     // 하지만 편의상 preview 컨테이너 안에 "기존 이미지"와 "새 이미지"를 구분해서 넣는 게 좋음.
     // 뷰어 로직에서 preview 영역을 초기화할 때 기존 이미지를 넣어주므로, 여기서는 append 하거나 별도 영역 관리 필요.
@@ -614,18 +636,15 @@ function renderMemoImages(previewId) {
     
     if (window.currentMemoFiles) {
         window.currentMemoFiles.forEach((file, index) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const div = document.createElement('div');
-                div.style.position = 'relative';
-                div.style.display = 'inline-block';
-                div.innerHTML = `
-                    <img src="${e.target.result}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd;">
-                    <button onclick="window.removeMemoImage(${index}, '${previewId}')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:18px; height:18px; font-size:12px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">&times;</button>
-                `;
-                newContainer.appendChild(div);
-            };
-            reader.readAsDataURL(file);
+            // [개선] FileReader 대신 ObjectURL을 사용하여 즉각적인 미리보기 제공 (managers.txt 방식보다 빠름)
+            const url = URL.createObjectURL(file);
+            const div = document.createElement('div');
+            div.style.cssText = 'position:relative; display:inline-block;';
+            div.innerHTML = `
+                <img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd;">
+                <button onclick="window.removeMemoImage(${index}, '${previewId}')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:18px; height:18px; font-size:12px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">&times;</button>
+            `;
+            newContainer.appendChild(div);
         });
     }
 }
