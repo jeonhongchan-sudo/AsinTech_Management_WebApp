@@ -114,7 +114,7 @@
         <div class="pm-header">
           <div class="pm-title">
             <button class="btn btn-secondary" onclick="closePhotoManager()">← 뒤로</button>
-            <h2 id="pmProjectName">프로젝트 이름</h2>
+            <h2 id="pmProjectName" style="margin-right: 10px;">프로젝트 이름</h2>
           </div>
           <div class="pm-actions">
             <div class="view-toggle-group">
@@ -122,6 +122,7 @@
                 <button class="btn btn-outline" id="btnViewList" onclick="toggleViewMode('list')" title="리스트 보기">☰</button>
             </div>
           </div>
+          <button id="pmSyncBtn" class="btn btn-warning" style="margin-left: 10px; padding: 2px 8px; font-size: 11px; vertical-align: middle;" onclick="window.runFullSync()">🔄 전체 저장소 동기화</button>
         </div>
         <div id="pmPhotoContainer" class="photo-container grid-view"></div>
       </div>
@@ -163,11 +164,6 @@
                 <button class="btn btn-warning" onclick="window.openJobManager()" title="Job 관리" style="padding:6px 10px; font-size:15px;">👷 <span class="btn-label">Job 관리</span></button>
                 <button class="btn btn-outline" id="btnToggleSurveyFilter" onclick="window.toggleSurveyFilterMode()" title="조사 메모만 보기" style="padding:6px 10px; font-size:13px;">📋 <span class="btn-label">필터</span></button>
                 <button class="btn btn-success" onclick="window.downloadSurveyMemosCSV()" title="엑셀 다운로드" style="padding:6px 10px; font-size:13px;">💾 <span class="btn-label">엑셀 저장</span></button>
-                <div id="archiveSearchArea" style="display:none;">
-                    <input type="text" id="archiveSearchInput" placeholder="아카이브 검색..." style="padding:6px; font-size:13px; border:1px solid #ddd; border-radius:4px; width:120px;" onkeydown="if(event.key==='Enter') window.searchArchivedMemos()">
-                    <button class="btn btn-info" onclick="window.searchArchivedMemos()" style="padding:6px 10px; font-size:13px;">🔍</button>
-                </div>
-                <button class="btn btn-secondary" id="btnToggleArchive" onclick="window.toggleMemoArchiveMode()" title="1년 지난 메모 조회" style="padding:6px 10px; font-size:13px;">🗄️</button>
             </div>
         </div>
         <div id="memoListContainer">

@@ -1399,19 +1399,6 @@ function openMemoPopup(feature) {
     let tmY = existingMemo ? existingMemo.tm_y : (feature.properties.tm_y || '');
     const chainage = existingMemo ? existingMemo.chainage : (feature.properties.chainage || ''); // [추가] Chainage
     const existingImgUrls = existingMemo && existingMemo.image_url ? existingMemo.image_url.split(',') : [];
-    
-    // [수정] TM 좌표가 없는 경우(빈 공간 등) WGS84 -> 프로젝트 원본 좌표계로 변환
-    if ((!tmX || !tmY) && typeof proj4 !== 'undefined') {
-        try {
-            const wgs84 = proj4('EPSG:4326');
-            const targetCrs = proj4(state.currentProjectSourceCrs || 'EPSG:5179');
-            const tmCoords = proj4(wgs84, targetCrs, [lon, lat]);
-            if (tmCoords && !isNaN(tmCoords[0])) {
-                tmX = tmCoords[0].toFixed(3);
-                tmY = tmCoords[1].toFixed(3);
-            }
-        } catch (e) { console.warn("TM 변환 실패:", e); }
-    }
 
     // -----------------------------------------------------------
     // [추가] 자동 사진 매칭 로직 (photo_linker_tool.py 참조)

@@ -9,8 +9,6 @@ const CONFIG = {
   CACHE_KEY_PROJECTS: 'CACHE_PROJECTS_LIST', 
   CACHE_DURATION: 21600,
   MEMO_PHOTO_FOLDER_ID: '1hzpvsiBXzcudhbwVKk670eSxNuomHSQt', // [추가] 메모 사진 저장 폴더
-  MEMO_ARCHIVE_SHEET_ID: '1h5PRE5Fea0HRnjshxrPhVNP5gyKPToXIMzGxFVMdzJ8', // [추가] 메모 아카이브 시트
-  MEMO_ARCHIVE_SHEET_NAME: 'Archive_Memos' // [추가] 아카이브 시트 탭 이름
 };
 
 // ==========================================
@@ -20,7 +18,7 @@ function doGet(e) {
   if (e && e.parameter && e.parameter.action) {
     return handleApiRequest(e);
   }
-  return ContentService.createTextOutput("Asin Tech API Server is running. (v2.6)");
+  return ContentService.createTextOutput("Asin Tech API Server is running. (v4.1-Drive-Final)");
 }
 
 function doPost(e) {
@@ -46,6 +44,7 @@ function handleApiRequest(e) {
       case 'deletePhoto': response = deletePhoto(e.parameter.fileId); break;
       case 'renamePhoto': response = renamePhoto(e.parameter.fileId, e.parameter.newFileName); break;
       case 'synchronizePhotos': response = synchronizePhotos(e.parameter.projectId, e.parameter.continuationToken); break;
+      case 'cleanupAllDriveOrphans': response = cleanupAllDriveOrphans(e.parameter.continuationToken); break;
       case 'synchronizeAll': response = synchronizeAllProjects(); break;
       case 'checkForUpdates': response = checkForUpdates(e.parameter.lastSyncTime); break;
       case 'exportToCSV': response = exportToCSV(e.parameter.projectId); break;
@@ -72,14 +71,12 @@ function handleApiRequest(e) {
 
       // [설정]
       case 'getSupabaseConfig': response = getSupabaseConfig(); break;
-      case 'getR2Config': response = getR2Config(); break;
 
       // [GitHub Action]
       case 'triggerGitHubAction': response = triggerGitHubAction(e.parameter.projectId); break;
 
       // [메모 관리]
       case 'uploadToDrive': response = uploadToDrive(e.parameter.fileName, e.parameter.fileData, e.parameter.mimeType); break;
-      case 'searchArchivedMemos': response = searchArchivedMemos(e.parameter.keyword, e.parameter.username); break;
 
       default: response = { success: false, error: 'Unknown action' };
     }
@@ -242,7 +239,7 @@ function uploadPhoto(projectId, fileData, fileName, skipDb) {
     const now = new Date();
 
     if (!shouldSkipDb) {
-      callSupabase('photos', 'post', { project_folder_id: projectId, file_id: fileId, file_name: fileName, file_url: fileUrl, created_at: now.toISOString() });
+      callSupabase('photos', 'post', { cad_project_id: projectId, file_id: fileId, file_name: fileName, file_url: fileUrl, created_at: now.toISOString() });
     }
     return { success: true, message: '업로드 성공', photo: { fileId: fileId, fileName: fileName, url: fileUrl, uploadDate: formatDate(now) } };
   } catch (error) { return { success: false, error: '업로드 오류: ' + error.toString() }; }
@@ -250,7 +247,7 @@ function uploadPhoto(projectId, fileData, fileName, skipDb) {
 
 function getPhotos(projectId) {
   try {
-    const data = callSupabase(`photos?project_folder_id=eq.${projectId}&select=*&order=created_at.desc`, 'get');
+    const data = callSupabase(`photos?cad_project_id=eq.${projectId}&select=*&order=created_at.desc`, 'get');
     if (!Array.isArray(data)) return { success: true, photos: [] };
     const photos = data.map(row => ({ fileName: row.file_name, url: row.file_url, fileId: row.file_id, uploadDate: row.created_at }));
     return { success: true, photos: photos };
@@ -278,7 +275,7 @@ function synchronizePhotos(projectId, continuationToken) {
     const startTime = new Date().getTime();
     const TIME_LIMIT = 210 * 1000;
     
-    const dbPhotos = callSupabase(`photos?project_folder_id=eq.${projectId}&select=file_id,file_name`, 'get');
+    const dbPhotos = callSupabase(`photos?cad_project_id=eq.${projectId}&select=file_id,file_name`, 'get');
     const dbMap = new Map();
     if (Array.isArray(dbPhotos)) dbPhotos.forEach(p => dbMap.set(p.file_id, p.file_name));
 
@@ -299,7 +296,7 @@ function synchronizePhotos(projectId, continuationToken) {
       if (dbMap.has(fileId)) {
         if (dbMap.get(fileId) !== fileName) callSupabase(`photos?file_id=eq.${fileId}`, 'patch', { file_name: fileName });
       } else {
-        callSupabase('photos', 'post', { project_folder_id: projectId, file_id: fileId, file_name: fileName, file_url: `https://drive.google.com/file/d/${fileId}/view?usp=sharing`, created_at: file.getDateCreated().toISOString() });
+        callSupabase('photos', 'post', { cad_project_id: projectId, file_id: fileId, file_name: fileName, file_url: `https://drive.google.com/file/d/${fileId}/view?usp=sharing`, created_at: file.getDateCreated().toISOString() });
         addedCount++;
       }
     }
@@ -307,9 +304,78 @@ function synchronizePhotos(projectId, continuationToken) {
   } catch (error) { return { success: false, error: '동기화 오류: ' + error.toString() }; }
 }
 
+// [수정] 전체 고아 파일 정리 (프로젝트 ID 무관하게 DB 전체와 비교)
+function cleanupAllDriveOrphans(continuationToken) {
+  const startTime = new Date().getTime();
+  const TIME_LIMIT = 200 * 1000; 
+  
+  try {
+    const validIds = new Set();
+    
+    // 1. 모든 테이블에서 유효한 file_id 수집 (한 번에 전체 조회)
+    const photos = callSupabase('photos?select=file_id', 'get');
+    if (Array.isArray(photos)) photos.forEach(p => { if(p.file_id) validIds.add(p.file_id); });
+    
+    const memos = callSupabase('memos?image_url=not.is.null&select=image_url', 'get');
+    if (Array.isArray(memos)) {
+      memos.forEach(m => {
+        String(m.image_url).split(',').forEach(u => {
+          const id = extractFileIdFromUrl(u.trim()); if(id) validIds.add(id);
+        });
+      });
+    }
+
+    // 2. 관리 대상 폴더 목록 (프로젝트 상위 폴더 + 메모 전용 폴더)
+    const parentFolder = DriveApp.getFolderById(CONFIG.PARENT_FOLDER_ID);
+    const memoFolder = DriveApp.getFolderById(CONFIG.MEMO_PHOTO_FOLDER_ID);
+    const validParentIds = new Set([CONFIG.PARENT_FOLDER_ID, CONFIG.MEMO_PHOTO_FOLDER_ID]);
+    
+    // 프로젝트 하위 폴더 ID들도 유효 부모 목록에 추가
+    const projectFolders = parentFolder.getFolders();
+    while (projectFolders.hasNext()) {
+      validParentIds.add(projectFolders.next().getId());
+    }
+    
+    // 3. 모든 파일 순회 (ContinuationToken을 통한 이어달리기)
+    let iterator;
+    if (continuationToken) {
+      iterator = DriveApp.continueFileIterator(continuationToken);
+    } else {
+      // [최적화] 전체 드라이브를 뒤지는 대신, 관리 대상 폴더 내의 이미지 파일만 검색하도록 쿼리 생성
+      const folderQueries = Array.from(validParentIds).map(id => `'${id}' in parents`).join(' or ');
+      iterator = DriveApp.searchFiles(`(${folderQueries}) and mimeType contains 'image/'`);
+    }
+
+    let deletedCount = 0;
+    while (iterator.hasNext()) {
+      if (new Date().getTime() - startTime > TIME_LIMIT) {
+        return { 
+          success: true, 
+          finished: false, 
+          continuationToken: iterator.getContinuationToken(), 
+          deletedCount: deletedCount
+        };
+      }
+      
+      const file = iterator.next();
+      const fid = file.getId();
+      
+      // DB에 없는 ID라면 삭제 (휴지통)
+      if (!validIds.has(fid)) {
+        file.setTrashed(true);
+        deletedCount++;
+      }
+    }
+    
+    return { success: true, finished: true, deletedCount: deletedCount };
+  } catch (error) {
+    return { success: false, error: '정리 오류: ' + error.toString() };
+  }
+}
+
 function exportToCSV(projectId) {
   try {
-    const data = callSupabase(`photos?project_folder_id=eq.${projectId}&select=file_name,file_url`, 'get');
+    const data = callSupabase(`photos?cad_project_id=eq.${projectId}&select=file_name,file_url`, 'get');
     let csv = '\uFEFFphoto_filename,photo_url\n';
     if (Array.isArray(data)) data.forEach(row => { csv += `"${row.file_name}","${row.file_url}"\n`; });
     return { success: true, csv: csv, fileName: `photos.csv` };
@@ -489,18 +555,6 @@ function getSupabaseConfig() {
     const adminUser = props.getProperty('AD_USER');
     if (!url || !key) return { success: false, error: 'Supabase 설정이 스크립트 속성에 없습니다.' };
     return { success: true, url: url, key: key, vworldKey: vworldKey, adminUser: adminUser };
-  } catch (e) { return { success: false, error: e.toString() }; }
-}
-
-function getR2Config() {
-  try {
-    const props = PropertiesService.getScriptProperties();
-    const endpoint = props.getProperty('R2_Endpoints');
-    const accessKey = props.getProperty('R2_Access_Key_ID');
-    const secretKey = props.getProperty('R2_Secret_Access_Key');
-    const bucket = props.getProperty('R2_BUCKET_NAME');
-    if (!endpoint || !accessKey || !secretKey || !bucket) return { success: false, error: 'R2 설정이 스크립트 속성에 없습니다.' };
-    return { success: true, R2_Endpoints: endpoint, R2_Access_Key_ID: accessKey, R2_Secret_Access_Key: secretKey, R2_BUCKET_NAME: bucket };
   } catch (e) { return { success: false, error: e.toString() }; }
 }
 
@@ -779,68 +833,4 @@ function extractFileIdFromUrl(url) {
   if (!url) return null;
   const match = url.match(/(?:id=|\/d\/|d\/)([a-zA-Z0-9_-]{25,})/);
   return match ? match[1] : null;
-}
-
-function installArchiveTrigger() {
-  const handlerName = 'archiveOldMemos';
-  const triggers = ScriptApp.getProjectTriggers();
-  for (const t of triggers) { if (t.getHandlerFunction() === handlerName) ScriptApp.deleteTrigger(t); }
-  ScriptApp.newTrigger(handlerName).timeBased().everyDays(1).atHour(1).create();
-  Logger.log(handlerName + " 트리거가 설치되었습니다.");
-}
-
-// [수정] 아카이브 메모 검색 (필터링 강화 및 새 컬럼 조회)
-// 1. 1년 지난 메모만 검색 (최신 메모는 Supabase에서 조회하므로 제외)
-// 2. 공개(is_public=true) 메모 OR 본인 작성 메모만 검색
-function searchArchivedMemos(keyword, requestUser) {
-  try {
-    const ss = SpreadsheetApp.openById(CONFIG.MEMO_ARCHIVE_SHEET_ID);
-    const sheet = ss.getSheetByName(CONFIG.MEMO_ARCHIVE_SHEET_NAME);
-    if (!sheet) return { success: true, memos: [] };
-
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return { success: true, memos: [] };
-
-    const memos = [];
-    const term = keyword ? keyword.toLowerCase() : "";
-    
-    // 1년 기준일 설정
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-
-    // 1행(헤더) 제외하고 순회
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      
-      // [필터 1] 1년 지난 메모인지 확인 (E열, index 4)
-      const createdAt = new Date(row[4]);
-      if (createdAt > oneYearAgo) continue; // 1년 안된건 건너뜀 (Supabase에 있음)
-
-      // [필터 2] 권한 확인: 공개(is_public=true) 이거나, 작성자가 본인인 경우
-      const isPublic = String(row[6]).toLowerCase() === 'true';
-      const author = String(row[3]); // username
-      
-      // 비공개이면서 작성자가 요청자와 다르면 숨김 (즉, 공개거나 내 메모면 통과)
-      if (!isPublic && author !== requestUser) continue;
-
-      const content = String(row[2]).toLowerCase();
-      const username = String(row[3]).toLowerCase();
-      const project = String(row[1]).toLowerCase();
-      
-      if (!term || content.includes(term) || username.includes(term) || project.includes(term)) {
-        // [수정] 새 컬럼 데이터 포함하여 반환
-        memos.push({
-          id: row[0], project_id: row[1], content: row[2], username: row[3],
-          created_at: row[4], updated_at: row[5], is_public: row[6],
-          image_url: row[7], lon: row[8], lat: row[9],
-          is_survey: row[10], job_name: row[11], tm_x: row[12], tm_y: row[13], chainage: row[14]
-        });
-      }
-    }
-    
-    memos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    return { success: true, memos: memos };
-  } catch (e) {
-    return { success: false, error: e.toString() };
-  }
 }

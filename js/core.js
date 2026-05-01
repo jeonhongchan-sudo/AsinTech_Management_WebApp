@@ -1,6 +1,6 @@
 // e:\Program\SelfProgram\아신테크\js\core.js
 
-export const API_URL = "https://script.google.com/macros/s/AKfycbwnV8CS2X_MYs5ZjOeTg7rBexOtjFeumTIcRJ4CWy-qPM4yV-G2pp_jcpyZoESI8cHq/exec";
+export const API_URL = "https://script.google.com/macros/s/AKfycbyBjiUmdE_ISu1Uk-3zwb75owaRWNIyRZu-RgAqmvxvvAho8RsGotvqF4PnHZ34_1r6/exec";
 export const R2_BASE_URL = "https://pub-64820218d8b845c7860fb4ea3b6d7ec3.r2.dev"; 
 
 // 전역 상태 관리
@@ -18,7 +18,6 @@ export const state = {
     adminUser: null,        // [추가] 관리자 ID (API로 수신)
     currentCadProjectId: null, // [추가] 현재 Map Viewer의 프로젝트 ID
     memos: [],              // [추가] 현재 프로젝트의 메모 목록
-    isMemoArchiveMode: false, // [추가] 메모 아카이브 조회 모드 여부
     isSurveyFilterMode: false, // [추가] 조사 메모 필터 모드 여부
     highlightedMemoId: null,   // [추가] 지도에서 강조할 메모 ID
     selectedJobFilter: null,   // [추가] 선택된 Job 필터 (null이면 전체 조사 메모)
@@ -26,6 +25,7 @@ export const state = {
     jobs: [],               // [추가] Job 리스트 (DB 동기화)
     uploadQueue: [],        // [추가] 백그라운드 업로드 큐
     isUploading: false,     // [추가] 업로드 진행 중 여부
+    isSyncing: false,       // [추가] 동기화 진행 중 여부
     isDistanceMode: false,  // [추가] 거리 측정 모드 활성화 여부
     distanceStartPoint: null, // [추가] 거리 측정 시작점 {lon, lat}
     distanceMarkers: []     // [추가] 거리 측정용 마커/팝업 관리 배열
