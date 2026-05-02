@@ -655,18 +655,39 @@ export async function openGeneralMemoModal() {
     
     content.value = '';
     if(publicCheck) publicCheck.checked = true; // 기본값: 공개
-    if(surveyCheck) surveyCheck.checked = false; // 기본값: 미체크
-    if(jobContainer) jobContainer.style.display = 'none'; // 기본값: 숨김
+    
+    // [수정] [메모관리] 탭에서는 조사 메모 기능이 의미가 없으므로 UI 숨김 처리
+    if(surveyCheck) {
+        surveyCheck.checked = false;
+        const surveyLabel = surveyCheck.closest('label');
+        if (surveyLabel) surveyLabel.style.display = 'none';
+    }
+    if(jobContainer) jobContainer.style.display = 'none';
+
     if(preview) preview.innerHTML = '';
     // if(urlInput) urlInput.value = '';
     
     // [추가] 전역 파일 배열 초기화
     window.currentMemoFiles = [];
 
-    // [수정] 일반 메모(공지/지침) 작성 시에만 문서 파일 첨부 허용
+    // [수정] 일반 메모(공지/지침) 작성 시 파일 첨부 허용 및 명칭 변경 지원
     setTimeout(() => {
         const fileInput = document.getElementById('memoFileSelect'); // 메모관리 탭의 전용 input ID
         if (fileInput) fileInput.setAttribute('accept', '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/*');
+
+        // [추가] UI 텍스트를 '사진'에서 '파일'로 변경 (HTML 직접 수정 대신 런타임 처리)
+        const modal = document.getElementById('memoModal');
+        if (modal) {
+            const buttons = modal.querySelectorAll('button');
+            buttons.forEach(btn => {
+                if (btn.innerText.includes('사진첨부')) btn.innerText = btn.innerText.replace('사진첨부', '파일첨부');
+                if (btn.title === '사진 선택') btn.title = '파일 선택';
+            });
+            const labels = modal.querySelectorAll('label');
+            labels.forEach(lbl => {
+                if (lbl.innerText.includes('사진')) lbl.innerText = lbl.innerText.replace('사진', '파일');
+            });
+        }
     }, 100);
 
     select.innerHTML = '<option>로딩 중...</option>';
@@ -692,19 +713,6 @@ export async function openGeneralMemoModal() {
         jobs.forEach(j => {
             jobSelect.innerHTML += `<option value="${j}">${j}</option>`;
         });
-
-        // [추가] 조사 메모 체크 시 Job 선택 표시
-        surveyCheck.onchange = (e) => {
-            const isChecked = e.target.checked;
-            jobContainer.style.display = isChecked ? 'block' : 'none';
-            // [추가] 조사 메모는 항상 공개
-            if (isChecked) {
-                publicCheck.checked = true;
-                publicCheck.disabled = true;
-            } else {
-                publicCheck.disabled = false;
-            }
-        };
 
     } catch (e) {
         select.innerHTML = '<option>로드 실패</option>';
@@ -803,9 +811,11 @@ export async function saveGeneralMemo() {
     const projectId = document.getElementById('memoProjectSelect').value;
     const content = document.getElementById('memoContentInput').value;
     const isPublic = document.getElementById('memoPublicCheck').checked; // [추가] 공개 여부 확인
-    const isSurvey = document.getElementById('memoSurveyCheck').checked; // [추가] 조사 메모 여부 확인
-    const jobName = document.getElementById('memoJobSelect').value; // [추가] Job 값
-    // const imageUrl = document.getElementById('memoImageUrl').value; // [수정] 사용 안 함
+    
+    // [수정] [메모관리] 탭에서는 조사 기능 제거
+    const isSurvey = false;
+    const jobName = null;
+
     
     // [추가] 파일 목록 가져오기
     const files = window.currentMemoFiles || [];

@@ -41,7 +41,7 @@
     /* 캐드 뷰어 스타일 */
     #cad-map { width: 100%; height: calc(100vh - 180px); border-radius: 8px; border: 1px solid #ddd; margin-top: 10px; }
     .cad-controls { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
-    .cad-controls select { padding: 8px; border-radius: 4px; border: 1px solid #ccc; min-width: 200px; }
+    .cad-controls select { padding: 8px; border-radius: 4px; border: 1px solid #ccc; min-width: 150px; max-width: 220px; }
     .cad-legend { font-size: 12px; color: #666; margin-left: auto; }
 
     /* 레이어 목록 패널 */
@@ -136,7 +136,7 @@
             </select>
             <!-- [추가] 지도 제어 컨트롤 -->
             <label style="font-size: 13px; display: flex; align-items: center; gap: 5px;"><input type="checkbox" id="chkMap" checked onchange="toggleBackgroundMap(this.checked)"> 배경지도</label>
-            <label style="font-size: 13px; display: flex; align-items: center; gap: 5px;"><input type="checkbox" id="chkMarkers" checked onchange="toggleMarkers(this.checked)"> 마커(Point)</label>
+            <label style="font-size: 13px; display: flex; align-items: center; gap: 5px;"><input type="checkbox" id="chkMarkers" onchange="toggleMarkers(this.checked)"> 마커(Point)</label>
             <label style="font-size: 13px; display: flex; align-items: center; gap: 5px;"><input type="checkbox" id="chkLineLabels" onchange="toggleLineLabels(this.checked)"> 선 레이어 명</label>
             <!-- [추가] 거리 측정 버튼 -->
             <button id="btnDistanceMeasure" class="btn btn-outline" onclick="window.toggleDistanceMode()" title="거리 측정" style="padding: 4px 8px; font-size: 13px;">📏</button>
@@ -290,7 +290,7 @@
 
   <!-- [추가] 일반 메모 작성 모달 -->
   <div id="memoModal" class="lightbox-overlay" style="display: none; z-index: 3002;">
-    <div class="container" style="max-width: 400px; min-height: auto; padding: 20px; background: white; border-radius: 8px;">
+    <div class="container" style="max-width: 940px; width: 95%; min-height: auto; padding: 30px; background: white; border-radius: 8px;">
         <h3 style="margin-top:0;">새 메모 작성</h3>
         <div class="form-group">
             <label>프로젝트 선택</label>
@@ -298,7 +298,7 @@
         </div>
         <div class="form-group">
             <label>내용</label>
-            <textarea id="memoContentInput" style="width:100%; height:100px; padding:8px;" placeholder="메모 내용을 입력하세요"></textarea>
+            <textarea id="memoContentInput" style="width:100%; height:200px; padding:8px;" placeholder="메모 내용을 입력하세요"></textarea>
         </div>
         <div class="form-group">
             <label>사진 첨부</label>
