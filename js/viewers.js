@@ -1442,7 +1442,21 @@ function openMemoPopup(feature) {
         existingImgHtml = `<div style="display:flex; gap:5px; flex-wrap:wrap; margin-bottom:5px;">`;
         existingImgUrls.forEach(url => {
             if(!url.trim()) return;
-            existingImgHtml += `<div class="existing-img-wrapper" style="position:relative; display:inline-block;"><img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd; cursor:pointer;" onclick="window.open('${url}', '_blank')"><button onclick="window.removeExistingMemoImage('${url}', 'popupMemoPreview', 'popupMemoUrl')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:12px; line-height:1; display:flex; align-items:center; justify-content:center;">&times;</button></div>`;
+            
+            // [수정] 파일 형식에 따른 미리보기 아이콘 개선
+            const urlLower = url.toLowerCase();
+            const isDoc = urlLower.includes('.pdf') || urlLower.match(/\.(doc|docx|xls|xlsx|ppt|pptx|hwp|txt|zip|name=)/i);
+            
+            let icon = '📄';
+            if (urlLower.includes('.pdf')) icon = '📕';
+            else if (urlLower.match(/\.(xls|xlsx)/i)) icon = '📗';
+            else if (urlLower.match(/\.(zip|7z|rar)/i)) icon = '📁';
+
+            const previewHtml = isDoc 
+                ? `<div style="width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#eee; border-radius:4px; font-size:24px; border:1px solid #ddd; cursor:pointer;" onclick="window.open('${url}', '_blank')" title="문서 열기">${icon}</div>`
+                : `<img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd; cursor:pointer;" onclick="window.open('${url}', '_blank')" title="사진 보기">`;
+
+            existingImgHtml += `<div class="existing-img-wrapper" style="position:relative; display:inline-block;">${previewHtml}<button onclick="window.removeExistingMemoImage('${url}', 'popupMemoPreview', 'popupMemoUrl')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:12px; line-height:1; display:flex; align-items:center; justify-content:center;">&times;</button></div>`;
         });
         existingImgHtml += `</div>`;
     }
@@ -1510,7 +1524,7 @@ function openMemoPopup(feature) {
             <button class="btn btn-info" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoFile').click()" title="파일 선택">📁</button>
             <button class="btn btn-secondary" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoCamera').click()" title="사진 촬영">📷</button>
         </div>
-        <!-- [수정] multiple 속성 추가 및 핸들러 변경 -->
+        <!-- [복원] 지도 메모는 현장 정보를 위한 사진만 첨부 가능 -->
         <input type="file" id="popupMemoFile" accept="image/*" multiple style="display:none" onchange="window.handleMemoImageSelect(this, 'popupMemoPreview')">
         <input type="file" id="popupMemoCamera" accept="image/*" capture="environment" multiple style="display:none" onchange="window.handleMemoImageSelect(this, 'popupMemoPreview')">
         

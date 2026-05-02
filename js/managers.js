@@ -26,13 +26,10 @@ function renderProjectList(result) {
   let html = '<ul class="project-list">';
   state.allProjects.forEach(p => {
     html += `<li class="project-item"><div class="project-info"><h3>${p.name}</h3><p>${new Date(p.createdDate).toLocaleDateString()}</p></div>
-        <div class="project-actions"><button class="btn btn-info" onclick="window.openPhotoManager('${p.id}', '${p.name}')">📷</button><button class="btn btn-success" onclick="window.exportCSV('${p.id}')">💾</button><button class="btn btn-danger" onclick="window.deleteProject('${p.id}')">🗑️</button></div></li>`;
+        <div class="project-actions"><button class="btn btn-info" onclick="window.openPhotoManager('${p.id}', '${p.name}')">📷</button></div></li>`;
   });
   listEl.innerHTML = html + '</ul>';
 }
-
-export function deleteProject(id) { if(confirm("삭제?")) callApi('deleteProject', { projectId: id }).then(loadProjects); }
-export function exportCSV(id) { callApi('exportToCSV', { projectId: id }).then(res => { if(res.success){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([res.csv],{type:'text/csv;charset=utf-8;'})); a.download=res.fileName; a.click(); } }); }
 
 // --- Photo Manager ---
 export function openPhotoManager(id, name) {
@@ -42,7 +39,7 @@ export function openPhotoManager(id, name) {
   document.getElementById('projects-tab').style.display = 'none';
   document.getElementById('photo-manager-interface').style.display = 'block';
   document.getElementById('mainTabs').style.display = 'none';
-  toggleViewMode('grid'); loadPhotos(id);
+  loadPhotos(id);
 }
 
 export function closePhotoManager() { state.currentProjectId = null; document.getElementById('photo-manager-interface').style.display = 'none'; document.getElementById('mainTabs').style.display = 'flex'; switchTab('projects'); }
@@ -104,40 +101,19 @@ function renderPhotos(res) {
    const container = document.getElementById('pmPhotoContainer');
    if(!res.success || !res.photos.length) { container.innerHTML = '<div class="empty-state">사진 없음</div>'; return; }
    state.currentPhotosData = res.photos;
-   let html = state.currentViewMode === 'grid' ? '' : '<table class="list-view-table"><thead><tr><th>#</th><th>파일명</th><th>날짜</th><th>관리</th></tr></thead><tbody>';
+   
+   let html = '';
    res.photos.forEach((p, i) => {
        const thumbnailUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=s400`;
        
-       // 다운로드 및 삭제 버튼 생성
-       const downloadBtn = `<button class="btn btn-primary" style="padding:2px 5px; font-size:11px;" onclick="window.downloadPhoto('${p.url}', '${encodeURIComponent(p.fileName)}')">저장</button>`;
-       
-       let deleteBtn = '';
-       if (p.isMemoPhoto) {
-           // 메모 사진인 경우: memos 테이블 업데이트 필요
-           deleteBtn = `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteIndividualMemoPhoto('${p.memoId}', '${p.url}')">삭제</button>`;
-       } else {
-           // 일반 사진인 경우: 기존 삭제 로직
-           deleteBtn = `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deletePhoto('${p.fileId}')">삭제</button>`;
-       }
+       const deleteBtn = p.isMemoPhoto 
+           ? `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteIndividualMemoPhoto('${p.memoId}', '${p.url}')">삭제</button>`
+           : `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deletePhoto('${p.fileId}')">삭제</button>`;
 
-       const actionHtml = `<div style="display:flex; gap:3px;">${downloadBtn}${deleteBtn}</div>`;
-
-       if(state.currentViewMode === 'grid') {
-           html += `<div class="photo-card"><div class="photo-thumb" onclick="window.openLightbox(${i})"><img src="${thumbnailUrl}" loading="lazy" alt="${p.fileName}"></div><div class="photo-details"><div class="photo-name">${p.fileName}</div><div class="photo-actions">${actionHtml}</div></div></div>`;
-       } else {
-           html += `<tr><td>${i+1}</td><td onclick="window.openLightbox(${i})">${p.fileName}</td><td>${new Date(p.uploadDate).toLocaleDateString()}</td><td>${actionHtml}</td></tr>`;
-       }
+       const actionHtml = `<div style="display:flex; justify-content: flex-end;">${deleteBtn}</div>`;
+       html += `<div class="photo-card"><div class="photo-thumb" onclick="window.openLightbox(${i})"><img src="${thumbnailUrl}" loading="lazy" alt="${p.fileName}"></div><div class="photo-details"><div class="photo-name">${p.fileName}</div><div class="photo-actions">${actionHtml}</div></div></div>`;
    });
-   container.innerHTML = state.currentViewMode === 'list' ? html + '</tbody></table>' : html;
-}
-
-export function toggleViewMode(m) { 
-    state.currentViewMode = m; 
-    document.getElementById('btnViewGrid').classList.toggle('active', m==='grid'); 
-    document.getElementById('btnViewList').classList.toggle('active', m==='list'); 
-    const container = document.getElementById('pmPhotoContainer');
-    if (m === 'grid') container.classList.add('grid-view'); else container.classList.remove('grid-view');
-    renderPhotos({success:true, photos:state.currentPhotosData}); 
+   container.innerHTML = html;
 }
 
 export function deletePhoto(id) { if(confirm("삭제?")) callApi('deletePhoto', { fileId: id }).then(() => loadPhotos(state.currentProjectId)); }
@@ -226,19 +202,6 @@ export async function deleteIndividualMemoPhoto(memoId, urlToDelete) {
         loadPhotos(state.currentProjectId); // 목록 갱신
     } catch (e) {
         alert("삭제 실패: " + e.message);
-    }
-}
-
-// [추가] 사진 다운로드 기능
-export async function downloadPhoto(url, fileName) {
-    try {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = decodeURIComponent(fileName);
-        a.target = '_blank';
-        a.click();
-    } catch (e) {
-        window.open(url, '_blank');
     }
 }
 
@@ -371,7 +334,6 @@ export async function loadMemoList() {
         // [수정] 특정 프로젝트 필터(project_id=eq...)를 제거하여 전체 조회
         const user = state.currentUser ? encodeURIComponent(state.currentUser) : 'anonymous';
         
-        // [수정] 조사 메모 필터링 적용
         let query = `memos?or=(is_public.eq.true,username.eq.${user})&select=*&order=created_at.desc`;
         if (state.isSurveyFilterMode) {
             let filterPart = `&is_survey=eq.true`;
@@ -381,9 +343,18 @@ export async function loadMemoList() {
             query = `memos?or=(is_public.eq.true,username.eq.${user})${filterPart}&select=*&order=created_at.desc`;
         }
         const data = await callSupabaseDirect(query);
+
+        // [추가] 정렬 로직: 일반 메모(GENERAL)를 최상단으로, 나머지는 날짜 역순
+        const sortedData = (data || []).sort((a, b) => { // [수정] lon, lat이 0인 메모를 최상단으로 정렬
+            const isAManagementMemo = a.lon === 0 && a.lat === 0;
+            const isBManagementMemo = b.lon === 0 && b.lat === 0;
+            if (isAManagementMemo && !isBManagementMemo) return -1;
+            if (!isAManagementMemo && isBManagementMemo) return 1;
+            return new Date(b.created_at) - new Date(a.created_at);
+        });
         
-        // 3. 데이터 병합
-        state.memos = (data || []).map(m => ({
+        // 4. 데이터 병합
+        state.memos = sortedData.map(m => ({
             ...m,
             projectName: m.project_id === 'GENERAL' ? '일반 (공지)' : (projectMap[m.project_id] || '알 수 없음')
         }));
@@ -402,12 +373,12 @@ function renderMemoListUI() {
         return;
     }
 
-    let html = '<table class="list-view-table"><thead><tr><th>프로젝트</th><th>내용</th><th>작성자</th><th>날짜</th><th>관리</th></tr></thead><tbody>';
+    let html = '<table class="list-view-table"><thead><tr><th>프로젝트</th><th>내용</th><th>날짜</th><th>작성자</th><th>관리</th></tr></thead><tbody>';
     state.memos.forEach(m => {
+        const isManagementMemo = m.lon === 0 && m.lat === 0; // [수정] lon, lat이 0인 메모를 관리용 메모로 간주
         const isMine = m.username === state.currentUser;
         const publicIcon = m.is_public ? '<span title="공개">🌐</span>' : '<span title="비공개">🔒</span>';
         
-        // 본인 글만 삭제 버튼 표시
         const deleteBtn = isMine 
             ? `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteMemo('${m.id}')">삭제</button>` 
             : '-';
@@ -419,27 +390,40 @@ function renderMemoListUI() {
             locBtn = `<button class="btn btn-info" style="padding:2px 5px; font-size:11px; margin-right:5px;" onclick="window.viewMemoOnMap('${m.project_id}', ${m.lon}, ${m.lat}, '${m.id}')">위치</button>`;
         }
 
-        // [추가] 사진 아이콘 표시
-        let imgIcon = '';
-        // [수정] image_url이 존재하는지 더 확실하게 체크 (공백 제거 후 10자 이상)
+        // [수정] 파일 아이콘 표시 (이미지와 문서 구분)
+        let fileIcon = '';
         const rawImageUrl = m.image_url ? String(m.image_url).trim() : "";
         if (rawImageUrl && rawImageUrl !== "null" && rawImageUrl !== "undefined" && rawImageUrl.length > 10) {
             const firstUrl = rawImageUrl.split(',')[0].trim();
-            imgIcon = `<a href="${firstUrl}" target="_blank" style="text-decoration:none; margin-right:5px;" title="사진 보기">📷</a>`;
-        } else {
-            // console.log(`[IconCheck] Memo ${m.id} has no valid image_url:`, m.image_url);
+            const urlLower = firstUrl.toLowerCase();
+            
+            // [수정] 파일 형식별 아이콘 세분화 (이미지, PDF, 문서 등)
+            let icon = '📷'; 
+            let title = '사진 보기';
+            if (urlLower.includes('.pdf')) {
+                icon = '📕'; title = 'PDF 보기';
+            } else if (urlLower.match(/\.(doc|docx|hwp|txt)/i)) {
+                icon = '📄'; title = '문서 보기';
+            } else if (urlLower.match(/\.(xls|xlsx|csv)/i)) {
+                icon = '📗'; title = '엑셀 보기';
+            } else if (urlLower.match(/\.(zip|7z|rar)/i) || urlLower.includes('name=')) {
+                // URL에 name= 파라미터가 있거나 압축파일인 경우
+                icon = (urlLower.match(/\.(zip|7z|rar)/i)) ? '📁' : '📄';
+                title = '첨부파일 보기';
+            }
+            fileIcon = `<a href="${firstUrl}" target="_blank" style="text-decoration:none; margin-right:5px; font-size:16px;" title="${title}">${icon}</a>`;
         }
-        // [추가] Job 이름 뱃지 표시
+
         let jobBadge = '';
         if (m.is_survey && m.job_name) {
             jobBadge = `<span style="background:#ffc107; color:#000; padding:2px 5px; border-radius:4px; font-size:11px; margin-right:5px; font-weight:bold;">[${m.job_name}]</span>`;
         }
 
-        html += `<tr>
+        html += `<tr class="${isManagementMemo ? 'general-memo-row' : ''}">
             <td data-label="프로젝트">${m.projectName}</td>
-            <td data-label="내용" class="memo-content" style="white-space:normal; max-width:300px;">${publicIcon} ${jobBadge}${imgIcon}${m.content}</td>
-            <td data-label="작성자">${m.username || '-'}</td>
+            <td data-label="내용" class="memo-content">${publicIcon} ${jobBadge}${fileIcon}${m.content}</td>
             <td data-label="날짜">${new Date(m.created_at).toLocaleString()}</td>
+            <td data-label="작성자">${m.username || '-'}</td>
             <td data-label="관리">${locBtn}${deleteBtn}</td>
         </tr>`;
     });
@@ -487,18 +471,23 @@ async function processMemoSaveBackground(data) {
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 try {
-                    const base64 = await resizeImage(file);
+                    let base64;
+                    if (file.type.startsWith('image/')) {
+                        base64 = await resizeImage(file);
+                    } else {
+                        // 이미지 외 파일은 리사이징 없이 Base64 변환
+                        base64 = await fileToBase64(file);
+                    }
                     const res = await callApi('uploadToDrive', { 
                         fileName: file.name, 
                         fileData: base64, 
-                        mimeType: "image/jpeg" 
+                        mimeType: file.type || "application/octet-stream" 
                     });
                     
                     if (res.success && res.url) {
                         finalImageUrls.push(res.url.trim());
                         console.log(`[Upload Success] ${i+1}/${files.length}:`, res.url);
                     } else {
-                        // [수정] 업로드 실패 시 저장을 중단하여 DB에 빈 값이 들어가는 것을 방지
                         const errorMsg = `사진 업로드에 실패했습니다: ${res.error}\n(드라이브 권한을 확인하세요)`;
                         console.error("[Upload Error]", errorMsg);
                         showAlert(errorMsg, "error");
@@ -595,6 +584,16 @@ export async function deleteMemo(id) {
     } catch (e) { showAlert("삭제 실패", "error"); }
 }
 
+// [추가] 일반 파일 Base64 변환 유틸리티
+export function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
 // [수정] 이미지 리사이징 유틸리티 함수 (속도 개선: 1024px, JPEG 0.6)
 export function resizeImage(file, maxWidth = 1024, quality = 0.6) {
     return new Promise((resolve, reject) => {
@@ -652,8 +651,7 @@ export async function openGeneralMemoModal() {
     const surveyCheck = document.getElementById('memoSurveyCheck'); // [추가]
     const jobContainer = document.getElementById('memoJobContainer'); // [추가]
     const jobSelect = document.getElementById('memoJobSelect'); // [추가]
-    const preview = document.getElementById('memoImagePreview');
-    // const urlInput = document.getElementById('memoImageUrl'); // [수정] 더 이상 사용 안 함
+    const preview = document.getElementById('memoImagePreview');    
     
     content.value = '';
     if(publicCheck) publicCheck.checked = true; // 기본값: 공개
@@ -664,6 +662,12 @@ export async function openGeneralMemoModal() {
     
     // [추가] 전역 파일 배열 초기화
     window.currentMemoFiles = [];
+
+    // [수정] 일반 메모(공지/지침) 작성 시에만 문서 파일 첨부 허용
+    setTimeout(() => {
+        const fileInput = document.getElementById('memoFileSelect'); // 메모관리 탭의 전용 input ID
+        if (fileInput) fileInput.setAttribute('accept', '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/*');
+    }, 100);
 
     select.innerHTML = '<option>로딩 중...</option>';
     modal.style.display = 'flex';
@@ -707,14 +711,6 @@ export async function openGeneralMemoModal() {
     }
 }
 
-// [추가] 메모 사진 삭제(목록에서 제거) 함수
-export function removeMemoImage(index, previewId) {
-    if (window.currentMemoFiles) {
-        window.currentMemoFiles.splice(index, 1);
-        renderMemoImages(previewId);
-    }
-}
-
 // [추가] 기존 이미지(URL) 삭제 함수
 export function removeExistingMemoImage(urlToRemove, previewId, hiddenInputId) {
     const hiddenInput = document.getElementById(hiddenInputId);
@@ -731,28 +727,34 @@ export function removeExistingMemoImage(urlToRemove, previewId, hiddenInputId) {
     }
 }
 
-// [추가] 메모 사진 선택 및 미리보기 핸들러 (업로드 X, 로컬 미리보기 O)
-export function handleMemoImageSelect(input, previewId) {
+// [추가] 메모 파일 삭제(목록에서 제거) 함수
+export function removeMemoFile(index, previewId) {
+    if (window.currentMemoFiles) {
+        window.currentMemoFiles.splice(index, 1);
+        renderMemoFiles(previewId);
+    }
+}
+
+// [수정] 메모 파일 선택 및 미리보기 핸들러 (이미지 + 문서 지원)
+export function handleMemoFileSelect(input, previewId) {
     if (!input.files || input.files.length === 0) return;
     
     if (!window.currentMemoFiles) window.currentMemoFiles = [];
     
-    // 선택된 파일들을 배열에 추가
     Array.from(input.files).forEach(file => {
         window.currentMemoFiles.push(file);
     });
 
-    // 미리보기 렌더링
-    renderMemoImages(previewId);
+    renderMemoFiles(previewId);
     
-    // 입력 초기화 (같은 파일 다시 선택 가능하도록)
     input.value = '';
 }
 
 // [추가] 선택된 사진들 미리보기 렌더링
-function renderMemoImages(previewId) {
-    // [개선] 일반적인 방법으로 못 찾을 경우 MapLibre 팝업 내부를 강제로 뒤집니다.
+function renderMemoFiles(previewId) {
     let preview = document.getElementById(previewId);
+    
+    // [개선] 일반적인 방법으로 못 찾을 경우 MapLibre 팝업 내부를 강제로 뒤짐
     if (!preview) {
         const popups = document.querySelectorAll('.maplibregl-popup-content');
         for (let p of popups) {
@@ -761,16 +763,8 @@ function renderMemoImages(previewId) {
         }
     }
 
-    if (!preview) {
-        return;
-    }
+    if (!preview) return;
 
-    // 기존 내용 중 "새로 추가된 파일" 영역만 갱신
-    // 여기서는 기존 URL 이미지는 건드리지 않고, 새 파일 영역만 다시 그림
-    // 하지만 편의상 preview 컨테이너 안에 "기존 이미지"와 "새 이미지"를 구분해서 넣는 게 좋음.
-    // 뷰어 로직에서 preview 영역을 초기화할 때 기존 이미지를 넣어주므로, 여기서는 append 하거나 별도 영역 관리 필요.
-    // 간단하게: preview 요소 안에 `new-images-container`가 없으면 만들고, 거기를 갱신.
-    
     let newContainer = preview.querySelector('.new-images-container');
     if (!newContainer) {
         newContainer = document.createElement('div');
@@ -786,13 +780,18 @@ function renderMemoImages(previewId) {
     
     if (window.currentMemoFiles) {
         window.currentMemoFiles.forEach((file, index) => {
-            // [개선] 전역 URL 객체 참조 충돌 방지를 위해 window.URL 명시
-            const url = (window.URL || window.webkitURL).createObjectURL(file);
+            const isImg = file.type.startsWith('image/');
+            const url = isImg ? (window.URL || window.webkitURL).createObjectURL(file) : '';
             const div = document.createElement('div');
-            div.style.cssText = 'position:relative; display:inline-block;';
+            div.style.cssText = 'position:relative; display:inline-block; width:60px; height:60px;';
+            
+            const previewHtml = isImg 
+                ? `<img src="${url}" style="width:100%; height:100%; object-fit:cover; border-radius:4px; border:1px solid #ddd;" onload="window.URL.revokeObjectURL(this.src)">`
+                : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#eee; border-radius:4px; font-size:10px; text-align:center; overflow:hidden;">${file.name.split('.').pop().toUpperCase()}</div>`;
+
             div.innerHTML = `
-                <img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd;" onload="window.URL.revokeObjectURL(this.src)">
-                <button onclick="window.removeMemoImage(${index}, '${previewId}')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:18px; height:18px; font-size:12px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">&times;</button>
+                ${previewHtml}
+                <button onclick="window.removeMemoFile(${index}, '${previewId}')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:20px; height:20px; font-size:14px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; z-index:10;">&times;</button>
             `;
             newContainer.appendChild(div);
         });
@@ -810,6 +809,15 @@ export async function saveGeneralMemo() {
     
     // [추가] 파일 목록 가져오기
     const files = window.currentMemoFiles || [];
+
+    // [추가] 업로드 전 파일 형식 및 용량 체크 (간단히)
+    for (const file of files) {
+        const isAllowed = file.type.startsWith('image/') || 
+                          ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
+                           'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(file.type);
+        
+        if (!isAllowed && !file.name.match(/\.(pdf|doc|docx|xls|xlsx)$/i)) return alert(`허용되지 않는 파일 형식이 포함되어 있습니다: ${file.name}`);
+    }
     
     if (!projectId) return alert("프로젝트를 선택하세요.");
     if (!content.trim()) return alert("내용을 입력하세요.");
@@ -825,11 +833,11 @@ export async function saveGeneralMemo() {
 window.saveMemo = saveMemo; // [추가]
 window.openGeneralMemoModal = openGeneralMemoModal;
 window.saveGeneralMemo = saveGeneralMemo;
-window.handleMemoImageSelect = handleMemoImageSelect;
-window.removeMemoImage = removeMemoImage;
+window.handleMemoFileSelect = handleMemoFileSelect;
+window.removeMemoFile = removeMemoFile;
 window.removeExistingMemoImage = removeExistingMemoImage;
 window.resizeImage = resizeImage;
-// window.clearMemoImage = clearMemoImage; // [삭제]
+window.fileToBase64 = fileToBase64;
 
 // [추가] Job 관리자 기능
 export function openJobManager() {

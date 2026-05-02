@@ -1,18 +1,14 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
-import { loadProjects, deleteProject, exportCSV, openPhotoManager, closePhotoManager, toggleViewMode, deletePhoto, deleteIndividualMemoPhoto, downloadPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoImageSelect, removeMemoImage, removeExistingMemoImage, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter, fetchAvailableJobs, saveGeneralMemo, openGeneralMemoModal } from './managers.js';
+import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter, fetchAvailableJobs, saveGeneralMemo, openGeneralMemoModal } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
-window.deleteProject = deleteProject;
-window.exportCSV = exportCSV;
 window.openPhotoManager = openPhotoManager;
 window.closePhotoManager = closePhotoManager;
-window.toggleViewMode = toggleViewMode;
 window.deletePhoto = deletePhoto;
 window.deleteIndividualMemoPhoto = deleteIndividualMemoPhoto; // [추가]
-window.downloadPhoto = downloadPhoto; // [추가]
 window.runFullSync = runFullSync; // [추가]
 window.openLightbox = openLightbox;
 window.closeLightbox = closeLightbox;
@@ -40,8 +36,9 @@ window.deleteUser = deleteUser;
 window.renameUser = renameUser;
 window.loadMemoList = loadMemoList; // [추가]
 window.deleteMemo = deleteMemo; // [추가]
-window.handleMemoImageSelect = handleMemoImageSelect; // [추가] 메모 사진 선택 핸들러
-window.removeMemoImage = removeMemoImage; // [추가]
+window.handleMemoFileSelect = handleMemoFileSelect; // 파일 통합 핸들러
+window.handleMemoImageSelect = handleMemoFileSelect; // [추가] 지도 팝업 호환성용 별칭
+window.removeMemoFile = removeMemoFile; // 파일 삭제 핸들러
 window.removeExistingMemoImage = removeExistingMemoImage; // [추가]
 window.loadMapMemos = loadMapMemos;
 window.openJobManager = openJobManager;

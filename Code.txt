@@ -628,8 +628,8 @@ function uploadToDrive(fileName, fileData, mimeType) {
     }
     
     const fileId = file.getId();
-    // [수정] 더 안정적이고 표준적인 구글 드라이브 직접 보기 URL 형식 사용
-    const url = "https://drive.google.com/uc?export=view&id=" + fileId;
+    // [수정] URL에 파일명을 포함시켜 클라이언트에서 확장자 판별이 가능하도록 함
+    const url = "https://drive.google.com/uc?export=view&id=" + fileId + "&name=" + encodeURIComponent(fileName);
     
     return { success: true, url: url, fileId: fileId };
   } catch (e) { return { success: false, error: '드라이브 업로드 실패: ' + e.toString() }; }
