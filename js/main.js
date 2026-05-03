@@ -174,20 +174,32 @@ export async function performLogin(username, isAuto = false) {
     // [추가] 로그인 잠금(Lock) 체크 로직
     if (state.supabaseConfig) {
         try {
-            // 1. 시스템 잠금 상태 확인 (SYSTEM_CONFIG)
-            const configData = await callSupabaseDirect(`user_settings?username=eq.SYSTEM_CONFIG&select=layer_colors`);
-            const isLocked = configData && configData.length > 0 && configData[0].layer_colors?.locked === true;
+            // 1. 시스템 잠금 및 유저 존재 여부 확인
+            const [configData, userCheck] = await Promise.all([
+                callSupabaseDirect(`user_settings?username=eq.SYSTEM_CONFIG&select=layer_colors`),
+                callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=username`)
+            ]);
 
-            if (isLocked) {
-                // 2. 잠겨있다면, 유저가 존재하는지 확인
-                const userCheck = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=username`);
-                const isAdmin = state.adminUser && username === state.adminUser;
-                
-                // 관리자가 아니고, 목록에도 없다면 차단
-                if (!isAdmin && (!userCheck || userCheck.length === 0)) {
-                    alert("현재 신규 가입이 제한되어 있습니다.\n관리자에게 문의하세요.");
+            const isLocked = configData && configData.length > 0 && configData[0].layer_colors?.locked === true;
+            const userExists = userCheck && userCheck.length > 0;
+            
+            // [수정] 관리자 확인 로직 개선 (대소문자 무시)
+            const curUserLower = username.toLowerCase();
+            const isAdmin = state.adminUser && curUserLower === state.adminUser.toLowerCase();
+
+            if (!isAdmin && !userExists) {
+                if (isLocked) {
+                    // 시스템이 잠겨있는데 유저가 없다면 (삭제된 경우 포함) 로그인 차단
+                    alert("가입된 구성원만 로그인이 가능합니다.\n방장 또는 관리자에게 문의하세요.");
                     if (btn) { btn.innerText = "앱 시작하기"; btn.disabled = false; }
                     return false;
+                } else {
+                    // [수정] 잠금이 풀려있을 때만 신규 유저 자동 등록
+                    try {
+                        await callSupabaseDirect('user_settings', 'POST', { username: username, layer_colors: {}, layer_styles: {} });
+                    } catch (e) {
+                        console.warn("유저 자동 등록 실패:", e);
+                    }
                 }
             }
         } catch (e) {
@@ -205,12 +217,6 @@ export async function performLogin(username, isAuto = false) {
 
     // [수정] 설정 로드 대기 (await) - 맵 로드 시 색상 적용을 위해 필요
     if (state.supabaseConfig) {
-        // [추가] 로그인 시 테이블에 유저가 없으면 등록 (기존 유저는 ignore-duplicates로 설정 보존)
-        try {
-            await callSupabaseDirect('user_settings', 'POST', { username: username, layer_colors: {}, layer_styles: {} }, { 'Prefer': 'resolution=ignore-duplicates' });
-        } catch (e) {
-            console.warn("유저 자동 등록 실패:", e);
-        }
         await fetchUserSettings(username);
     }
     updateHeaderWithUser(username);
