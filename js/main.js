@@ -132,7 +132,7 @@ export function switchTab(tabName) {
 async function fetchUserSettings(username) {
     if (!state.supabaseConfig) return;
     try {
-        // [수정] is_room_manager 컬럼도 함께 조회
+        // [수정] 유효성 확인을 위해 데이터 조회 시도
         const data = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=layer_colors,layer_styles,is_room_manager`);
         if (data && data.length > 0) {
             state.userSettings = { 
@@ -142,22 +142,18 @@ async function fetchUserSettings(username) {
             // [추가] 방장 권한 설정
             state.isRoomManager = data[0].is_room_manager === true;
             
-            // [삭제] Job 리스트는 이제 jobs 테이블에서 직접 관리하므로 user_settings에서 로드할 필요 없음
-            // if (state.userSettings.layer_styles['__GLOBAL_JOBS__']) {
-            //     state.jobs = state.userSettings.layer_styles['__GLOBAL_JOBS__'];
-            //     localStorage.setItem('asin_jobs', JSON.stringify(state.jobs)); // 로컬 백업
-            // } else {
-            //     state.jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
-            // }
             reloadLayerStylesFromSettings(); // 맵이 이미 열려있다면 즉시 적용
 
             updateHeaderWithUser(username); // 권한 로드 후 헤더 갱신
+            return true;
         } else {
             state.userSettings = { layer_colors: {}, layer_styles: {} };
+            return false;
         }
     } catch (e) {
         console.warn("사용자 설정 로드 실패:", e);
         state.userSettings = { layer_colors: {}, layer_styles: {} };
+        return false;
     }
 }
 
@@ -304,8 +300,17 @@ document.addEventListener('DOMContentLoaded', function() {
           
           // [추가] Config 로드 전 이미 로그인이 수행된 경우 설정 가져오기
           if (state.currentUser) {
-              updateHeaderWithUser(state.currentUser); // [추가] 관리자 정보 수신 후 헤더(버튼) 갱신
-              await fetchUserSettings(state.currentUser);
+              // [수정] 앱 진입 시 캐시된 유저가 DB에 여전히 존재하는지 확인 (삭제된 유저 진입 차단)
+              const isValid = await fetchUserSettings(state.currentUser);
+              if (!isValid) {
+                  console.warn("Cached user is invalid or deleted.");
+                  localStorage.removeItem('asin_user');
+                  state.currentUser = null;
+                  alert("유효하지 않거나 삭제된 계정입니다. 다시 로그인해주세요.");
+                  location.reload();
+                  return;
+              }
+              updateHeaderWithUser(state.currentUser);
           }
       }
       loadProjects();

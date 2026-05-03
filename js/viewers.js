@@ -686,13 +686,21 @@ async function loadCadProjects() {
     const select = document.getElementById('cadProjectSelect');
     select.innerHTML = '<option value="">로딩 중...</option>';
     try {
-        // [수정] 권한 체크를 위해 project_shares 데이터 포함 조회
-        const data = await callSupabaseDirect('cad_projects?select=id,name,created_at,is_private,owner_name,cad_files(updated_at),project_shares(username)');
+        const curUser = state.currentUser;
+        if (!curUser) return;
+
+        // [수정] 프로젝트 목록과 유저 존재 여부를 함께 확인
+        const [data, userCheck] = await Promise.all([
+            callSupabaseDirect('cad_projects?select=id,name,created_at,is_private,owner_name,cad_files(updated_at),project_shares(username)'),
+            callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(curUser)}&select=username`)
+        ]);
         
+        // [추가] 유저가 삭제된 경우 차단
+        if (!userCheck || userCheck.length === 0) { localStorage.removeItem('asin_user'); location.reload(); return; }
+
         // [수정] 블랙리스트 방식 필터링 적용 (managers.js와 로직 통일)
         const filteredData = data.filter(p => {
-            if (!state.currentUser) return false;
-            const curUserLower = state.currentUser.toLowerCase();
+            const curUserLower = curUser.toLowerCase();
             const isAdmin = state.adminUser && curUserLower === state.adminUser.toLowerCase();
             if (isAdmin || state.isRoomManager) return true; 
 

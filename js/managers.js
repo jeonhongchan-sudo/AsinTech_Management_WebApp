@@ -5,9 +5,23 @@ import { switchTab } from './main.js';
 // --- Project Manager ---
 export function loadProjects() {
   if (state.supabaseConfig) {
-      // [수정] guest 권한 확인을 위해 project_shares 정보를 함께 가져옴
-      callSupabaseDirect('cad_projects?select=*,cad_files(updated_at),project_shares(username)')
-          .then(data => {
+      const curUser = state.currentUser;
+      if (!curUser) return;
+
+      // [수정] 프로젝트 목록 로드 시 유저의 존재 여부를 매번 확인하여 삭제된 유저의 권한 우회 차단
+      Promise.all([
+          callSupabaseDirect('cad_projects?select=*,cad_files(updated_at),project_shares(username)'),
+          callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(curUser)}&select=username`)
+      ])
+          .then(([data, userCheck]) => {
+              // [추가] 유저가 DB에서 삭제된 경우 즉시 퇴출
+              if (!userCheck || userCheck.length === 0) {
+                  localStorage.removeItem('asin_user');
+                  alert("계정 정보가 없습니다. 다시 로그인해주세요.");
+                  location.reload();
+                  return;
+              }
+
               // [추가] 권한 필터링 로직
               const filtered = data.filter(p => {
                   if (!state.currentUser) return false; // 로그인 전 보호
