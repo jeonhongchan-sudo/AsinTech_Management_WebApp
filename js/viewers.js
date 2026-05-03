@@ -686,26 +686,24 @@ async function loadCadProjects() {
     const select = document.getElementById('cadProjectSelect');
     select.innerHTML = '<option value="">로딩 중...</option>';
     try {
-        // [수정] guest 필터링을 위해 project_shares 데이터 포함 조회
+        // [수정] 권한 체크를 위해 project_shares 데이터 포함 조회
         const data = await callSupabaseDirect('cad_projects?select=id,name,created_at,is_private,owner_name,cad_files(updated_at),project_shares(username)');
         
-        // [추가] 권한에 따른 필터링 적용
+        // [수정] 블랙리스트 방식 필터링 적용 (managers.js와 로직 통일)
         const filteredData = data.filter(p => {
             if (!state.currentUser) return false;
-
             const curUserLower = state.currentUser.toLowerCase();
             const isAdmin = state.adminUser && curUserLower === state.adminUser.toLowerCase();
-            if (isAdmin) return true;
-
-            if (curUserLower === 'guest') {
-                // guest 권한 엄격 체크
-                return Array.isArray(p.project_shares) && 
-                       p.project_shares.some(s => s.username && s.username.toLowerCase() === 'guest');
-            }
+            if (isAdmin || state.isRoomManager) return true; 
 
             const isOwner = p.owner_name === state.currentUser;
-            // 나만보기가 아니면 누구나, 나만보기면 본인만
-            return !p.is_private || isOwner;
+            if (isOwner) return true;
+
+            if (p.is_private) return false;
+
+            const isBlocked = Array.isArray(p.project_shares) && 
+                              p.project_shares.some(s => s.username && s.username.toLowerCase() === curUserLower);
+            return !isBlocked;
         });
 
         const projects = filteredData.map(p => {

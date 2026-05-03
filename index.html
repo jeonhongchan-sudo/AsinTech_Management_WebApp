@@ -297,10 +297,9 @@
         </div>
         
         <!-- 1. 메인 버튼 (구성원/프로젝트/Guest) -->
-        <div id="roomMainButtons" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+        <div id="roomMainButtons" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
             <button class="btn btn-primary" style="padding:20px 5px; font-size:14px; font-weight:bold;" onclick="window.switchRoomView('user')">👥 구성원<br>추가</button>
             <button class="btn btn-info" style="padding:20px 5px; font-size:14px; font-weight:bold;" onclick="window.switchRoomView('project')">📁 프로젝트<br>관리</button>
-            <button class="btn btn-success" style="padding:20px 5px; font-size:14px; font-weight:bold;" onclick="window.switchRoomView('guest')">👤 Guest<br>관리</button>
         </div>
 
         <!-- 2. 구성원 가입 섹션 -->
@@ -314,9 +313,9 @@
                 <button class="btn btn-primary" onclick="window.roomCreateUser()">가입시키기</button>
             </div>
             <div style="max-height: 300px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px;">
-                <table class="list-view-table" style="margin-top:0;">
-                    <thead style="position:sticky; top:0; background:#f1f1f1;">
-                        <tr><th>사용자명</th><th style="width:100px; text-align:center;">상태</th></tr>
+                <table class="list-view-table" style="margin-top:0; display: table !important; width: 100%; table-layout: fixed;">
+                    <thead style="position:sticky; top:0; background:#f1f1f1; z-index:1; display: table-header-group !important;">
+                        <tr style="display: table-row !important;"><th style="width: 45%; display: table-cell !important; text-align: left !important; padding-left: 10px !important;">사용자명</th><th style="width: 55%; text-align:center; display: table-cell !important;">관리</th></tr>
                     </thead>
                     <tbody id="roomUserList"></tbody>
                 </table>
@@ -332,14 +331,18 @@
             <div id="roomProjectList" style="max-height: 400px; overflow-y: auto;"></div>
         </div>
 
-        <!-- 4. Guest 관리 섹션 -->
-        <div id="roomGuestSection" style="display:none;">
+        <!-- 4. 사용자별 프로젝트 권한 관리 섹션 -->
+        <div id="roomUserAccessSection" style="display:none;">
             <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
-                <button class="btn btn-outline" onclick="window.switchRoomView('main')" style="padding:5px 10px;">← 뒤로</button>
-                <h3 style="margin:0;">Guest 접근 허용 설정</h3>
+                <button class="btn btn-outline" onclick="window.switchRoomView('user')" style="padding:5px 10px;">← 뒤로</button>
+                <h3 style="margin:0;"><span id="accessTargetUser">사용자</span> 권한</h3>
             </div>
-            <p style="font-size:12px; color:#666; margin-bottom:10px;">※ 체크된 프로젝트만 'guest' 유저에게 노출됩니다.</p>
-            <div id="roomGuestProjectList" style="max-height: 400px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px;"></div>
+            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                <button class="btn btn-primary" style="flex:1; padding:8px; font-size:12px; font-weight:bold;" onclick="window.bulkToggleUserAccess(true)">전체 선택 (활성화)</button>
+                <button class="btn btn-outline" style="flex:1; padding:8px; font-size:12px; font-weight:bold;" onclick="window.bulkToggleUserAccess(false)">전체 해제 (비활성화)</button>
+            </div>
+            <p style="font-size:12px; color:#666; margin-bottom:10px;">※ 체크가 활성화된 프로젝트만 유저에게 노출됩니다. (기본값: 전체 허용)</p>
+            <div id="roomUserProjectList" style="max-height: 400px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px;"></div>
         </div>
     </div>
   </div>

@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
-import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter, fetchAvailableJobs, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, toggleGuestAccess, completeGuestSettings } from './managers.js';
+import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter, fetchAvailableJobs, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
@@ -36,8 +36,9 @@ window.closeRoomManagerPage = closeRoomManagerPage; // [추가]
 window.roomCreateUser = roomCreateUser; // [추가]
 window.switchRoomView = switchRoomView; // [추가]
 window.toggleProjectPrivate = toggleProjectPrivate; // [추가]
-window.toggleGuestAccess = toggleGuestAccess; // [추가]
-window.completeGuestSettings = completeGuestSettings; // [추가]
+window.openUserAccess = openUserAccess; // [추가] 유저별 권한 설정
+window.toggleUserAccess = toggleUserAccess; // [추가] 유저별 권한 토글
+window.bulkToggleUserAccess = bulkToggleUserAccess; // [추가] 유저별 권한 일괄 변경
 window.toggleSystemLock = toggleSystemLock;
 window.createNewUser = createNewUser;
 window.deleteUser = deleteUser;
@@ -162,9 +163,6 @@ async function fetchUserSettings(username) {
 
 // [수정] 로그인 로직 분리 (자동 로그인 검증 강화)
 export async function performLogin(username, isAuto = false) {
-    // [추가] guest 계정인 경우 대소문자 무시하고 소문자로 표준화
-    if (username && username.toLowerCase() === 'guest') username = 'guest';
-
     // 1. UI 준비 (수동 로그인일 때만 버튼 제어)
     const overlay = document.getElementById('loginOverlay');
     const btn = overlay.querySelector('button');
@@ -260,7 +258,6 @@ function updateHeaderWithUser(username) {
         // [수정] 대소문자 구분 없이 권한 확인
         const curUserLower = username.toLowerCase();
         const isAdmin = state.adminUser && curUserLower === state.adminUser.toLowerCase();
-        const isGuest = curUserLower === 'guest';
         const isRoomManager = state.isRoomManager;
 
         let badgeHtml = '';
@@ -268,8 +265,6 @@ function updateHeaderWithUser(username) {
             badgeHtml = `<button onclick="window.openAdminPage()" style="background:#ffc107; border:none; border-radius:10px; color:#000; cursor:pointer; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px;">관</button>`;
         } else if (isRoomManager) {
             badgeHtml = `<button onclick="window.openRoomManagerPage()" style="background:#4dabf7; border:none; border-radius:10px; color:#fff; cursor:pointer; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px;">방</button>`;
-        } else if (isGuest) {
-            badgeHtml = `<span style="background:#28a745; border-radius:10px; color:#fff; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px; display:inline-flex; align-items:center; height:18px; line-height:1;">손</span>`;
         } else {
             badgeHtml = `<span style="background:#868e96; border-radius:10px; color:#fff; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px; display:inline-flex; align-items:center; height:18px; line-height:1;">일</span>`;
         }
