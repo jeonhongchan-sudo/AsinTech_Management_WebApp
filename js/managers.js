@@ -353,7 +353,11 @@ export async function createNewUser() {
 export async function deleteUser(username) {
     if (!confirm(`'${username}' 유저를 삭제하시겠습니까?`)) return;
     try {
+        // 1. 유저 설정 삭제
         await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}`, 'DELETE');
+        // 2. 프로젝트 권한(차단 목록) 데이터도 함께 삭제
+        await callSupabaseDirect(`project_shares?username=eq.${encodeURIComponent(username)}`, 'DELETE');
+
         // 현재 열려있는 팝업에 따라 리스트 갱신
         if (document.getElementById('adminOverlay').style.display === 'flex') loadAdminData();
         if (document.getElementById('roomManagerOverlay').style.display === 'flex') loadRoomUserData();
