@@ -5,9 +5,44 @@ import { switchTab } from './main.js';
 // --- Project Manager ---
 export function loadProjects() {
   if (state.supabaseConfig) {
-      callSupabaseDirect('cad_projects?select=*&order=created_at.desc')
+      // [수정] guest 권한 확인을 위해 project_shares 정보를 함께 가져옴
+      callSupabaseDirect('cad_projects?select=*,cad_files(updated_at),project_shares(username)')
           .then(data => {
-              const projects = data.map(row => ({ name: row.name, id: row.id, createdDate: row.created_at, status: row.status }));
+              // [추가] 권한 필터링 로직
+              const filtered = data.filter(p => {
+                  if (!state.currentUser) return false; // 로그인 전 보호
+                  
+                  const curUserLower = state.currentUser.toLowerCase();
+                  const isAdmin = state.adminUser && curUserLower === state.adminUser.toLowerCase();
+                  if (isAdmin) return true; // 관리자는 다 보임
+
+                  if (curUserLower === 'guest') {
+                      // guest는 반드시 project_shares 테이블에 이름이 있어야만 보임
+                      // join 결과가 없으면(null/undefined) false 반환
+                      return Array.isArray(p.project_shares) && 
+                             p.project_shares.some(s => s.username && s.username.toLowerCase() === 'guest');
+                  }
+
+                  const isOwner = p.owner_name === state.currentUser;
+                  // 일반 유저/타방장: 비공개(나만보기)가 아니면 다 보임. 비공개면 주인만 보임.
+                  return !p.is_private || isOwner;
+              });
+
+              // [수정] MapViewer(viewers.js)와 동일하게 파일 업데이트 날짜 기준으로 최신순 정렬
+              const projects = filtered.map(p => {
+                  let lastDate = new Date(p.created_at);
+                  if (p.cad_files && Array.isArray(p.cad_files)) {
+                      p.cad_files.forEach(f => {
+                          if (f.updated_at) {
+                              const fDate = new Date(f.updated_at);
+                              if (fDate > lastDate) lastDate = fDate;
+                          }
+                      });
+                  }
+                  return { name: p.name, id: p.id, createdDate: lastDate, status: p.status };
+              });
+
+              projects.sort((a, b) => b.createdDate - a.createdDate);
               renderProjectList({ success: true, projects: projects });
           })
           .catch(err => {
@@ -241,9 +276,9 @@ async function loadAdminData() {
         }
 
         // 2. 유저 목록 조회
-        let users = await callSupabaseDirect(`user_settings?username=neq.SYSTEM_CONFIG&select=username,created_at&order=created_at.desc`);
+        let users = await callSupabaseDirect(`user_settings?username=neq.SYSTEM_CONFIG&select=username,created_at,is_room_manager&order=created_at.desc`);
         
-        // [추가] 관리자 본인 제외 필터링
+        // [수정] 보안: 관리자 이하 누구에게도 관리자명은 보이지 않게 필터링
         if (users && state.adminUser) {
             users = users.filter(u => u.username !== state.adminUser);
         }
@@ -251,9 +286,14 @@ async function loadAdminData() {
         let html = '';
         if (users && users.length > 0) {
             users.forEach(u => {
+                const roomBtn = u.is_room_manager 
+                    ? `<button class="btn btn-primary" style="padding:2px 5px; font-size:11px;" onclick="window.setUserRole('${u.username}', false)">방장해제</button>`
+                    : `<button class="btn btn-outline" style="padding:2px 5px; font-size:11px;" onclick="window.setUserRole('${u.username}', true)">방장지정</button>`;
+
                 html += `<tr>
                     <td>${u.username}</td>
                     <td style="text-align:center;">
+                        ${roomBtn}
                         <button class="btn btn-outline" style="padding:2px 5px; font-size:11px;" onclick="window.renameUser('${u.username}')">이름변경</button>
                         <button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteUser('${u.username}')">삭제</button>
                     </td>
@@ -267,6 +307,17 @@ async function loadAdminData() {
     } catch (e) {
         console.error(e);
         listEl.innerHTML = `<tr><td colspan="2" style="text-align:center; color:red;">로드 실패: ${e.message}</td></tr>`;
+    }
+}
+
+// [추가] 관리자가 특정 유저를 방장으로 지정/해제하는 함수
+export async function setUserRole(username, isRoomManager) {
+    try {
+        await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}`, 'PATCH', { is_room_manager: isRoomManager });
+        showAlert(isRoomManager ? "방장으로 지정되었습니다." : "방장 권한이 해제되었습니다.");
+        loadAdminData();
+    } catch (e) {
+        showAlert("권한 변경 실패", "error");
     }
 }
 
@@ -316,6 +367,185 @@ export async function renameUser(oldName) {
         await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(oldName)}`, 'PATCH', { username: newName });
         loadAdminData();
     } catch (e) { showAlert("이름 변경 실패 (중복된 이름일 수 있습니다)", "error"); }
+}
+
+// --- [추가] 방장 전용 관리 페이지 (방) ---
+
+export function openRoomManagerPage() {
+    document.getElementById('roomManagerOverlay').style.display = 'flex';
+    switchRoomView('main'); // 처음 열면 메인 메뉴 표시
+}
+
+export function closeRoomManagerPage() {
+    document.getElementById('roomManagerOverlay').style.display = 'none';
+}
+
+// 방장 팝업 내 뷰 전환 (메인메뉴/구성원가입/프로젝트관리)
+export function switchRoomView(view) {
+    const main = document.getElementById('roomMainButtons');
+    const userSec = document.getElementById('roomUserSection');
+    const projectSec = document.getElementById('roomProjectSection');
+    const guestSec = document.getElementById('roomGuestSection');
+    
+    main.style.display = view === 'main' ? 'grid' : 'none';
+    userSec.style.display = view === 'user' ? 'block' : 'none';
+    projectSec.style.display = view === 'project' ? 'block' : 'none';
+    guestSec.style.display = view === 'guest' ? 'block' : 'none';
+    
+    if(view === 'user') loadRoomUserData();
+    if(view === 'project') loadRoomProjectData();
+    if(view === 'guest') loadRoomGuestData();
+}
+
+async function loadRoomProjectData() {
+    const listEl = document.getElementById('roomProjectList');
+    listEl.innerHTML = '<div style="text-align:center; padding:20px;"><span class="spinner"></span> 로딩 중...</div>';
+
+    try {
+        const projects = await callSupabaseDirect('cad_projects?select=*&order=created_at.desc');
+        let html = '<table class="list-view-table"><thead><tr><th>프로젝트명</th><th style="width:100px; text-align:center;">설정</th></tr></thead><tbody>';
+        
+        if (projects && projects.length > 0) {
+            projects.forEach(p => {
+                const isPrivate = p.is_private === true;
+                const privateBtnClass = isPrivate ? 'btn-primary' : 'btn-outline';
+                const privateText = isPrivate ? '🔒 나만보기' : '🔓 전체공개';
+
+                html += `<tr>
+                    <td>${p.name}</td>
+                    <td style="text-align:center;">
+                        <button class="btn ${privateBtnClass}" style="padding:4px 8px; font-size:11px; width:80px;" onclick="window.toggleProjectPrivate(${p.id}, ${!isPrivate})">${privateText}</button>
+                    </td>
+                </tr>`;
+            });
+        } else {
+            html += '<tr><td colspan="2" style="text-align:center;">프로젝트가 없습니다.</td></tr>';
+        }
+        listEl.innerHTML = html + '</tbody></table>';
+    } catch (e) {
+        listEl.innerHTML = '<div style="text-align:center; color:red; padding:20px;">로드 실패</div>';
+    }
+}
+
+export async function toggleProjectPrivate(projectId, isPrivate) {
+    try {
+        // 프로젝트 소유자 정보를 현재 로그인한 방장으로 설정
+        const payload = { is_private: isPrivate, owner_name: state.currentUser };
+        await callSupabaseDirect(`cad_projects?id=eq.${projectId}`, 'PATCH', payload);
+        showAlert(isPrivate ? "비공개(나만 보기)로 설정되었습니다." : "전체 공개로 전환되었습니다.");
+        loadRoomProjectData();
+    } catch (e) { showAlert("설정 변경 실패", "error"); }
+}
+
+// --- [추가] Guest 전용 프로젝트 권한 관리 ---
+async function loadRoomGuestData() {
+    const listEl = document.getElementById('roomGuestProjectList');
+    listEl.innerHTML = '<div style="text-align:center; padding:20px;">로딩 중...</div>';
+
+    try {
+        // 모든 프로젝트와 그 중 guest에게 공유된 정보를 가져옴
+        const [projects, shares] = await Promise.all([
+            callSupabaseDirect('cad_projects?select=id,name&order=created_at.desc'),
+            callSupabaseDirect("project_shares?username=eq.guest&select=project_id")
+        ]);
+
+        const sharedIds = new Set(shares ? shares.map(s => s.project_id) : []);
+
+        let html = '<table class="list-view-table"><thead><tr><th>프로젝트명</th><th style="width:100px; text-align:center;">Guest허용</th></tr></thead><tbody>';
+        
+        if (projects && projects.length > 0) {
+            projects.forEach(p => {
+                const isChecked = sharedIds.has(p.id);
+                html += `<tr>
+                    <td>${p.name}</td>
+                    <td style="text-align:center;">
+                        <input type="checkbox" style="width:20px; height:20px; cursor:pointer;" 
+                            ${isChecked ? 'checked' : ''} 
+                            onchange="window.toggleGuestAccess(${p.id}, this.checked)">
+                    </td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            // [추가] 설정 완료 버튼
+            html += `<div style="margin-top:20px; text-align:center;">
+                        <button class="btn btn-primary" style="width:100%; padding:12px; font-weight:bold;" onclick="window.completeGuestSettings()">설정 완료 (저장)</button>
+                     </div>`;
+        } else {
+            html += '<tr><td colspan="2" style="text-align:center;">프로젝트가 없습니다.</td></tr>';
+        }
+        listEl.innerHTML = html;
+    } catch (e) {
+        listEl.innerHTML = '<div style="text-align:center; color:red; padding:20px;">로드 실패</div>';
+    }
+}
+
+export async function completeGuestSettings() {
+    // 설정 완료 시 알림을 주고 팝업 초기 메뉴로 이동
+    showAlert("Guest 권한 설정이 적용되었습니다.");
+    // 변경된 권한을 즉시 반영하기 위해 프로젝트 목록 다시 로드
+    loadProjects();
+    if (window.loadCadProjects) await window.loadCadProjects();
+    switchRoomView('main');
+}
+
+export async function toggleGuestAccess(projectId, shouldAllow) {
+    try {
+        if (shouldAllow) {
+            // 허용 선택 시: project_shares 테이블에 'guest' 추가
+            await callSupabaseDirect('project_shares', 'POST', { 
+                project_id: projectId, 
+                username: 'guest' 
+            }, { 'Prefer': 'resolution=ignore-duplicates' });
+        } else {
+            // 해제 선택 시: 해당 프로젝트의 'guest' 권한 삭제
+            await callSupabaseDirect(`project_shares?project_id=eq.${projectId}&username=eq.guest`, 'DELETE');
+        }
+    } catch (e) {
+        showAlert("Guest 권한 변경 실패", "error");
+    }
+}
+
+async function loadRoomUserData() {
+    const listEl = document.getElementById('roomUserList');
+    listEl.innerHTML = '<tr><td colspan="2" style="text-align:center;">로딩 중...</td></tr>';
+
+    try {
+        // 보안: 관리자를 제외한 모든 유저 목록 조회
+        let users = await callSupabaseDirect(`user_settings?username=neq.SYSTEM_CONFIG&select=username,created_at`);
+        if (users && state.adminUser) {
+            users = users.filter(u => u.username !== state.adminUser);
+        }
+
+        let html = '';
+        if (users && users.length > 0) {
+            users.forEach(u => {
+                html += `<tr>
+                    <td>${u.username}</td>
+                    <td style="text-align:center; color:#888; font-size:12px;">가입됨</td>
+                </tr>`;
+            });
+        } else {
+            html = '<tr><td colspan="2" style="text-align:center;">유저가 없습니다.</td></tr>';
+        }
+        listEl.innerHTML = html;
+    } catch (e) {
+        listEl.innerHTML = `<tr><td colspan="2" style="text-align:center;">로드 실패</td></tr>`;
+    }
+}
+
+export async function roomCreateUser() {
+    const input = document.getElementById('roomNewUserName');
+    const name = input.value.trim();
+    if (!name) return alert("이름을 입력하세요.");
+    // 보안: 관리자명으로 가입 시도 차단
+    if (name === 'SYSTEM_CONFIG' || name === state.adminUser) return alert("사용할 수 없는 이름입니다.");
+
+    try {
+        await callSupabaseDirect('user_settings', 'POST', { username: name, layer_colors: {}, layer_styles: {} }, { 'Prefer': 'resolution=merge-duplicates' });
+        input.value = '';
+        loadRoomUserData();
+        showAlert("신규 유저가 등록되었습니다.");
+    } catch (e) { showAlert("등록 실패", "error"); }
 }
 
 // --- [추가] Memo Manager ---

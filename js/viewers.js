@@ -686,12 +686,29 @@ async function loadCadProjects() {
     const select = document.getElementById('cadProjectSelect');
     select.innerHTML = '<option value="">로딩 중...</option>';
     try {
-        // [수정] cad_projects의 생성일과 연관된 cad_files의 updated_at을 함께 조회
-        // cad_projects 테이블에 updated_at이 없을 수 있으므로 cad_files 테이블을 참조
-        const data = await callSupabaseDirect('cad_projects?select=id,name,created_at,cad_files(updated_at)');
+        // [수정] guest 필터링을 위해 project_shares 데이터 포함 조회
+        const data = await callSupabaseDirect('cad_projects?select=id,name,created_at,is_private,owner_name,cad_files(updated_at),project_shares(username)');
         
-        // [추가] 각 프로젝트별로 파일들의 최종 업데이트 날짜를 비교하여 최신 날짜 산출
-        const projects = data.map(p => {
+        // [추가] 권한에 따른 필터링 적용
+        const filteredData = data.filter(p => {
+            if (!state.currentUser) return false;
+
+            const curUserLower = state.currentUser.toLowerCase();
+            const isAdmin = state.adminUser && curUserLower === state.adminUser.toLowerCase();
+            if (isAdmin) return true;
+
+            if (curUserLower === 'guest') {
+                // guest 권한 엄격 체크
+                return Array.isArray(p.project_shares) && 
+                       p.project_shares.some(s => s.username && s.username.toLowerCase() === 'guest');
+            }
+
+            const isOwner = p.owner_name === state.currentUser;
+            // 나만보기가 아니면 누구나, 나만보기면 본인만
+            return !p.is_private || isOwner;
+        });
+
+        const projects = filteredData.map(p => {
             let lastDate = new Date(p.created_at); // 기본값: 프로젝트 생성일
             if (p.cad_files && Array.isArray(p.cad_files)) {
                 p.cad_files.forEach(f => {

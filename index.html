@@ -288,6 +288,62 @@
     </div>
   </div>
 
+  <!-- [추가] 방장 페이지 모달 -->
+  <div id="roomManagerOverlay" class="lightbox-overlay" style="display: none; z-index: 3005;">
+    <div class="container" style="max-width: 500px; min-height: auto; padding: 20px; background: white; border-radius: 8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid #eee; padding-bottom:10px;">
+            <h2 style="margin:0;">방장 관리 메뉴</h2>
+            <button class="btn btn-secondary" onclick="window.closeRoomManagerPage()">닫기</button>
+        </div>
+        
+        <!-- 1. 메인 버튼 (구성원/프로젝트/Guest) -->
+        <div id="roomMainButtons" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+            <button class="btn btn-primary" style="padding:20px 5px; font-size:14px; font-weight:bold;" onclick="window.switchRoomView('user')">👥 구성원<br>추가</button>
+            <button class="btn btn-info" style="padding:20px 5px; font-size:14px; font-weight:bold;" onclick="window.switchRoomView('project')">📁 프로젝트<br>관리</button>
+            <button class="btn btn-success" style="padding:20px 5px; font-size:14px; font-weight:bold;" onclick="window.switchRoomView('guest')">👤 Guest<br>관리</button>
+        </div>
+
+        <!-- 2. 구성원 가입 섹션 -->
+        <div id="roomUserSection" style="display:none;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
+                <button class="btn btn-outline" onclick="window.switchRoomView('main')" style="padding:5px 10px;">← 뒤로</button>
+                <h3 style="margin:0;">구성원 가입 및 목록</h3>
+            </div>
+            <div style="margin-bottom: 15px; display:flex; gap:10px;">
+                <input type="text" id="roomNewUserName" placeholder="신규 유저 이름 입력" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                <button class="btn btn-primary" onclick="window.roomCreateUser()">가입시키기</button>
+            </div>
+            <div style="max-height: 300px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px;">
+                <table class="list-view-table" style="margin-top:0;">
+                    <thead style="position:sticky; top:0; background:#f1f1f1;">
+                        <tr><th>사용자명</th><th style="width:100px; text-align:center;">상태</th></tr>
+                    </thead>
+                    <tbody id="roomUserList"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 3. 프로젝트 관리 섹션 -->
+        <div id="roomProjectSection" style="display:none;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
+                <button class="btn btn-outline" onclick="window.switchRoomView('main')" style="padding:5px 10px;">← 뒤로</button>
+                <h3 style="margin:0;">프로젝트 관리</h3>
+            </div>
+            <div id="roomProjectList" style="max-height: 400px; overflow-y: auto;"></div>
+        </div>
+
+        <!-- 4. Guest 관리 섹션 -->
+        <div id="roomGuestSection" style="display:none;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
+                <button class="btn btn-outline" onclick="window.switchRoomView('main')" style="padding:5px 10px;">← 뒤로</button>
+                <h3 style="margin:0;">Guest 접근 허용 설정</h3>
+            </div>
+            <p style="font-size:12px; color:#666; margin-bottom:10px;">※ 체크된 프로젝트만 'guest' 유저에게 노출됩니다.</p>
+            <div id="roomGuestProjectList" style="max-height: 400px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px;"></div>
+        </div>
+    </div>
+  </div>
+
   <!-- [추가] 일반 메모 작성 모달 -->
   <div id="memoModal" class="lightbox-overlay" style="display: none; z-index: 3002;">
     <div class="container" style="max-width: 940px; width: 95%; min-height: auto; padding: 30px; background: white; border-radius: 8px;">

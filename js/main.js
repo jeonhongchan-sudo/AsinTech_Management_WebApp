@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
-import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter, fetchAvailableJobs, saveGeneralMemo, openGeneralMemoModal } from './managers.js';
+import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter, fetchAvailableJobs, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, toggleGuestAccess, completeGuestSettings } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
@@ -30,6 +30,14 @@ window.handleLogin = handleLogin; // [추가] 로그인 함수 바인딩
 window.logout = logout; // [추가] 로그아웃 함수 바인딩
 window.openAdminPage = openAdminPage;
 window.closeAdminPage = closeAdminPage;
+window.setUserRole = setUserRole; // [추가] 방장 지정 함수 바인딩
+window.openRoomManagerPage = openRoomManagerPage; // [추가]
+window.closeRoomManagerPage = closeRoomManagerPage; // [추가]
+window.roomCreateUser = roomCreateUser; // [추가]
+window.switchRoomView = switchRoomView; // [추가]
+window.toggleProjectPrivate = toggleProjectPrivate; // [추가]
+window.toggleGuestAccess = toggleGuestAccess; // [추가]
+window.completeGuestSettings = completeGuestSettings; // [추가]
 window.toggleSystemLock = toggleSystemLock;
 window.createNewUser = createNewUser;
 window.deleteUser = deleteUser;
@@ -113,19 +121,25 @@ export function switchTab(tabName) {
   if (tabName === 'memos') {
       loadMemoList();
   }
+
+  if (tabName === 'projects') {
+      loadProjects();
+  }
 }
 
 // [추가] 사용자 설정 로드 헬퍼 함수
 async function fetchUserSettings(username) {
     if (!state.supabaseConfig) return;
     try {
-        // [수정] layer_styles 컬럼도 함께 조회
-        const data = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=layer_colors,layer_styles`);
+        // [수정] is_room_manager 컬럼도 함께 조회
+        const data = await callSupabaseDirect(`user_settings?username=eq.${encodeURIComponent(username)}&select=layer_colors,layer_styles,is_room_manager`);
         if (data && data.length > 0) {
             state.userSettings = { 
                 layer_colors: data[0].layer_colors || {},
                 layer_styles: data[0].layer_styles || {} // [추가] 스타일 설정 로드
             };
+            // [추가] 방장 권한 설정
+            state.isRoomManager = data[0].is_room_manager === true;
             
             // [삭제] Job 리스트는 이제 jobs 테이블에서 직접 관리하므로 user_settings에서 로드할 필요 없음
             // if (state.userSettings.layer_styles['__GLOBAL_JOBS__']) {
@@ -135,6 +149,8 @@ async function fetchUserSettings(username) {
             //     state.jobs = JSON.parse(localStorage.getItem('asin_jobs') || '[]');
             // }
             reloadLayerStylesFromSettings(); // 맵이 이미 열려있다면 즉시 적용
+
+            updateHeaderWithUser(username); // 권한 로드 후 헤더 갱신
         } else {
             state.userSettings = { layer_colors: {}, layer_styles: {} };
         }
@@ -146,6 +162,9 @@ async function fetchUserSettings(username) {
 
 // [수정] 로그인 로직 분리 (자동 로그인 검증 강화)
 export async function performLogin(username, isAuto = false) {
+    // [추가] guest 계정인 경우 대소문자 무시하고 소문자로 표준화
+    if (username && username.toLowerCase() === 'guest') username = 'guest';
+
     // 1. UI 준비 (수동 로그인일 때만 버튼 제어)
     const overlay = document.getElementById('loginOverlay');
     const btn = overlay.querySelector('button');
@@ -185,7 +204,6 @@ export async function performLogin(username, isAuto = false) {
     // UI 해제 및 헤더 업데이트
     overlay.style.display = 'none';
     if (btn) { btn.innerText = "앱 시작하기"; btn.disabled = false; }
-    updateHeaderWithUser(username);
 
     // [수정] 설정 로드 대기 (await) - 맵 로드 시 색상 적용을 위해 필요
     if (state.supabaseConfig) {
@@ -197,7 +215,8 @@ export async function performLogin(username, isAuto = false) {
         }
         await fetchUserSettings(username);
     }
-
+    updateHeaderWithUser(username);
+    loadProjects(); // [추가] 로그인 성공 직후 유저 권한에 맞는 프로젝트 목록 로드
     return true;
 }
 
@@ -238,14 +257,25 @@ function updateHeaderWithUser(username) {
         }
     }
     if (userInfo) {
-        // [수정] 디자인 개선: 텍스트 간소화 및 로그아웃 버튼 스타일 변경
-        let html = `<span style="font-weight:bold; margin-right:5px;">${username}</span>`;
-        
-        // [추가] 관리자 버튼 (username이 adminUser와 같을 때만 표시)
-        if (state.adminUser && username === state.adminUser) {
-            html += `<button onclick="window.openAdminPage()" style="background:#ffc107; border:none; border-radius:10px; color:#000; cursor:pointer; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px;">관</button>`;
+        // [수정] 대소문자 구분 없이 권한 확인
+        const curUserLower = username.toLowerCase();
+        const isAdmin = state.adminUser && curUserLower === state.adminUser.toLowerCase();
+        const isGuest = curUserLower === 'guest';
+        const isRoomManager = state.isRoomManager;
+
+        let badgeHtml = '';
+        if (isAdmin) {
+            badgeHtml = `<button onclick="window.openAdminPage()" style="background:#ffc107; border:none; border-radius:10px; color:#000; cursor:pointer; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px;">관</button>`;
+        } else if (isRoomManager) {
+            badgeHtml = `<button onclick="window.openRoomManagerPage()" style="background:#4dabf7; border:none; border-radius:10px; color:#fff; cursor:pointer; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px;">방</button>`;
+        } else if (isGuest) {
+            badgeHtml = `<span style="background:#28a745; border-radius:10px; color:#fff; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px; display:inline-flex; align-items:center; height:18px; line-height:1;">손</span>`;
+        } else {
+            badgeHtml = `<span style="background:#868e96; border-radius:10px; color:#fff; padding:2px 8px; font-size:11px; font-weight:bold; margin-right:5px; display:inline-flex; align-items:center; height:18px; line-height:1;">일</span>`;
         }
-        
+
+        // [수정] 배지(badgeHtml)가 유저명 앞에 오도록 배치
+        let html = `<div style="display:inline-flex; align-items:center;">${badgeHtml}<span style="font-weight:bold; margin-right:10px;">${username}</span></div>`;
         html += `<button onclick="window.logout()" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.4); border-radius:10px; color:#fff; cursor:pointer; padding:2px 8px; font-size:11px;">로그아웃</button>`;
         userInfo.innerHTML = html;
     }

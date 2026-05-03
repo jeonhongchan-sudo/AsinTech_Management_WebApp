@@ -14,6 +14,7 @@ export const state = {
     currentLightboxIndex: 0,
     r2Config: null,
     currentUser: null,      // [추가] 현재 로그인한 사용자 ID
+    isRoomManager: false,   // [추가] 방장 여부
     userSettings: {},       // [추가] 사용자별 설정 (색상 등)
     adminUser: null,        // [추가] 관리자 ID (API로 수신)
     currentCadProjectId: null, // [추가] 현재 Map Viewer의 프로젝트 ID
