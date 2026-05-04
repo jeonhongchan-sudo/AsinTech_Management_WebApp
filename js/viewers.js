@@ -114,7 +114,7 @@ function renderRoadLedgerTOC() {
     const tocData = PDF_TOC_DATA['Contents (목차)'];
     const pdfBaseUrl = "https://drive.google.com/file/d/1mysxDT9bfxcdh2-DXDW9NLnOZOCRQ7lF/view?usp=drive_link";
     
-    let html = `<div style="padding: 20px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
+    let html = `<div style="padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
     html += `<div style="text-align:center; margin-bottom:20px; border-bottom:2px solid #eee; padding-bottom:15px; position: relative;">
                 <h2 style="margin-bottom:10px; padding-top: 10px;">2024 도로대장 작성 지침 목차</h2>
                 <a href="${pdfBaseUrl}" target="_blank" class="btn btn-primary" style="text-decoration:none;">📄 PDF</a>
@@ -140,12 +140,14 @@ function renderUISTable() {
     const container = document.getElementById('uisCodeTableContainer');
     if (container.innerHTML.trim() !== '') return;
     if (!UIS_DATA) return;
-    let html = `<table class="uis-table"><thead><tr><th>명칭</th><th style="width:15%">코드</th><th style="width:15%">형태</th></tr></thead><tbody>`;
+    // [수정] 명칭 컬럼 너비 최대화 및 코드/형태 컬럼 우측 정렬로 모바일 가시성 개선
+    // [재수정] 명칭과 코드 간 간격 확보 및 코드/형태 중앙 정렬
+    let html = `<table class="uis-table" style="width:100%;"><thead><tr><th style="text-align:left; padding-left:15px; padding-right:10px;">명칭</th><th style="width:70px; text-align:center;">코드</th><th style="width:50px; text-align:center; padding-right:15px;">형태</th></tr></thead><tbody>`;
     UIS_DATA.forEach(group => {
         html += `<tr><td colspan="3" class="uis-group-header">${group.category}</td></tr>`;
         group.items.forEach(item => {
             let nameDisplay = item.name + (ROAD_LEDGER_ITEMS.has(item.name) ? ` <span class="badge-ledger">도</span>` : '');
-            html += `<tr><td style="text-align:left;padding-left:20px;">${nameDisplay}</td><td style="font-family:monospace;font-weight:bold;">${item.code}</td><td>${item.type}</td></tr>`;
+            html += `<tr><td style="text-align:left; padding-left:15px; padding-right:10px; word-break: break-all;">${nameDisplay}</td><td style="font-family:monospace;font-weight:bold; text-align:center;">${item.code}</td><td style="text-align:center; padding-right:15px;">${item.type}</td></tr>`;
         });
     });
     container.innerHTML = html + `</tbody></table>`;
@@ -155,7 +157,7 @@ function renderNetworkRtk() {
     const container = document.getElementById('networkRtkContainer');
     if (container.innerHTML.trim() !== '') return;
     const data = NETWORK_RTK_DATA;
-    let html = `<div style="padding: 20px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
+    let html = `<div style="padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
     html += `<h2 style="text-align: center; margin-bottom: 10px;">${data.title}</h2>`;
     html += `<p style="text-align: right; font-weight: bold; color: #555;">${data.effectiveDate}</p>`;
     data.sections.forEach(section => {
@@ -227,7 +229,7 @@ function renderNonConformityCases() {
     const container = document.getElementById('nonConformityContainer');
     if (container.innerHTML.trim() !== '') return;
     const data = NON_CONFORMITY_CASES_DATA;
-    let html = `<div style="padding: 20px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
+    let html = `<div style="padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
     
     // Header
     html += `<div style="text-align:center; margin-bottom:30px; border-bottom:2px solid #eee; padding-bottom:20px; position: relative;">
@@ -302,7 +304,7 @@ function renderNumericMap() {
     if (container.innerHTML.trim() !== '') return;
     const data = NUMERIC_MAP_DATA;
     
-    let html = `<div style="padding: 20px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
+    let html = `<div style="padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
     
     // Header with PDF Button
     html += `<div style="text-align:center; margin-bottom:30px; border-bottom:2px solid #eee; padding-bottom:20px; position: relative;">
@@ -334,7 +336,7 @@ function renderGnssNotice() {
     if (container.innerHTML.trim() !== '') return;
     const data = GNSS_NOTICE_DATA;
     
-    let html = `<div style="padding: 20px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
+    let html = `<div style="padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
     
     // Header
     html += `<div style="text-align:center; margin-bottom:30px; border-bottom:2px solid #eee; padding-bottom:20px; position: relative;">
@@ -375,7 +377,7 @@ function renderPublicSurveyFaq() {
     if (container.innerHTML.trim() !== '') return;
     const data = PUBLIC_SURVEY_FAQ_DATA;
     
-    let html = `<div style="padding: 20px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
+    let html = `<div style="padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
     
     // Header
     html += `<div style="text-align:center; margin-bottom:30px; border-bottom:2px solid #eee; padding-bottom:20px; position: relative;">
@@ -475,7 +477,7 @@ function renderRegulationRevision() {
     if (container.innerHTML.trim() !== '') return;
     const data = REGULATION_REVISION_DATA;
     
-    let html = `<div style="padding: 20px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
+    let html = `<div style="padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
     
     // Header
     html += `<div style="text-align:center; margin-bottom:30px; border-bottom:2px solid #eee; padding-bottom:20px;">
@@ -521,7 +523,7 @@ function renderMaterialAbbr() {
     if (container.innerHTML.trim() !== '') return;
     const data = MATERIAL_ABBREVIATION_DATA;
 
-    let html = `<div style="padding: 20px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
+    let html = `<div style="padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
 
     // Header
     html += `<div style="text-align:center; margin-bottom:30px; border-bottom:2px solid #eee; padding-bottom:20px;">
@@ -571,7 +573,7 @@ function renderPublicSurveyRegulations() {
     if (container.innerHTML.trim() !== '') return;
     const data = PUBLIC_SURVEY_REGULATIONS_DATA;
 
-    let html = `<div style="padding: 20px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
+    let html = `<div style="padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 8px;">`;
 
     // Header
     html += `<div style="text-align:center; margin-bottom:30px; border-bottom:2px solid #eee; padding-bottom:20px;">
@@ -579,7 +581,7 @@ function renderPublicSurveyRegulations() {
              </div>`;
 
     data.parts.forEach(part => {
-        html += `<div style="margin-top: 40px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fdfdff;">`;
+        html += `<div style="margin-top: 40px; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fdfdff;">`;
         html += `<h3 style="border-left: 5px solid #8e44ad; padding-left: 10px; margin-bottom: 20px;">${part.partTitle}</h3>`;
         
         part.articles.forEach(article => {
@@ -905,8 +907,10 @@ function updateLayerDiscovery() {
             if (savedStyle) {
                 cadLayerColors[layerName] = savedStyle.color || getRandomColor();
                 if (savedStyle.visible === false) cadHiddenLayers.add(layerName);
-                if (!state.userSettings.layer_styles[storageKey]) state.userSettings.layer_styles[storageKey] = {};
-                state.userSettings.layer_styles[storageKey].width = savedStyle.width || 1.5;
+                if (state.userSettings?.layer_styles) {
+                    if (!state.userSettings.layer_styles[storageKey]) state.userSettings.layer_styles[storageKey] = {};
+                    state.userSettings.layer_styles[storageKey].width = savedStyle.width || 1.5;
+                }
             } else {
                 cadLayerColors[layerName] = getRandomColor();
             }
@@ -941,7 +945,7 @@ function renderLayerList() {
     labelStyleDiv.className = 'layer-item';
     labelStyleDiv.style.cssText = 'border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; font-weight: bold; display: flex; align-items: center; justify-content: space-between;';
     const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
-    const savedLabelStyle = state.userSettings.layer_styles?.[labelStyleKey] || { size: 12, color: '#000000' };
+    const savedLabelStyle = state.userSettings?.layer_styles?.[labelStyleKey] || { size: 12, color: '#000000' };
     labelStyleDiv.innerHTML = `
         <span style="flex:1;">선레이어명 스타일</span>
         <input type="number" class="layer-width-input" value="${savedLabelStyle.size || 12}" min="1" max="50" step="1" onchange="window.changeLineLabelSize(parseInt(this.value))" title="글자 크기 변경" style="margin-right:5px;">
@@ -951,7 +955,7 @@ function renderLayerList() {
 
     Array.from(cadLayers).sort().forEach(layer => {
         const storageKey = `${state.currentCadProjectId}_${layer}`;
-        const layerStyle = state.userSettings.layer_styles[storageKey] || {};
+        const layerStyle = state.userSettings?.layer_styles?.[storageKey] || {};
         const color = layerStyle.color || cadLayerColors[layer]; // cadLayerColors는 하위 호환용
         const isChecked = layerStyle.visible !== false; // visible이 false가 아니면 체크됨
         const lineWidth = layerStyle.width || 1.5; // 기본 굵기
@@ -1244,15 +1248,8 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
         // [수정] 내 메모 또는(OR) 공개된 메모만 조회
         const user = state.currentUser ? encodeURIComponent(state.currentUser) : 'anonymous';
         
-        // [추가] 조사 메모 필터링 적용
         let query = `memos?project_id=eq.${state.currentCadProjectId}&or=(is_public.eq.true,username.eq.${user})&select=*`;
-        if (state.isSurveyFilterMode) {
-            let filterPart = `&is_survey=eq.true`;
-            if (state.selectedJobFilter) {
-                filterPart += `&job_name=eq.${encodeURIComponent(state.selectedJobFilter)}`;
-            }
-            query = `memos?project_id=eq.${state.currentCadProjectId}&or=(is_public.eq.true,username.eq.${user})${filterPart}&select=*&order=created_at.desc`;
-        }
+
         const data = await callSupabaseDirect(query);
         
         // [수정] state.memos 전체를 덮어쓰지 않고 현재 프로젝트 데이터만 업데이트하거나 병합
@@ -1416,8 +1413,6 @@ function openMemoPopup(feature) {
     const content = existingMemo ? existingMemo.content : '';
     const memoId = existingMemo ? existingMemo.id : null; // [추가] 수정 시 ID 전달
     const isPublic = existingMemo ? existingMemo.is_public : true; // [수정] 기본값: 공개 메모
-    const isSurvey = existingMemo ? existingMemo.is_survey : false; // [추가] 기존 조사 여부
-    const jobName = existingMemo ? existingMemo.job_name : ''; // [추가] 기존 Job 명
     let tmX = existingMemo ? existingMemo.tm_x : (feature.properties.tm_x || '');
     let tmY = existingMemo ? existingMemo.tm_y : (feature.properties.tm_y || '');
     const chainage = existingMemo ? existingMemo.chainage : (feature.properties.chainage || ''); // [추가] Chainage
@@ -1506,19 +1501,6 @@ function openMemoPopup(feature) {
         <a href="https://m.map.naver.com/map.nhn?lat=${lat}&lng=${lon}&level=12&pin=1" target="_blank" class="btn btn-outline" style="flex:1; padding: 4px; font-size:11px; background-color:#03C75A; color:white; border-color:#03C75A;">네이버</a>
     </div>`;
 
-    // [추가] Job 리스트 옵션 생성
-    // [수정] 초기에는 로딩 표시, 팝업 생성 후 비동기로 채움
-    let jobOptions = '<option value="">로딩 중...</option>';
-    const jobDisplay = isSurvey ? 'block' : 'none';
-
-    // [추가] 조사 메모인 경우 공개 메모 체크박스 상태 설정
-    let publicAttr = '';
-    if (isSurvey) {
-        publicAttr = 'checked disabled';
-    } else {
-        publicAttr = isPublic ? 'checked' : '';
-    }
-
     // [추가] 삭제 권한 로직: 본인 글이거나 공개된 글이면 삭제 가능
     const isMine = existingMemo ? (existingMemo.username === state.currentUser) : true;
     const canDelete = existingMemo ? (isMine || isPublic) : false;
@@ -1536,11 +1518,6 @@ function openMemoPopup(feature) {
     const popupContent = document.createElement('div');
     popupContent.style.width = '200px';
     popupContent.innerHTML = `
-        <div id="quickJobPicker" style="margin-bottom:10px; padding:8px; background:#fff9db; border:1px solid #fab005; border-radius:6px; display:none;">
-            <div style="font-size:11px; font-weight:bold; color:#f08c00; margin-bottom:5px; display:flex; align-items:center; gap:3px;">👷 빠른 조사 설정 (Job 선택)</div>
-            <div class="job-chips" style="display:flex; gap:4px; flex-wrap:wrap; max-height:80px; overflow-y:auto;">
-            </div>
-        </div>
         ${matchedPhotosHtml} <!-- 자동 매칭된 사진 영역 -->
         <textarea id="popupMemoInput" style="width:100%; height:80px; margin-bottom:5px; font-size:13px;">${content}</textarea>
         <div style="display:flex; gap:5px; margin-bottom:5px;">
@@ -1557,13 +1534,7 @@ function openMemoPopup(feature) {
         </div>
         <input type="hidden" id="popupMemoUrl" value="${existingImgUrls.filter(u => u.trim() !== '').join(',')}">
         <label style="font-size:12px; display:flex; align-items:center; margin-bottom:5px;">
-            <input type="checkbox" id="popupMemoSurvey" ${isSurvey ? 'checked' : ''}> 조사 메모
-        </label>
-        <div id="popupMemoJobContainer" style="display:${jobDisplay}; margin-bottom:5px; padding-left:5px;">
-             <select id="popupMemoJobSelect" style="width:100%; padding:5px; font-size:12px; border:1px solid #ddd; border-radius:4px;">${jobOptions}</select>
-        </div>
-        <label style="font-size:12px; display:flex; align-items:center; margin-bottom:5px;">
-            <input type="checkbox" id="popupMemoPublic" ${publicAttr}> 공개 메모 (다른 사용자와 공유)
+            <input type="checkbox" id="popupMemoPublic" ${isPublic ? 'checked' : ''}> 공개 메모 (다른 사용자와 공유)
         </label>
         <div id="popupMemoActionButtons">${actionButtonsHtml}</div>
         ${infoHtml}
@@ -1574,59 +1545,6 @@ function openMemoPopup(feature) {
         .setLngLat(coords)
         .setDOMContent(popupContent)
         .addTo(cadMap);
-
-    // [추가] 비동기로 Job 리스트 로드 및 적용
-    if (window.fetchAvailableJobs) {
-        window.fetchAvailableJobs().then(jobs => {
-            const picker = popupContent.querySelector('#quickJobPicker');
-            const chipsCont = popupContent.querySelector('.job-chips');
-            const select = popupContent.querySelector('#popupMemoJobSelect');
-
-            // 빠른 선택 칩(Chips) 생성
-            if (jobs && jobs.length > 0) {
-                picker.style.display = 'block';
-                jobs.forEach(j => {
-                    const btn = document.createElement('button');
-                    btn.innerText = j;
-                    btn.className = 'btn btn-outline';
-                    btn.style.cssText = 'padding:2px 8px; font-size:11px; border-radius:12px; border-color:#fab005; color:#e67e22; background:white;';
-                    
-                    if (j === jobName) {
-                        btn.style.background = '#fab005';
-                        btn.style.color = '#fff';
-                    }
-
-                    btn.onclick = () => {
-                        const surveyChk = popupContent.querySelector('#popupMemoSurvey');
-                        const jobCont = popupContent.querySelector('#popupMemoJobContainer');
-                        const pubChk = popupContent.querySelector('#popupMemoPublic');
-
-                        // 자동 설정 로직
-                        surveyChk.checked = true;
-                        jobCont.style.display = 'block';
-                        select.value = j;
-                        pubChk.checked = true;
-                        pubChk.disabled = true;
-
-                        // UI 피드백 (하이라이트)
-                        chipsCont.querySelectorAll('button').forEach(b => { b.style.background = 'white'; b.style.color = '#e67e22'; });
-                        btn.style.background = '#fab005';
-                        btn.style.color = '#fff';
-                    };
-                    chipsCont.appendChild(btn);
-                });
-            }
-
-            if (select) {
-                let opts = '<option value="">Job 선택</option>';
-                jobs.forEach(j => {
-                    const selected = j === jobName ? 'selected' : '';
-                    opts += `<option value="${j}" ${selected}>${j}</option>`;
-                });
-                select.innerHTML = opts;
-            }
-        });
-    }
 
     // [추가] 팝업 열릴 때 전역 파일 배열 초기화
     window.currentMemoFiles = [];
@@ -1647,21 +1565,6 @@ function openMemoPopup(feature) {
         ['keydown', 'keyup', 'keypress', 'input'].forEach(evt => textarea.addEventListener(evt, e => e.stopPropagation()));
         setTimeout(() => textarea.focus(), 100); // 팝업 열린 후 포커스
     }
-
-    // [추가] 조사 메모 체크 시 Job 선택 박스 토글
-    popupContent.querySelector('#popupMemoSurvey').addEventListener('change', (e) => {
-        const isChecked = e.target.checked;
-        popupContent.querySelector('#popupMemoJobContainer').style.display = isChecked ? 'block' : 'none';
-        
-        // [추가] 조사 메모 체크 시 공개 메모 강제 설정
-        const pubChk = popupContent.querySelector('#popupMemoPublic');
-        if (isChecked) {
-            pubChk.checked = true;
-            pubChk.disabled = true;
-        } else {
-            pubChk.disabled = false;
-        }
-    });
 
     // [추가] 삭제 버튼 이벤트 핸들러
     const delBtn = popupContent.querySelector('#popupMemoDeleteBtn');
@@ -1684,8 +1587,6 @@ function openMemoPopup(feature) {
         saveBtn.onclick = async () => {
         const newContent = popupContent.querySelector('#popupMemoInput').value;
         const newIsPublic = popupContent.querySelector('#popupMemoPublic').checked;
-        const newIsSurvey = popupContent.querySelector('#popupMemoSurvey').checked;
-        const newJobName = popupContent.querySelector('#popupMemoJobSelect').value;
         let existingImages = popupContent.querySelector('#popupMemoUrl').value; 
         
         const files = (window.currentMemoFiles && window.currentMemoFiles.length > 0) ? [...window.currentMemoFiles] : []; // 새 파일들 복사
@@ -1698,7 +1599,7 @@ function openMemoPopup(feature) {
             saveBtn.innerText = "저장 중...";
 
             // [수정] memoId를 함께 전달하여 수정/신규 구분
-            const saveSuccess = await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, existingImages, newIsSurvey, newJobName, tmX, tmY, chainage, files);
+            const saveSuccess = await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, existingImages, tmX, tmY, chainage, files);
             
             if (saveSuccess) { // 저장 성공 시에만 팝업 닫기
                 window.currentMemoFiles = []; // 전달 후 즉시 초기화

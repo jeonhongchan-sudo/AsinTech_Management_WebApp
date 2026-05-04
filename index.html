@@ -29,6 +29,11 @@
         .nav-tab { padding: 10px 5px; font-size: 14px; flex: 1; }
         /* 사이드바 닫기 버튼 (공통) */
         .sidebar-close-btn { display: block !important; }
+
+        /* [추가] 지침서 탭 모바일 최적화: 내용물 폭 확보를 위해 사이드바와 내용을 세로로 배치 */
+        .guidelines-wrapper { flex-direction: column !important; }
+        .guidelines-sidebar { width: 100% !important; border-right: none !important; border-bottom: 1px solid #ddd; max-height: 150px; overflow-y: auto; }
+        .guidelines-content { width: 100% !important; padding: 8px !important; }
     }
 
     /* 모바일 가로 모드 (Landscape) 최적화: 탭 높이 조정 */
@@ -161,9 +166,7 @@
             <div class="memo-actions" id="memoActions">
                 <button class="btn btn-primary" onclick="window.openGeneralMemoModal()" title="새 메모 작성" style="font-weight:bold; font-size:18px; padding: 5px 15px;">+ <span class="btn-label">메모 작성</span></button>
                 <button class="btn btn-secondary" onclick="loadMemoList()" title="새로고침" style="padding:6px 10px; font-size:13px;">↻ <span class="btn-label">새로고침</span></button>
-                <button class="btn btn-warning" onclick="window.openJobManager()" title="Job 관리" style="padding:6px 10px; font-size:15px;">👷 <span class="btn-label">Job 관리</span></button>
-                <button class="btn btn-outline" id="btnToggleSurveyFilter" onclick="window.toggleSurveyFilterMode()" title="조사 메모만 보기" style="padding:6px 10px; font-size:13px;">📋 <span class="btn-label">필터</span></button>
-                <button class="btn btn-success" onclick="window.downloadSurveyMemosCSV()" title="엑셀 다운로드" style="padding:6px 10px; font-size:13px;">💾 <span class="btn-label">엑셀 저장</span></button>
+                <button class="btn btn-success" onclick="window.downloadMemosCSV()" title="엑셀 다운로드" style="padding:6px 10px; font-size:13px;">💾 <span class="btn-label">엑셀 저장</span></button>
             </div>
         </div>
         <div id="memoListContainer">
@@ -371,12 +374,6 @@
             <!-- <input type="hidden" id="memoImageUrl"> -->
         </div>
         <div class="form-group" style="margin-top: 10px;">
-            <label style="display:flex; align-items:center; cursor:pointer; font-size:14px; margin-bottom:5px;">
-                <input type="checkbox" id="memoSurveyCheck" style="width:auto; margin-right:8px;"> 조사 메모
-            </label>
-            <div id="memoJobContainer" style="display:none; margin-bottom:5px; padding-left:24px;">
-                <select id="memoJobSelect" style="width:100%; padding:5px; border:1px solid #ddd; border-radius:4px;"></select>
-            </div>
             <label style="display:flex; align-items:center; cursor:pointer; font-size:14px;">
                 <input type="checkbox" id="memoPublicCheck" style="width:auto; margin-right:8px;" checked> 공개 메모 (다른 사용자와 공유)
             </label>
@@ -385,32 +382,6 @@
             <button class="btn btn-secondary" onclick="document.getElementById('memoModal').style.display='none'">취소</button>
             <button class="btn btn-primary" onclick="window.saveGeneralMemo()">저장</button>
         </div>
-    </div>
-  </div>
-
-  <!-- [추가] Job 관리 모달 -->
-  <div id="jobManagerModal" class="lightbox-overlay" style="display: none; z-index: 3003;">
-    <div class="container" style="max-width: 400px; min-height: auto; padding: 20px; background: white; border-radius: 8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-            <h3 style="margin:0;">Job 관리</h3>
-            <button class="btn btn-secondary" onclick="window.closeJobManager()">닫기</button>
-        </div>
-        <div style="display:flex; gap:5px; margin-bottom:15px;">
-            <input type="text" id="newJobInput" placeholder="Job 이름 입력" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;">
-            <button class="btn btn-primary" onclick="window.addJob()">추가</button>
-        </div>
-        <div id="jobManagerList" style="max-height:300px; overflow-y:auto; border:1px solid #eee; border-radius:4px;"></div>
-    </div>
-  </div>
-
-  <!-- [추가] Job 선택(필터) 모달 -->
-  <div id="jobSelectionModal" class="lightbox-overlay" style="display: none; z-index: 3004;">
-    <div class="container" style="max-width: 350px; min-height: auto; padding: 20px; background: white; border-radius: 8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;">
-            <h3 style="margin:0;">Job 선택</h3>
-            <button class="btn btn-secondary" onclick="window.closeJobSelectionModal()">닫기</button>
-        </div>
-        <div id="jobSelectionList" style="max-height:400px; overflow-y:auto;"></div>
     </div>
   </div>
 

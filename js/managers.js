@@ -613,13 +613,7 @@ export async function loadMemoList() {
         const user = state.currentUser ? encodeURIComponent(state.currentUser) : 'anonymous';
         
         let query = `memos?or=(is_public.eq.true,username.eq.${user})&select=*&order=created_at.desc`;
-        if (state.isSurveyFilterMode) {
-            let filterPart = `&is_survey=eq.true`;
-            if (state.selectedJobFilter) {
-                filterPart += `&job_name=eq.${encodeURIComponent(state.selectedJobFilter)}`;
-            }
-            query = `memos?or=(is_public.eq.true,username.eq.${user})${filterPart}&select=*&order=created_at.desc`;
-        }
+
         const data = await callSupabaseDirect(query);
 
         // [추가] 정렬 로직: 일반 메모(GENERAL)를 최상단으로, 나머지는 날짜 역순
@@ -692,14 +686,9 @@ function renderMemoListUI() {
             fileIcon = `<a href="${firstUrl}" target="_blank" style="text-decoration:none; margin-right:5px; font-size:16px;" title="${title}">${icon}</a>`;
         }
 
-        let jobBadge = '';
-        if (m.is_survey && m.job_name) {
-            jobBadge = `<span style="background:#ffc107; color:#000; padding:2px 5px; border-radius:4px; font-size:11px; margin-right:5px; font-weight:bold;">[${m.job_name}]</span>`;
-        }
-
         html += `<tr class="${isManagementMemo ? 'general-memo-row' : ''}">
             <td data-label="프로젝트">${m.projectName}</td>
-            <td data-label="내용" class="memo-content">${publicIcon} ${jobBadge}${fileIcon}${m.content}</td>
+            <td data-label="내용" class="memo-content">${publicIcon} ${fileIcon}${m.content}</td>
             <td data-label="날짜">${new Date(m.created_at).toLocaleString()}</td>
             <td data-label="작성자">${m.username || '-'}</td>
             <td data-label="관리">${locBtn}${deleteBtn}</td>
@@ -712,27 +701,24 @@ function renderMemoListUI() {
 // [수정] 메모 저장 함수 (비동기 백그라운드 처리 적용)
 // files: 업로드할 파일 객체 배열 (없으면 null)
 // existingImages: 기존에 저장된 이미지 URL 문자열 (콤마 구분)
-export async function saveMemo(projectId, lon, lat, content, layer, memoId = null, isPublic = true, existingImages = null, isSurvey = false, jobName = null, tmX = null, tmY = null, chainage = null, files = []) {
+export async function saveMemo(projectId, lon, lat, content, layer, memoId = null, isPublic = true, existingImages = null, tmX = null, tmY = null, chainage = null, files = []) {
     if (!state.supabaseConfig) {
         showAlert("설정 로드 실패. 페이지를 새로고침하세요.", "error");
         return;
     }
 
-    // [추가] 조사 메모는 항상 공개 상태로 설정
-    if (isSurvey) isPublic = true;
-
     showAlert("메모 저장 및 업로드를 시작합니다...", "info");
 
     // [수정] 백그라운드 처리 결과를 명확히 반환하여 viewers.js에서 팝업이 닫히도록 제어
     const saveResult = await processMemoSaveBackground({
-        projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files
+        projectId, lon, lat, content, layer, memoId, isPublic, existingImages, tmX, tmY, chainage, files
     });
     return saveResult;
 }
 
 // [추가] 백그라운드 메모 저장 및 업로드 처리 함수
 async function processMemoSaveBackground(data) {
-    const { projectId, lon, lat, content, layer, memoId, isPublic, existingImages, isSurvey, jobName, tmX, tmY, chainage, files } = data;
+    const { projectId, lon, lat, content, layer, memoId, isPublic, existingImages, tmX, tmY, chainage, files } = data;
     const user = state.currentUser || 'anonymous';
     
     try {
@@ -800,8 +786,6 @@ async function processMemoSaveBackground(data) {
             username: user,
             is_public: isPublic,
             image_url: imageUrlString,
-            is_survey: isSurvey,
-            job_name: jobName,
             tm_x: validTmX,
             tm_y: validTmY,
             chainage: chainage,
@@ -900,47 +884,15 @@ export function resizeImage(file, maxWidth = 1024, quality = 0.6) {
     });
 }
 
-// [추가] 사용 가능한 모든 Job 목록 가져오기 (DB memos + user_settings)
-export async function fetchAvailableJobs() {
-    const jobsSet = new Set();
-
-    if (state.supabaseConfig) {
-        try {
-            // [수정] jobs 테이블에서 Job 목록 조회 (메모 유무와 상관없이 조회됨)
-            const data = await callSupabaseDirect('jobs?select=job_name&order=created_at.desc');
-            if (data) {
-                data.forEach(row => {
-                    if (row.job_name) jobsSet.add(row.job_name);
-                });
-            }
-        } catch (e) {
-            console.warn("Failed to fetch jobs:", e);
-        }
-    }
-    return Array.from(jobsSet).sort();
-}
-
 // [추가] 일반 메모 작성 모달 열기
 export async function openGeneralMemoModal() {
     const modal = document.getElementById('memoModal');
     const select = document.getElementById('memoProjectSelect');
     const content = document.getElementById('memoContentInput');
     const publicCheck = document.getElementById('memoPublicCheck'); // [추가]
-    const surveyCheck = document.getElementById('memoSurveyCheck'); // [추가]
-    const jobContainer = document.getElementById('memoJobContainer'); // [추가]
-    const jobSelect = document.getElementById('memoJobSelect'); // [추가]
     const preview = document.getElementById('memoImagePreview');    
     
     content.value = '';
-    if(publicCheck) publicCheck.checked = true; // 기본값: 공개
-    
-    // [수정] [메모관리] 탭에서는 조사 메모 기능이 의미가 없으므로 UI 숨김 처리
-    if(surveyCheck) {
-        surveyCheck.checked = false;
-        const surveyLabel = surveyCheck.closest('label');
-        if (surveyLabel) surveyLabel.style.display = 'none';
-    }
-    if(jobContainer) jobContainer.style.display = 'none';
 
     if(preview) preview.innerHTML = '';
     // if(urlInput) urlInput.value = '';
@@ -984,13 +936,6 @@ export async function openGeneralMemoModal() {
                 select.appendChild(opt);
             });
         }
-
-        // [추가] Job 리스트 로드
-        const jobs = await fetchAvailableJobs(); // [수정] DB 조회 함수 사용
-        jobSelect.innerHTML = '<option value="">Job 선택</option>';
-        jobs.forEach(j => {
-            jobSelect.innerHTML += `<option value="${j}">${j}</option>`;
-        });
 
     } catch (e) {
         select.innerHTML = '<option>로드 실패</option>';
@@ -1090,10 +1035,6 @@ export async function saveGeneralMemo() {
     const content = document.getElementById('memoContentInput').value;
     const isPublic = document.getElementById('memoPublicCheck').checked; // [추가] 공개 여부 확인
     
-    // [수정] [메모관리] 탭에서는 조사 기능 제거
-    const isSurvey = false;
-    const jobName = null;
-
     
     // [추가] 파일 목록 가져오기
     const files = window.currentMemoFiles || [];
@@ -1112,9 +1053,47 @@ export async function saveGeneralMemo() {
 
     // 일반 메모는 좌표를 0, 0으로 저장 (DB 스키마가 Not Null인 경우 대비)
     // imageUrl 인자는 null로 전달 (새 파일은 files로 전달)
-    await saveMemo(projectId, 0, 0, content, '일반메모', null, isPublic, null, isSurvey, jobName, null, null, null, files); 
+    await saveMemo(projectId, 0, 0, content, '일반메모', null, isPublic, null, null, null, null, files); 
     document.getElementById('memoModal').style.display = 'none';
     window.currentMemoFiles = []; // 초기화
+}
+
+// [추가] 메모 CSV 다운로드 (일반 메모 포함)
+export function downloadMemosCSV() {
+    if (!state.memos || state.memos.length === 0) {
+        return alert("다운로드할 메모가 없습니다.");
+    }
+
+    let csvContent = "\uFEFF"; // BOM (한글 깨짐 방지)
+    csvContent += "프로젝트,lon,lat,tm_x,tm_y,메모내용,Chainage,작성자,공개여부,날짜,첨부파일\n";
+
+    state.memos.forEach(m => {
+        const content = (m.content || '').replace(/"/g, '""'); // 따옴표 이스케이프
+        const imageUrls = (m.image_url || '').split(',').filter(url => url.trim() !== '').join(';'); // 여러 URL은 세미콜론으로 구분
+        const row = [
+            `"${m.projectName}"`,
+            `"${m.lon || ''}"`,
+            `"${m.lat || ''}"`,
+            `"${m.tm_x || ''}"`,
+            `"${m.tm_y || ''}"`,
+            `"${content}"`,
+            `"${m.chainage || ''}"`,
+            `"${m.username}"`,
+            `"${m.is_public ? '공개' : '비공개'}"`,
+            `"${new Date(m.created_at).toLocaleString()}"`,
+            `"${imageUrls}"`
+        ];
+        csvContent += row.join(",") + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `memos_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 // window 객체에 바인딩 (viewers.js의 popup에서 호출)
@@ -1126,160 +1105,3 @@ window.removeMemoFile = removeMemoFile;
 window.removeExistingMemoImage = removeExistingMemoImage;
 window.resizeImage = resizeImage;
 window.fileToBase64 = fileToBase64;
-
-// [추가] Job 관리자 기능
-export function openJobManager() {
-    document.getElementById('jobManagerModal').style.display = 'flex';
-    renderJobManagerList();
-}
-
-export function closeJobManager() {
-    document.getElementById('jobManagerModal').style.display = 'none';
-}
-
-// [수정] Job 추가 (jobs 테이블에 저장)
-export async function addJob() {
-    const input = document.getElementById('newJobInput');
-    const val = input.value.trim();
-    if(!val) return alert("Job 이름을 입력하세요.");
-    
-    try {
-        // jobs 테이블에 insert
-        await callSupabaseDirect('jobs', 'POST', { 
-            job_name: val, 
-            created_by: state.currentUser || 'anonymous' 
-        });
-        input.value = '';
-        renderJobManagerList(); // 목록 갱신
-    } catch (e) {
-        alert("Job 추가 실패 (중복된 이름일 수 있습니다): " + e.message);
-    }
-}
-
-// [수정] Job 삭제 (jobs 테이블에서 삭제)
-export async function deleteJob(job) {
-    if(!confirm(`'${job}'을(를) 삭제하시겠습니까?`)) return;
-    
-    try {
-        await callSupabaseDirect(`jobs?job_name=eq.${encodeURIComponent(job)}`, 'DELETE');
-        renderJobManagerList(); // 목록 갱신
-    } catch (e) {
-        alert("삭제 실패: " + e.message);
-    }
-}
-
-// [수정] Job 관리자 목록 렌더링 (DB 조회)
-async function renderJobManagerList() {
-    const list = document.getElementById('jobManagerList');
-    list.innerHTML = '<div style="text-align:center; padding:10px;">로딩 중...</div>';
-    
-    const jobs = await fetchAvailableJobs(); // DB에서 최신 목록 가져오기
-    
-    let html = '';
-    jobs.forEach(j => {
-        html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px; border-bottom:1px solid #eee;"><span>${j}</span><button class="btn btn-danger" style="padding:2px 8px; font-size:12px;" onclick="window.deleteJob('${j}')">삭제</button></div>`;
-    });
-    list.innerHTML = html || '<div style="text-align:center; padding:10px; color:#999;">등록된 Job이 없습니다.</div>';
-}
-
-// [추가] 조사 메모 필터 모드 토글
-export function toggleSurveyFilterMode() {
-    if (state.isSurveyFilterMode) {
-        // 이미 필터 중이면 해제
-        state.isSurveyFilterMode = false;
-        state.selectedJobFilter = null;
-        updateFilterButtonUI();
-        loadMemoList();
-        if (window.loadMapMemos) window.loadMapMemos();
-    } else {
-        // 필터 켜기 -> Job 선택 모달 열기
-        openJobSelectionModal();
-    }
-}
-
-// [추가] Job 선택 모달 열기
-export async function openJobSelectionModal() { // [수정] async 추가
-    const modal = document.getElementById('jobSelectionModal');
-    const list = document.getElementById('jobSelectionList');
-    
-    list.innerHTML = '<div style="text-align:center; padding:20px;"><span class="spinner"></span> 로딩 중...</div>';
-    modal.style.display = 'flex';
-
-    const jobs = await fetchAvailableJobs(); // [수정] DB 조회 함수 사용
-    let html = `<button class="btn btn-outline" style="width:100%; margin-bottom:5px; text-align:left; padding:10px;" onclick="window.selectJobFilter(null)"><strong>전체 조사 메모 보기</strong></button>`;
-    
-    if (jobs.length > 0) {
-        jobs.forEach(j => {
-            html += `<button class="btn btn-outline" style="width:100%; margin-bottom:5px; text-align:left; padding:10px;" onclick="window.selectJobFilter('${j}')">${j}</button>`;
-        });
-    } else {
-        html += `<div style="padding:15px; color:#666; text-align:center; background:#f9f9f9; border-radius:4px;">등록된 Job이 없습니다.<br><small>'👷' 버튼을 눌러 Job을 추가하세요.</small></div>`;
-    }
-    
-    list.innerHTML = html;
-}
-
-export function closeJobSelectionModal() {
-    document.getElementById('jobSelectionModal').style.display = 'none';
-}
-
-export function selectJobFilter(jobName) {
-    state.isSurveyFilterMode = true;
-    state.selectedJobFilter = jobName;
-    closeJobSelectionModal();
-    updateFilterButtonUI();
-    loadMemoList();
-    if (window.loadMapMemos) window.loadMapMemos();
-}
-
-function updateFilterButtonUI() {
-    const btn = document.getElementById('btnToggleSurveyFilter');
-    if (state.isSurveyFilterMode) {
-        btn.classList.add('active');
-        btn.style.background = '#ffc107'; // Warning color (조사 테마색)
-        btn.style.color = '#000';
-        btn.innerText = state.selectedJobFilter ? `📋 ${state.selectedJobFilter}` : `📋 조사(전체)`;
-    } else {
-        btn.classList.remove('active');
-        btn.style.background = '';
-        btn.style.color = '';
-        btn.innerText = `📋 필터`;
-    }
-}
-
-// [추가] 조사 메모 CSV 다운로드
-export function downloadSurveyMemosCSV() {
-    if (!state.memos || state.memos.length === 0) {
-        return alert("다운로드할 메모가 없습니다.");
-    }
-
-    let csvContent = "\uFEFF"; // BOM (한글 깨짐 방지)
-    csvContent += "프로젝트,lon,lat,tm_x,tm_y,메모내용,Chainage,작성자,Job,조사날짜,조사여부\n";
-
-    state.memos.forEach(m => {
-        const content = (m.content || '').replace(/"/g, '""'); // 따옴표 이스케이프
-        const row = [
-            `"${m.projectName}"`,
-            `"${m.lon || ''}"`,
-            `"${m.lat || ''}"`,
-            `"${m.tm_x || ''}"`,
-            `"${m.tm_y || ''}"`,
-            `"${content}"`,
-            `"${m.chainage || ''}"`,
-            `"${m.username}"`,
-            `"${m.job_name || ''}"`,
-            `"${new Date(m.created_at).toLocaleString()}"`,
-            `"${m.is_survey ? 'O' : 'X'}"`
-        ];
-        csvContent += row.join(",") + "\n";
-    });
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `survey_memos_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}

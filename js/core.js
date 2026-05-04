@@ -19,11 +19,8 @@ export const state = {
     adminUser: null,        // [추가] 관리자 ID (API로 수신)
     currentCadProjectId: null, // [추가] 현재 Map Viewer의 프로젝트 ID
     memos: [],              // [추가] 현재 프로젝트의 메모 목록
-    isSurveyFilterMode: false, // [추가] 조사 메모 필터 모드 여부
     highlightedMemoId: null,   // [추가] 지도에서 강조할 메모 ID
-    selectedJobFilter: null,   // [추가] 선택된 Job 필터 (null이면 전체 조사 메모)
     projectPhotos: [],      // [추가] 현재 프로젝트의 전체 사진 목록 (자동 매칭용)
-    jobs: [],               // [추가] Job 리스트 (DB 동기화)
     uploadQueue: [],        // [추가] 백그라운드 업로드 큐
     isUploading: false,     // [추가] 업로드 진행 중 여부
     isSyncing: false,       // [추가] 동기화 진행 중 여부

@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
-import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, openJobManager, closeJobManager, addJob, deleteJob, toggleSurveyFilterMode, downloadSurveyMemosCSV, openJobSelectionModal, closeJobSelectionModal, selectJobFilter, fetchAvailableJobs, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess } from './managers.js';
+import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
@@ -50,22 +50,13 @@ window.handleMemoImageSelect = handleMemoFileSelect; // [추가] 지도 팝업 �
 window.removeMemoFile = removeMemoFile; // 파일 삭제 핸들러
 window.removeExistingMemoImage = removeExistingMemoImage; // [추가]
 window.loadMapMemos = loadMapMemos;
-window.openJobManager = openJobManager;
-window.closeJobManager = closeJobManager; // [추가]
-window.addJob = addJob; // [추가]
-window.deleteJob = deleteJob; // [추가]
-window.toggleSurveyFilterMode = toggleSurveyFilterMode; // [추가]
-window.downloadSurveyMemosCSV = downloadSurveyMemosCSV; // [추가]
-window.fetchAvailableJobs = fetchAvailableJobs; // [추가]
-window.openJobSelectionModal = openJobSelectionModal; // [추가]
-window.closeJobSelectionModal = closeJobSelectionModal; // [추가]
-window.selectJobFilter = selectJobFilter; // [추가]
 window.toggleDistanceMode = toggleDistanceMode; // [추가] 거리 측정 토글
+window.downloadMemosCSV = downloadMemosCSV; // [추가] 메모 CSV 다운로드
 
 // [추가] 모바일 메모 메뉴 토글
 window.toggleMemoMenu = function() {
     const actions = document.getElementById('memoActions');
-    actions.classList.toggle('show');
+    if (actions) actions.classList.toggle('show');
 };
 
 // [추가] 메뉴 외부 클릭 시 닫기
