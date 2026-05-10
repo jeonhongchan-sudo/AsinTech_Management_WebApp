@@ -53,6 +53,22 @@ window.loadMapMemos = loadMapMemos;
 window.toggleDistanceMode = toggleDistanceMode; // [추가] 거리 측정 토글
 window.downloadMemosCSV = downloadMemosCSV; // [추가] 메모 CSV 다운로드
 
+// [추가] 지도 팝업 내 사진 탐색(Lightbox) 연동 브릿지 함수
+window.openMatchedLightbox = function(index) {
+    if (window.currentMatchedPhotos && window.currentMatchedPhotos.length > 0) {
+        state.currentPhotosData = window.currentMatchedPhotos;
+        window.openLightbox(index);
+    }
+};
+
+// [추가] 메모 첨부 사진 탐색(Lightbox) 연동 브릿지 함수
+window.openMemoLightbox = function(index) {
+    if (window.currentMemoPhotos && window.currentMemoPhotos.length > 0) {
+        state.currentPhotosData = window.currentMemoPhotos;
+        window.openLightbox(index);
+    }
+};
+
 // [추가] 모바일 메모 메뉴 토글
 window.toggleMemoMenu = function() {
     const actions = document.getElementById('memoActions');

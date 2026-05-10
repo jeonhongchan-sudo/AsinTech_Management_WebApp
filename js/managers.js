@@ -256,12 +256,27 @@ export async function deleteIndividualMemoPhoto(memoId, urlToDelete) {
 
 // --- Lightbox ---
 export function openLightbox(i) { state.currentLightboxIndex = i; document.getElementById('lightboxOverlay').style.display = 'flex'; updateLightboxImage(); }
-export function closeLightbox() { document.getElementById('lightboxOverlay').style.display = 'none'; document.getElementById('lightboxImg').src = ''; }
+
+export function closeLightbox(e) { 
+    // [수정] 배경(Overlay)을 클릭했을 때만 닫히도록 방어 로직 추가 
+    // 이전/다음 버튼이나 이미지 자체를 클릭했을 때 창이 닫히는 현상을 방지합니다.
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('lightboxOverlay').style.display = 'none'; 
+    document.getElementById('lightboxImg').src = ''; 
+}
+
 export function navigateLightbox(d) { const n = state.currentLightboxIndex + d; if(n >= 0 && n < state.currentPhotosData.length) { state.currentLightboxIndex = n; updateLightboxImage(); } }
 function updateLightboxImage() { 
     const p = state.currentPhotosData[state.currentLightboxIndex]; 
     const fullImageUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=w1920-h1080`;
-    document.getElementById('lightboxImg').src = fullImageUrl; document.getElementById('lightboxDownloadBtn').href = fullImageUrl; 
+    document.getElementById('lightboxImg').src = fullImageUrl; 
+    document.getElementById('lightboxDownloadBtn').href = fullImageUrl; 
+    
+    // [추가] 하단 캡션 업데이트 (현재 번호 / 전체 개수 및 파일명 표시)
+    const caption = document.getElementById('lightboxCaption');
+    if (caption) {
+        caption.innerText = `[${state.currentLightboxIndex + 1} / ${state.currentPhotosData.length}] ${p.fileName || ''}`;
+    }
 }
 
 // --- Admin Manager ---

@@ -786,6 +786,16 @@ export async function loadCadMap(projectId) {
             container: 'cad-map', fadeDuration: 0, bounds: bounds, fitBoundsOptions: { padding: 40, animate: false },
             renderWorldCopies: false, maxZoom: 24, localIdeographFontFamily: "'Noto Sans KR', sans-serif",
             validateStyle: false, boxZoom: false, dragRotate: false, doubleClickZoom: false,
+        transformRequest: (url, resourceType) => {
+            // [추가] PMTiles(Range Request) 요청 시 브라우저 캐시 충돌 에러 방지
+            if (url.includes('.pmtiles')) {
+                return {
+                    url: url,
+                    cache: 'no-store' // 캐시 저장소 사용을 건너뛰어 에러 발생 차단
+                };
+            }
+            return { url: url };
+        },
             style: {
                 version: 8, glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
                 sources: {
@@ -1430,23 +1440,38 @@ function openMemoPopup(feature) {
             // 확장자 제거한 파일명 베이스
             const baseName = fName.includes('.') ? fName.substring(0, fName.lastIndexOf('.')) : fName;
             
-            // 매칭 기준 (Python 스크립트 로직 이식)
+            // 매칭 기준 (Python 스크립트 로직 이식 및 확장)
+            // [수정] 하이픈이 2개 이상인 경우 (예: 250601-01-1), 앞의 두 마디만 추출하여 비교 (예: 250601-01)
+            // 이는 '250601-01/제수변하단'과 같은 포인트명에 여러 장의 연관 사진을 매칭하기 위함입니다.
+            let searchName = baseName;
+            const parts = baseName.split('-');
+            if (parts.length >= 3) {
+                searchName = parts[0] + '-' + parts[1];
+            }
+
             // 1. 완전 일치: point_name == file_name_base
             // 2. 부분 포함: file_name_base in point_name (파일명이 포인트명에 포함됨)
             // 3. 접두사: file_name_base.startswith(point_name + '-')
             return (pointText === baseName) || 
                    (pointText.includes(baseName)) || 
-                   (baseName.startsWith(pointText + '-'));
+                   (baseName.startsWith(pointText + '-')) ||
+                   (pointText.includes(searchName)); // [추가] 단축된 파일명이 포인트명에 포함되는지 확인
         });
 
         if (matched.length > 0) {
+            // [추가] Lightbox 연동을 위해 데이터 형식 변환 및 전역 저장
+            window.currentMatchedPhotos = matched.map(p => ({
+                fileName: p.file_name,
+                url: p.file_url
+            }));
+
             matchedPhotosHtml = `<div style="margin-bottom:8px; padding:5px; background:#f8f9fa; border-radius:4px; border:1px solid #eee;">
                 <div style="font-size:11px; font-weight:bold; color:#007bff; margin-bottom:4px;">📸 관련 사진 (${matched.length})</div>
                 <div style="display:flex; gap:4px; overflow-x:auto; padding-bottom:2px;">
-                    ${matched.map(p => {
+                    ${matched.map((p, idx) => {
                         if (!p.file_url) return '';
                         const fullUrl = p.file_url;
-                        return `<img src="${fullUrl}" onclick="window.open('${fullUrl}', '_blank')" style="width:40px; height:40px; object-fit:cover; border-radius:3px; cursor:pointer; border:1px solid #ddd;" title="${p.file_name}">`;
+                        return `<img src="${fullUrl}" onclick="window.openMatchedLightbox(${idx})" style="width:40px; height:40px; object-fit:cover; border-radius:3px; cursor:pointer; border:1px solid #ddd;" title="${p.file_name}">`;
                     }).join('')}
                 </div>
             </div>`;
@@ -1457,8 +1482,14 @@ function openMemoPopup(feature) {
     // [수정] 기존 이미지 여러 장 표시
     let existingImgHtml = '';
     if (existingImgUrls.length > 0) {
+        // [추가] 메모 첨부 사진 Lightbox 연동을 위한 데이터 변환
+        window.currentMemoPhotos = existingImgUrls.map((url, i) => ({
+            fileName: `메모 사진 ${i + 1}`,
+            url: url
+        }));
+
         existingImgHtml = `<div style="display:flex; gap:5px; flex-wrap:wrap; margin-bottom:5px;">`;
-        existingImgUrls.forEach(url => {
+        existingImgUrls.forEach((url, idx) => {
             if(!url.trim()) return;
             
             // [수정] 파일 형식에 따른 미리보기 아이콘 개선
@@ -1472,8 +1503,8 @@ function openMemoPopup(feature) {
 
             const previewHtml = isDoc 
                 ? `<div style="width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#eee; border-radius:4px; font-size:24px; border:1px solid #ddd; cursor:pointer;" onclick="window.open('${url}', '_blank')" title="문서 열기">${icon}</div>`
-                : `<img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd; cursor:pointer;" onclick="window.open('${url}', '_blank')" title="사진 보기">`;
-
+                : `<img src="${url}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #ddd; cursor:pointer;" onclick="window.openMemoLightbox(${idx})" title="사진 보기">`;
+           
             existingImgHtml += `<div class="existing-img-wrapper" style="position:relative; display:inline-block;">${previewHtml}<button onclick="window.removeExistingMemoImage('${url}', 'popupMemoPreview', 'popupMemoUrl')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:12px; line-height:1; display:flex; align-items:center; justify-content:center;">&times;</button></div>`;
         });
         existingImgHtml += `</div>`;
