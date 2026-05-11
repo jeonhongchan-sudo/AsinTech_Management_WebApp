@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
-import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV } from './managers.js';
+import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
@@ -9,7 +9,6 @@ window.openPhotoManager = openPhotoManager;
 window.closePhotoManager = closePhotoManager;
 window.deletePhoto = deletePhoto;
 window.deleteIndividualMemoPhoto = deleteIndividualMemoPhoto; // [추가]
-window.runFullSync = runFullSync; // [추가]
 window.openLightbox = openLightbox;
 window.closeLightbox = closeLightbox;
 window.navigateLightbox = navigateLightbox;
@@ -294,6 +293,7 @@ document.addEventListener('DOMContentLoaded', function() {
   if (savedUser) {
       const input = document.getElementById('loginUsername');
       if (input) input.value = savedUser;
+      state.currentUser = savedUser; // [추가] 초기 상태 복구 (Config 로드 후 자동 처리용)
   }
 
   initProj4Defs();
@@ -327,6 +327,11 @@ document.addEventListener('DOMContentLoaded', function() {
                   location.reload();
                   return;
               }
+              
+              // [추가] 유효한 세션이 있다면 로그인 화면을 자동으로 닫음
+              const overlay = document.getElementById('loginOverlay');
+              if (overlay) overlay.style.display = 'none';
+              
               updateHeaderWithUser(state.currentUser);
           }
       }

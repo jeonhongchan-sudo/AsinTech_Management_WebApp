@@ -183,63 +183,6 @@ export async function deletePhoto(id) {
     callApi('deletePhoto', { fileId: id }).then(() => loadPhotos(state.currentProjectId)); 
 }
 
-// [추가] 저장소 통합 동기화 (이어달리기 지원)
-export async function runFullSync() {
-    if (state.isSyncing) {
-        showAlert("이미 동기화 작업이 진행 중입니다.", "info");
-        return;
-    }
-
-    if (!confirm("모든 프로젝트와 메모의 고아 파일을 삭제하시겠습니까?\n이 작업은 백그라운드에서 실행되며, 완료될 때까지 다른 작업을 계속하실 수 있습니다.")) return;
-    
-    state.isSyncing = true;
-    showAlert("백그라운드 동기화 작업을 시작합니다.", "info");
-
-    // 실제 루프 함수를 호출하되 await 하지 않음으로써 제어권을 즉시 UI에 반환
-    _startSyncLoop();
-}
-
-async function _startSyncLoop() {
-    let continuationToken = null;
-    let globalDeletedCount = 0;
-
-    try {
-        do {
-            // 매 루프마다 버튼 요소 존재 여부 확인 (탭 전환 등으로 DOM에서 사라질 수 있음)
-            const btn = document.getElementById('pmSyncBtn');
-            if (btn) {
-                btn.disabled = true;
-                btn.innerText = `⏳ 정리 중... (${globalDeletedCount})`;
-            }
-
-            const res = await callApi('cleanupAllDriveOrphans', { continuationToken });
-            
-            if (!res.success) {
-                if (res.error.includes("project_folder_id")) {
-                    throw new Error("GAS 코드가 업데이트되지 않았습니다. GAS 에디터에서 '새 배포'를 진행해주세요.");
-                }
-                throw new Error(res.error);
-            }
-
-            globalDeletedCount += (res.deletedCount || 0);
-            continuationToken = res.finished ? null : res.continuationToken;
-        } while (continuationToken);
-
-        showAlert(`백그라운드 동기화 완료! 총 ${globalDeletedCount}개의 파일이 정리되었습니다.`, "success");
-        if (state.currentProjectId) loadPhotos(state.currentProjectId);
-    } catch (e) {
-        console.error("동기화 실패:", e);
-        alert("동기화 도중 오류 발생: " + e.message);
-    } finally {
-        state.isSyncing = false;
-        const btn = document.getElementById('pmSyncBtn');
-        if (btn) {
-            btn.disabled = false;
-            btn.innerText = '🔄 전체 저장소 동기화';
-        }
-    }
-}
-
 // [추가] 메모 사진 개별 삭제 기능
 export async function deleteIndividualMemoPhoto(memoId, urlToDelete) {
     if(!confirm("이 메모 사진을 삭제하시겠습니까?")) return;
