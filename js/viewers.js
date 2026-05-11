@@ -1532,15 +1532,17 @@ function openMemoPopup(feature) {
         <a href="https://m.map.naver.com/map.nhn?lat=${lat}&lng=${lon}&level=12&pin=1" target="_blank" class="btn btn-outline" style="flex:1; padding: 4px; font-size:11px; background-color:#03C75A; color:white; border-color:#03C75A;">네이버</a>
     </div>`;
 
-    // [추가] 삭제 권한 로직: 본인 글이거나 공개된 글이면 삭제 가능
-    const isMine = existingMemo ? (existingMemo.username === state.currentUser) : true;
-    const canDelete = existingMemo ? (isMine || isPublic) : false;
+    // [수정] 권한 로직: 수정은 누구나 가능, 삭제는 관리자/방장/본인만 가능
+    const isAdmin = state.adminUser && state.currentUser && state.currentUser.toLowerCase() === state.adminUser.toLowerCase();
+    const isMine = existingMemo && existingMemo.username === state.currentUser;
+    const canDelete = isAdmin || state.isRoomManager || isMine;
 
     let actionButtonsHtml = '';
-    if (memoId && canDelete) {
+    if (memoId) {
+        // [수정] 수정 버튼은 등급 무관 노출, 삭제 버튼은 권한 확인 후 노출
         actionButtonsHtml = `<div style="display:flex; gap:5px;">
-            <button id="popupMemoDeleteBtn" class="btn btn-danger" style="flex:1; padding:5px; font-size:12px;">삭제</button>
-            <button id="popupMemoSaveBtn" class="btn btn-primary" style="flex:1; padding:5px; font-size:12px;">수정</button>
+            ${canDelete ? `<button id="popupMemoDeleteBtn" class="btn btn-danger" style="flex:1; padding:5px; font-size:12px;">삭제</button>` : ''}
+            <button id="popupMemoSaveBtn" class="btn btn-primary" style="flex:${canDelete ? '1' : '2'}; padding:5px; font-size:12px;">수정</button>
         </div>`;
     } else {
         actionButtonsHtml = `<button id="popupMemoSaveBtn" class="btn btn-primary" style="width:100%; padding:5px; font-size:12px;">저장</button>`;
@@ -1770,6 +1772,23 @@ function clearDistanceMeasurement() {
     state.distanceMarkers = [];
 }
 
+// [추가] 조사 모드 토글
+export function toggleSurveyMode() {
+    state.isSurveyMode = !state.isSurveyMode;
+    const btn = document.getElementById('btnSurveyMode');
+    const statusEl = document.getElementById('cadStatus');
+    
+    if (state.isSurveyMode) {
+        btn.classList.add('active');
+        btn.style.backgroundColor = '#4dabf7'; // 파란색 계열 활성화
+        statusEl.innerText = '조사 모드 활성 (사진 원본 저장)';
+    } else {
+        btn.classList.remove('active');
+        btn.style.backgroundColor = '';
+        statusEl.innerText = '도면 로드 완료';
+    }
+}
+
 // loadCadMap 완료 시 인터랙션 설정 호출
 const originalLoadCadMap = loadCadMap;
 loadCadMap = async function(projectId) {
@@ -1777,3 +1796,4 @@ loadCadMap = async function(projectId) {
     loadProjectPhotos(); // [추가] 사진 목록 로드 (비동기)
     setupMapInteraction();
 };
+window.toggleSurveyMode = toggleSurveyMode;

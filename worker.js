@@ -42,6 +42,27 @@ export default {
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // --- [추가] 4. R2 파일 이름 변경 (Copy + Delete) ---
+    if (url.pathname === "/rename" && request.method === "POST") {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      if (!from || !to) return new Response("Missing paths", { status: 400, headers: corsHeaders });
+
+      try {
+        const obj = await env.MY_BUCKET.get(from);
+        if (!obj) return new Response("Source file not found", { status: 404, headers: corsHeaders });
+
+        await env.MY_BUCKET.put(to, obj.body, {
+          httpMetadata: obj.httpMetadata,
+          customMetadata: obj.customMetadata,
+        });
+        await env.MY_BUCKET.delete(from);
+        return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+      } catch (e) {
+        return new Response(e.message, { status: 500, headers: corsHeaders });
+      }
+    }
+
     // --- [추가] 3. R2 파일 직접 삭제 (DELETE) ---
     if (request.method === "DELETE") {
       const fileName = decodeURIComponent(url.pathname.slice(1));

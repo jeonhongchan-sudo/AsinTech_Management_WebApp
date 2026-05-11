@@ -105,7 +105,7 @@ export async function loadPhotos(id) {
     // 1. 일반 사진(R2)과 메모 사진(memos 테이블)을 병렬로 조회
     const [photoData, memoData] = await Promise.all([
       callSupabaseDirect(`photos?cad_project_id=eq.${id}&select=*&order=created_at.desc`),
-      callSupabaseDirect(`memos?project_id=eq.${id}&image_url=not.is.null&select=id,content,image_url,created_at`)
+      callSupabaseDirect(`memos?project_id=eq.${id}&image_url=not.is.null&select=id,content,image_url,created_at,is_survey`)
     ]);
 
     // 2. 일반 사진 데이터 정리
@@ -114,7 +114,8 @@ export async function loadPhotos(id) {
       url: row.file_url,
       fileId: row.file_id,
       uploadDate: row.created_at,
-      isMemoPhoto: false
+      isMemoPhoto: false,
+      isSurvey: false // 파이썬 업로드 및 일반 업로드는 다운로드 제한 대상
     }));
 
     // 3. 메모 사진 데이터 정리 (image_url 파싱 및 객체화)
@@ -123,14 +124,19 @@ export async function loadPhotos(id) {
       const rawUrls = row.image_url ? String(row.image_url).trim() : "";
       if (rawUrls && rawUrls !== "null" && rawUrls !== "undefined" && rawUrls.length > 10) {
         const urls = rawUrls.split(',').map(u => u.trim()).filter(u => u !== "");
-        urls.forEach((url, idx) => {
+        urls.forEach((url) => {
+          // [수정] URL에서 실제 파일명 추출 (uuid/파일명.jpg 구조에서 파일명만)
+          const urlParts = url.split('/');
+          const fileNameFromUrl = urlParts[urlParts.length - 1];
+          
           memoPhotos.push({
-            fileName: `[메모] ${row.content ? row.content.substring(0, 15) : row.id}${urls.length > 1 ? ` (${idx+1})` : ''}`,
+            fileName: `[메모] ${fileNameFromUrl}`,
             url: url,
-            memoId: row.id, // [추가] 메모 사진을 개별 삭제하기 위해 memoId 추가
+            memoId: row.id,
             fileId: null, // 메모 사진은 file_id 대신 URL 직접 사용
             uploadDate: row.created_at,
-            isMemoPhoto: true
+            isMemoPhoto: true,
+            isSurvey: row.is_survey === true // 조사 모드 여부 반영
           });
         });
       }
@@ -155,14 +161,122 @@ function renderPhotos(res) {
    res.photos.forEach((p, i) => {
        const thumbnailUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=s400`;
        
+       const downloadBtn = `<button class="btn btn-info" style="padding:2px 5px; font-size:11px; margin-right:5px;" onclick="window.downloadPhotoFile('${p.url}', '${p.fileName}', ${p.isSurvey})">저장</button>`;
        const deleteBtn = p.isMemoPhoto 
            ? `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteIndividualMemoPhoto('${p.memoId}', '${p.url}')">삭제</button>`
            : `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deletePhoto('${p.fileId}')">삭제</button>`;
 
-       const actionHtml = `<div style="display:flex; justify-content: flex-end;">${deleteBtn}</div>`;
+       const actionHtml = `<div style="display:flex; justify-content: flex-end;">${downloadBtn}${deleteBtn}</div>`;
        html += `<div class="photo-card"><div class="photo-thumb" onclick="window.openLightbox(${i})"><img src="${thumbnailUrl}" loading="lazy" alt="${p.fileName}"></div><div class="photo-details"><div class="photo-name">${p.fileName}</div><div class="photo-actions">${actionHtml}</div></div></div>`;
    });
    container.innerHTML = html;
+}
+
+// [추가] 개별 사진 파일 다운로드 (브라우저 다운로드 강제)
+export async function downloadPhotoFile(url, fileName, isSurvey) {
+    // [수정] 조사 메모 활성화 여부 체크
+    if (!isSurvey) {
+        alert("조사메모가 활성화된 메모만 다운로드 가능합니다.");
+        return;
+    }
+    if (!url) return;
+    try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = fileName.includes('.') ? fileName : `${fileName}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+        console.error("다운로드 실패:", e);
+        window.open(url, '_blank'); // 실패 시 새 탭으로 열기
+    }
+}
+
+// [추가] 현재 프로젝트의 모든 사진 다운로드
+export async function downloadAllPhotos() {
+    if (!state.currentPhotosData || state.currentPhotosData.length === 0) return;
+    
+    // [수정] 조사 메모 사진만 필터링
+    const surveyPhotos = state.currentPhotosData.filter(p => p.isSurvey);
+    if (surveyPhotos.length === 0) {
+        alert("조사메모가 활성화된 메모가 없어 다운로드할 사진이 없습니다.");
+        return;
+    }
+
+    if (!confirm(`총 ${surveyPhotos.length}장의 조사메모 사진을 순차적으로 다운로드하시겠습니까?\n(브라우저 설정에 따라 팝업 허용이 필요할 수 있습니다.)`)) return;
+
+    const btn = document.getElementById('pmDownloadAllBtn');
+    btn.disabled = true;
+    btn.innerText = "⏳ 다운로드 중...";
+
+    for (let i = 0; i < surveyPhotos.length; i++) {
+        const p = surveyPhotos[i];
+        await downloadPhotoFile(p.url, p.fileName, true);
+        // 브라우저 부하 방지를 위해 짧은 간격 추가
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    btn.disabled = false;
+    btn.innerText = "📥 전체 사진 다운로드";
+    showAlert("조사메모 사진 다운로드가 완료되었습니다.");
+}
+
+// [추가] 현재 프로젝트의 모든 사진 일괄 삭제
+export async function deleteAllPhotos() {
+    if (!state.currentPhotosData || state.currentPhotosData.length === 0) return;
+    if (!confirm(`현재 프로젝트의 사진 ${state.currentPhotosData.length}장을 모두 삭제하시겠습니까?\n이 작업은 되돌릴 수 없으며 원본 파일도 스토리지에서 삭제됩니다.`)) return;
+
+    const btn = document.getElementById('pmDeleteAllBtn');
+    const originalText = btn.innerText;
+    btn.disabled = true;
+
+    const photosToDelete = [...state.currentPhotosData];
+    let deletedCount = 0;
+
+    for (let i = 0; i < photosToDelete.length; i++) {
+        const p = photosToDelete[i];
+        btn.innerText = `⏳ 삭제 중... (${i + 1}/${photosToDelete.length})`;
+
+        try {
+            if (p.isMemoPhoto) {
+                // 1. 메모 DB 레코드의 image_url 업데이트
+                const data = await callSupabaseDirect(`memos?id=eq.${p.memoId}&select=image_url`);
+                if (data && data.length > 0) {
+                    const currentUrls = data[0].image_url ? data[0].image_url.split(',') : [];
+                    const updatedUrls = currentUrls.map(u => u.trim()).filter(u => u !== p.url && u !== "");
+                    await callSupabaseDirect(`memos?id=eq.${p.memoId}`, 'PATCH', {
+                        image_url: updatedUrls.join(','),
+                        updated_at: new Date().toISOString()
+                    });
+                }
+            } else {
+                // 2. 일반 사진 DB 레코드 삭제 (Supabase photos 테이블)
+                await callSupabaseDirect(`photos?file_id=eq.${p.fileId}`, 'DELETE');
+            }
+
+            // 3. R2 실제 파일 삭제 (Worker 호출)
+            if (p.url && p.url.includes('r2.dev')) {
+                const filePath = p.url.split(R2_BASE_URL + '/')[1];
+                await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': WORKER_AUTH_KEY }
+                });
+            }
+            deletedCount++;
+        } catch (e) {
+            console.warn(`사진 삭제 실패 (${p.fileName}):`, e);
+        }
+    }
+
+    btn.disabled = false;
+    btn.innerText = originalText;
+    showAlert(`${deletedCount}개의 사진이 완전히 삭제되었습니다.`);
+    loadPhotos(state.currentProjectId);
 }
 
 export async function deletePhoto(id) { 
@@ -619,17 +733,57 @@ export async function loadMemoList() {
     }
 }
 
+// [추가] 메모 프로젝트 필터 열기
+export async function openMemoProjectFilter() {
+    const modal = document.getElementById('memoFilterModal');
+    const listEl = document.getElementById('memoFilterList');
+    listEl.innerHTML = '<div style="padding:10px; text-align:center;">로딩 중...</div>';
+    modal.style.display = 'flex';
+
+    try {
+        const projects = await callSupabaseDirect('cad_projects?select=id,name&order=name.asc');
+        let html = `<div style="padding:10px; background:#f8f9fa; border-bottom:1px solid #ddd; cursor:pointer; font-weight:bold;" onclick="window.setMemoFilter(null)">전체 보기 (필터 해제)</div>`;
+        html += `<div style="padding:10px; background:#f8f9fa; border-bottom:1px solid #ddd; cursor:pointer;" onclick="window.setMemoFilter('GENERAL')">일반 (공지)</div>`;
+        
+        if (projects) {
+            projects.forEach(p => {
+                const isCurrent = state.memoFilterProjectId === p.id;
+                html += `<div style="padding:10px; border-bottom:1px solid #eee; cursor:pointer; ${isCurrent ? 'background:#e7f5ff; font-weight:bold;' : ''}" 
+                         onclick="window.setMemoFilter('${p.id}', '${p.name}')">${p.name}</div>`;
+            });
+        }
+        listEl.innerHTML = html;
+    } catch (e) { listEl.innerHTML = '<div style="padding:10px; color:red;">로드 실패</div>'; }
+}
+
+// [추가] 필터 적용 함수
+export function setMemoFilter(projectId, projectName = null) {
+    state.memoFilterProjectId = projectId;
+    const title = document.getElementById('memoListTitle');
+    title.innerText = projectName ? `메모 목록 (${projectName})` : '메모 목록 (전체)';
+    
+    document.getElementById('memoFilterModal').style.display = 'none';
+    renderMemoListUI();
+}
+
 function renderMemoListUI() {
     const container = document.getElementById('memoListContainer');
-    if (!state.memos || state.memos.length === 0) {
+    
+    // [추가] 필터링 적용
+    const filteredMemos = state.memoFilterProjectId 
+        ? state.memos.filter(m => m.project_id === state.memoFilterProjectId)
+        : state.memos;
+
+    if (!filteredMemos || filteredMemos.length === 0) {
         container.innerHTML = '<div class="empty-state">작성된 메모가 없습니다.</div>';
         return;
     }
 
     let html = '<table class="list-view-table"><thead><tr><th>프로젝트</th><th>내용</th><th>날짜</th><th>작성자</th><th>관리</th></tr></thead><tbody>';
-    state.memos.forEach(m => {
+    filteredMemos.forEach(m => {
         const isManagementMemo = m.lon === 0 && m.lat === 0; // [수정] lon, lat이 0인 메모를 관리용 메모로 간주
         const isMine = m.username === state.currentUser;
+        const surveyBadge = m.is_survey ? '<span class="badge-survey" style="background:#4dabf7; color:white; padding:2px 4px; border-radius:3px; font-size:10px; margin-right:5px;">조사</span>' : '';
         const publicIcon = m.is_public ? '<span title="공개">🌐</span>' : '<span title="비공개">🔒</span>';
         
         const deleteBtn = isMine 
@@ -669,7 +823,7 @@ function renderMemoListUI() {
 
         html += `<tr class="${isManagementMemo ? 'general-memo-row' : ''}">
             <td data-label="프로젝트">${m.projectName}</td>
-            <td data-label="내용" class="memo-content">${publicIcon} ${fileIcon}${m.content}</td>
+            <td data-label="내용" class="memo-content">${publicIcon} ${surveyBadge}${fileIcon}${m.content}</td>
             <td data-label="날짜">${new Date(m.created_at).toLocaleString()}</td>
             <td data-label="작성자">${m.username || '-'}</td>
             <td data-label="관리">${locBtn}${deleteBtn}</td>
@@ -701,8 +855,30 @@ export async function saveMemo(projectId, lon, lat, content, layer, memoId = nul
 async function processMemoSaveBackground(data) {
     const { projectId, lon, lat, content, layer, memoId, isPublic, existingImages, tmX, tmY, chainage, files } = data;
     const user = state.currentUser || 'anonymous';
+    const isSurvey = state.isSurveyMode; // [추가] 현재 조사 모드 여부 캡처
     
     try {
+        // [추가] 수정 모드일 때, 기존 이미지 중 사용자가 삭제한 이미지를 R2에서 제거
+        if (memoId) {
+            const originalData = await callSupabaseDirect(`memos?id=eq.${memoId}&select=image_url`);
+            if (originalData && originalData.length > 0 && originalData[0].image_url) {
+                const oldUrls = originalData[0].image_url.split(',').map(u => u.trim()).filter(u => u);
+                const newExistingUrls = (existingImages || "").split(',').map(u => u.trim()).filter(u => u);
+                
+                // 예전엔 있었는데 지금(existingImages)은 없는 URL은 삭제 대상
+                const urlsToDelete = oldUrls.filter(u => !newExistingUrls.includes(u));
+                for (const url of urlsToDelete) {
+                    if (url.includes('r2.dev')) {
+                        const filePath = url.split(R2_BASE_URL + '/')[1];
+                        await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': WORKER_AUTH_KEY }
+                        }).catch(err => console.warn("수정 중 R2 삭제 실패:", filePath));
+                    }
+                }
+            }
+        }
+
         // 1. 기존 이미지 URL 정리 (잘못된 문자열 유입 방지)
         let finalImageUrls = (existingImages && typeof existingImages === 'string' && existingImages !== "null" && existingImages !== "undefined") 
             ? existingImages.split(',').map(u => u.trim()).filter(u => u !== "") 
@@ -716,12 +892,30 @@ async function processMemoSaveBackground(data) {
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 try {
-                    let uploadData = file; // [수정] 사용자의 요청에 따라 리사이징 없이 원본 그대로 업로드
+                    let uploadData = file; // 기본은 원본
                     let contentType = file.type || "application/octet-stream";
+                    
+                    // [수정] 사용자가 지정한 커스텀 명칭이 있으면 사용, 없으면 메모 내용이나 원본명 사용
+                    let fileNameToUse = file.customSurveyName || content.replace(/[\\/:*?"<>|]/g, "_").substring(0, 50) || "file";
+                    
+                    // 확장자 강제 (이미지의 경우 .jpg)
+                    if (contentType.startsWith('image/') && !fileNameToUse.toLowerCase().endsWith('.jpg')) {
+                        fileNameToUse += '.jpg';
+                    }
 
-                    // [수정] R2 저장 경로 구성: memos_photo/{Project_id}/{UUID}_{파일명}
+                    let r2FolderPath = isSurvey ? `survey_memo_photo/${projectId}` : `memos_photo/${projectId}`;
+
+                    if (!isSurvey) {
+                        // 일반 메모일 경우 사진 리사이징 수행
+                        if (file.type.startsWith('image/')) {
+                            uploadData = await resizeImage(file);
+                            contentType = "image/jpeg";
+                        }
+                    }
+
                     const uuid = generateUUID();
-                    const r2Path = `memos_photo/${projectId}/${uuid}_${file.name}`;
+                    // [수정] 경로 구조 변경: UUID를 폴더로 사용하여 다운로드 시 파일명 보존 (UUID/1001.jpg)
+                    const r2Path = `${r2FolderPath}/${uuid}/${fileNameToUse}`;
 
                     // 1. Worker에게 서명된 URL 요청
                     const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}&type=${encodeURIComponent(contentType)}`, {
@@ -757,6 +951,42 @@ async function processMemoSaveBackground(data) {
         // 3. 최종 이미지 URL 문자열 생성
         // [수정] 배열이 비어있을 경우 명확히 null 처리를 하거나 빈 문자열 유지
         const imageUrlString = finalImageUrls.length > 0 ? finalImageUrls.map(u => String(u).trim()).filter(u => u !== "").join(',') : "";
+
+        // [추가] 조사 모드에서 메모 내용(텍스트) 변경에 따른 R2 파일명 동기화 (Rename)
+        if (isSurvey && finalImageUrls.length > 0) {
+            const names = content.split('/').map(n => n.trim()).filter(n => n);
+            for (let i = 0; i < Math.min(names.length, finalImageUrls.length); i++) {
+                const url = finalImageUrls[i];
+                if (!url.includes('r2.dev')) continue;
+
+                const urlParts = url.split('/');
+                const currentFullName = urlParts[urlParts.length - 1];
+                const currentNameOnly = currentFullName.includes('.') ? currentFullName.split('.').slice(0, -1).join('.') : currentFullName;
+                const targetNameOnly = names[i];
+
+                // 텍스트와 파일명이 다르면 이름 변경 실행
+                if (currentNameOnly !== targetNameOnly) {
+                    const ext = currentFullName.includes('.') ? currentFullName.split('.').pop() : 'jpg';
+                    const newFullName = `${targetNameOnly}.${ext}`;
+                    const oldPath = url.split(R2_BASE_URL + '/')[1];
+                    const newPath = oldPath.replace(currentFullName, newFullName);
+
+                    console.log(`[Rename] Renaming R2 file: ${currentFullName} -> ${newFullName}`);
+                    const renameRes = await fetch(`${WORKER_URL}/rename?from=${encodeURIComponent(oldPath)}&to=${encodeURIComponent(newPath)}`, {
+                        method: 'POST',
+                        headers: { 'Authorization': WORKER_AUTH_KEY }
+                    });
+
+                    if (renameRes.ok) {
+                        // 성공 시 메모리 상의 URL 배열 업데이트
+                        finalImageUrls[i] = `${R2_BASE_URL}/${newPath}`;
+                    }
+                }
+            }
+        }
+        
+        // 최종 DB 업데이트를 위한 이미지 문자열 재생성 (이름이 변경되었을 수 있으므로)
+        const finalImageUrlString = finalImageUrls.length > 0 ? finalImageUrls.map(u => String(u).trim()).filter(u => u !== "").join(',') : "";
         console.log("[Save] Final payload image_url:", imageUrlString);
 
         // 4. 데이터 타입 검증 (NaN 및 타입 오류 방지)
@@ -775,7 +1005,8 @@ async function processMemoSaveBackground(data) {
             layer: layer,
             username: user,
             is_public: isPublic,
-            image_url: imageUrlString,
+            is_survey: isSurvey, // [추가] 조사 메모 여부 저장
+            image_url: finalImageUrlString,
             tm_x: validTmX,
             tm_y: validTmY,
             chainage: chainage,
@@ -887,6 +1118,38 @@ export function resizeImage(file, maxWidth = 1024, quality = 0.6) {
     });
 }
 
+// [추가] 조사 모드 시 파일명과 메모 내용을 동기화하는 헬퍼 함수
+function syncSurveyMemoText() {
+    if (!state.isSurveyMode) return;
+    
+    // 지도 팝업 또는 일반 모달의 텍스트 영역 찾기
+    const textarea = document.getElementById('popupMemoInput') || document.getElementById('memoContentInput');
+    if (!textarea) return;
+
+    const names = [];
+
+    // 1. 기존에 저장된 이미지(URL)에서 파일명 추출
+    const hiddenInput = document.getElementById('popupMemoUrl'); 
+    if (hiddenInput && hiddenInput.value) {
+        const urls = hiddenInput.value.split(',').filter(u => u.trim());
+        urls.forEach(url => {
+            const parts = url.split('/');
+            const fullName = parts[parts.length - 1];
+            const nameOnly = fullName.split('.')[0]; // 확장자 제거
+            if (nameOnly) names.push(nameOnly);
+        });
+    }
+
+    // 2. 새로 선택된 파일들에서 지정된 이름 추출
+    if (window.currentMemoFiles) {
+        window.currentMemoFiles.forEach(f => {
+            if (f.customSurveyName) names.push(f.customSurveyName);
+        });
+    }
+
+    textarea.value = names.join('/');
+}
+
 // [추가] 일반 메모 작성 모달 열기
 export async function openGeneralMemoModal() {
     const modal = document.getElementById('memoModal');
@@ -959,6 +1222,7 @@ export function removeExistingMemoImage(urlToRemove, previewId, hiddenInputId) {
         const wrapper = btn.closest('.existing-img-wrapper');
         if (wrapper) wrapper.remove();
     }
+    syncSurveyMemoText(); // [추가] 기존 사진 삭제 시 텍스트 동기화
 }
 
 // [추가] 메모 파일 삭제(목록에서 제거) 함수
@@ -966,20 +1230,38 @@ export function removeMemoFile(index, previewId) {
     if (window.currentMemoFiles) {
         window.currentMemoFiles.splice(index, 1);
         renderMemoFiles(previewId);
+        syncSurveyMemoText(); // [추가] 선택한 새 파일 삭제 시 텍스트 동기화
     }
 }
 
 // [수정] 메모 파일 선택 및 미리보기 핸들러 (이미지 + 문서 지원)
 export function handleMemoFileSelect(input, previewId) {
     if (!input.files || input.files.length === 0) return;
-    
     if (!window.currentMemoFiles) window.currentMemoFiles = [];
     
-    Array.from(input.files).forEach(file => {
-        window.currentMemoFiles.push(file);
-    });
+    const files = Array.from(input.files);
+    
+    for (const file of files) {
+        // [추가] 조사 모드일 경우 파일마다 명칭 입력 받기
+        if (state.isSurveyMode) {
+            const contentInput = document.getElementById('popupMemoInput') || document.getElementById('memoContentInput');
+            const defaultName = (contentInput && contentInput.value.trim()) || file.name.split('.')[0];
+            
+            const customName = prompt(`파일 '${file.name}'의 조사 명칭(파일명)을 입력하세요:`, defaultName);
+            
+            if (customName !== null) { // 취소가 아닐 경우에만 추가
+                file.customSurveyName = customName.trim() || defaultName;
+                window.currentMemoFiles.push(file);
+            }
+            // 취소를 누르면 해당 파일은 업로드 목록에서 제외됩니다.
+        } else {
+            // 일반 모드는 그대로 추가
+            window.currentMemoFiles.push(file);
+        }
+    }
 
     renderMemoFiles(previewId);
+    syncSurveyMemoText(); // [추가] 파일 선택 및 이름 입력 완료 후 텍스트 동기화
     
     input.value = '';
 }
@@ -1016,15 +1298,17 @@ function renderMemoFiles(previewId) {
         window.currentMemoFiles.forEach((file, index) => {
             const isImg = file.type.startsWith('image/');
             const url = isImg ? (window.URL || window.webkitURL).createObjectURL(file) : '';
+            const displayName = file.customSurveyName || file.name; // [추가] 커스텀 이름 표시
             const div = document.createElement('div');
             div.style.cssText = 'position:relative; display:inline-block; width:60px; height:60px;';
             
             const previewHtml = isImg 
                 ? `<img src="${url}" style="width:100%; height:100%; object-fit:cover; border-radius:4px; border:1px solid #ddd;" onload="window.URL.revokeObjectURL(this.src)">`
-                : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#eee; border-radius:4px; font-size:10px; text-align:center; overflow:hidden;">${file.name.split('.').pop().toUpperCase()}</div>`;
+                : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#eee; border-radius:4px; font-size:10px; text-align:center; overflow:hidden;">${displayName.split('.').pop().toUpperCase()}</div>`;
 
             div.innerHTML = `
                 ${previewHtml}
+                <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.5); color:white; font-size:9px; text-align:center; white-space:nowrap; overflow:hidden;">${displayName}</div>
                 <button onclick="window.removeMemoFile(${index}, '${previewId}')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:20px; height:20px; font-size:14px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; z-index:10;">&times;</button>
             `;
             newContainer.appendChild(div);
@@ -1063,14 +1347,19 @@ export async function saveGeneralMemo() {
 
 // [추가] 메모 CSV 다운로드 (일반 메모 포함)
 export function downloadMemosCSV() {
-    if (!state.memos || state.memos.length === 0) {
+    // [수정] 현재 필터링된 리스트만 다운로드
+    const targetMemos = state.memoFilterProjectId 
+        ? state.memos.filter(m => m.project_id === state.memoFilterProjectId)
+        : state.memos;
+
+    if (!targetMemos || targetMemos.length === 0) {
         return alert("다운로드할 메모가 없습니다.");
     }
 
     let csvContent = "\uFEFF"; // BOM (한글 깨짐 방지)
     csvContent += "프로젝트,lon,lat,tm_x,tm_y,메모내용,Chainage,작성자,공개여부,날짜,첨부파일\n";
 
-    state.memos.forEach(m => {
+    targetMemos.forEach(m => {
         const content = (m.content || '').replace(/"/g, '""'); // 따옴표 이스케이프
         const imageUrls = (m.image_url || '').split(',').filter(url => url.trim() !== '').join(';'); // 여러 URL은 세미콜론으로 구분
         const row = [
@@ -1093,13 +1382,18 @@ export function downloadMemosCSV() {
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `memos_${new Date().toISOString().slice(0,10)}.csv`);
+    const fileName = state.memoFilterProjectId ? `memos_filtered_${new Date().toISOString().slice(0,10)}.csv` : `memos_all_${new Date().toISOString().slice(0,10)}.csv`;
+    link.setAttribute("download", fileName);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 }
 
 // window 객체에 바인딩 (viewers.js의 popup에서 호출)
+window.openMemoProjectFilter = openMemoProjectFilter;
+window.setMemoFilter = setMemoFilter;
+window.downloadPhotoFile = downloadPhotoFile;
+window.downloadAllPhotos = downloadAllPhotos;
 window.saveMemo = saveMemo; // [추가]
 window.openGeneralMemoModal = openGeneralMemoModal;
 window.saveGeneralMemo = saveGeneralMemo;

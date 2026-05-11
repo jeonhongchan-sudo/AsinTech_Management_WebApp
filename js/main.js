@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
-import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV } from './managers.js';
+import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, deleteAllPhotos } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
@@ -51,6 +51,11 @@ window.removeExistingMemoImage = removeExistingMemoImage; // [추가]
 window.loadMapMemos = loadMapMemos;
 window.toggleDistanceMode = toggleDistanceMode; // [추가] 거리 측정 토글
 window.downloadMemosCSV = downloadMemosCSV; // [추가] 메모 CSV 다운로드
+window.openMemoProjectFilter = openMemoProjectFilter;
+window.setMemoFilter = setMemoFilter;
+window.downloadPhotoFile = downloadPhotoFile;
+window.downloadAllPhotos = downloadAllPhotos;
+window.deleteAllPhotos = deleteAllPhotos; // [추가] 전체 삭제 함수 바인딩
 
 // [추가] 지도 팝업 내 사진 탐색(Lightbox) 연동 브릿지 함수
 window.openMatchedLightbox = function(index) {
@@ -293,7 +298,6 @@ document.addEventListener('DOMContentLoaded', function() {
   if (savedUser) {
       const input = document.getElementById('loginUsername');
       if (input) input.value = savedUser;
-      state.currentUser = savedUser; // [추가] 초기 상태 복구 (Config 로드 후 자동 처리용)
   }
 
   initProj4Defs();
@@ -327,10 +331,6 @@ document.addEventListener('DOMContentLoaded', function() {
                   location.reload();
                   return;
               }
-              
-              // [추가] 유효한 세션이 있다면 로그인 화면을 자동으로 닫음
-              const overlay = document.getElementById('loginOverlay');
-              if (overlay) overlay.style.display = 'none';
               
               updateHeaderWithUser(state.currentUser);
           }

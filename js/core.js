@@ -29,7 +29,9 @@ export const state = {
     isUploading: false,     // [추가] 업로드 진행 중 여부
     isDistanceMode: false,  // [추가] 거리 측정 모드 활성화 여부
     distanceStartPoint: null, // [추가] 거리 측정 시작점 {lon, lat}
-    distanceMarkers: []     // [추가] 거리 측정용 마커/팝업 관리 배열
+    distanceMarkers: [],     // [추가] 거리 측정용 마커/팝업 관리 배열
+    isSurveyMode: false,      // [추가] 조사 모드 활성화 여부
+    memoFilterProjectId: null // [추가] 메모 필터링용 프로젝트 ID
 };
 
 // 유틸리티 함수
