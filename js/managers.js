@@ -1,5 +1,5 @@
 // e:\Program\SelfProgram\아신테크\js\managers.js
-import { state, callApi, callSupabaseDirect, showAlert, generateUUID, R2_BASE_URL } from './core.js';
+import { state, callApi, callSupabaseDirect, showAlert, generateUUID, R2_BASE_URL, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
 import { switchTab } from './main.js';
 
 // --- Project Manager ---
@@ -165,7 +165,23 @@ function renderPhotos(res) {
    container.innerHTML = html;
 }
 
-export function deletePhoto(id) { if(confirm("삭제?")) callApi('deletePhoto', { fileId: id }).then(() => loadPhotos(state.currentProjectId)); }
+export async function deletePhoto(id) { 
+    if(!confirm("사진을 삭제하시겠습니까?")) return;
+    
+    // [추가] R2 파일인지 확인 (id가 URL 형태인 경우 대응)
+    const photo = state.currentPhotosData.find(p => p.fileId === id);
+    if (photo && photo.url && photo.url.includes('r2.dev')) {
+        const filePath = photo.url.replace(R2_BASE_URL + '/', '');
+        try {
+            await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': WORKER_AUTH_KEY }
+            });
+        } catch (e) { console.warn("R2 파일 삭제 실패:", e); }
+    }
+
+    callApi('deletePhoto', { fileId: id }).then(() => loadPhotos(state.currentProjectId)); 
+}
 
 // [추가] 저장소 통합 동기화 (이어달리기 지원)
 export async function runFullSync() {
@@ -245,6 +261,13 @@ export async function deleteIndividualMemoPhoto(memoId, urlToDelete) {
         const fileIdMatch = urlToDelete.match(/(?:id=|\/d\/|d\/)([a-zA-Z0-9_-]{25,})/);
         if (fileIdMatch) {
             await callApi('deletePhoto', { fileId: fileIdMatch[1] });
+        } else if (urlToDelete.includes('r2.dev')) {
+            // [추가] R2 파일 삭제 처리
+            const filePath = urlToDelete.replace(R2_BASE_URL + '/', '');
+            await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': WORKER_AUTH_KEY }
+            });
         }
 
         showAlert("사진이 삭제되었습니다.");
@@ -750,27 +773,36 @@ async function processMemoSaveBackground(data) {
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 try {
-                    let base64;
-                    if (file.type.startsWith('image/')) {
-                        base64 = await resizeImage(file);
-                    } else {
-                        // 이미지 외 파일은 리사이징 없이 Base64 변환
-                        base64 = await fileToBase64(file);
-                    }
-                    const res = await callApi('uploadToDrive', { 
-                        fileName: file.name, 
-                        fileData: base64, 
-                        mimeType: file.type || "application/octet-stream" 
+                    let uploadData = file; // [수정] 사용자의 요청에 따라 리사이징 없이 원본 그대로 업로드
+                    let contentType = file.type || "application/octet-stream";
+
+                    // [수정] R2 저장 경로 구성: memos_photo/{Project_id}/{UUID}_{파일명}
+                    const uuid = generateUUID();
+                    const r2Path = `memos_photo/${projectId}/${uuid}_${file.name}`;
+
+                    // 1. Worker에게 서명된 URL 요청
+                    const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}&type=${encodeURIComponent(contentType)}`, {
+                        method: 'GET',
+                        headers: { 'Authorization': WORKER_AUTH_KEY }
                     });
-                    
-                    if (res.success && res.url) {
-                        finalImageUrls.push(res.url.trim());
-                        console.log(`[Upload Success] ${i+1}/${files.length}:`, res.url);
+
+                    if (!presignRes.ok) throw new Error("Worker 승인 실패: " + await presignRes.text());
+                    let { url: signedUrl } = await presignRes.json();
+                    signedUrl = signedUrl.trim().replace(/[<>]/g, '');
+
+                    // 2. R2로 직접 전송 (Presigned URL 방식)
+                    const uploadRes = await fetch(signedUrl, {
+                        method: 'PUT',
+                        body: uploadData,
+                        headers: { 'Content-Type': contentType }
+                    });
+
+                    if (uploadRes.ok) {
+                        const finalUrl = `${R2_BASE_URL}/${r2Path}`;
+                        finalImageUrls.push(finalUrl);
+                        console.log(`[R2 Upload Success] ${i+1}/${files.length}:`, finalUrl);
                     } else {
-                        const errorMsg = `사진 업로드에 실패했습니다: ${res.error}\n(드라이브 권한을 확인하세요)`;
-                        console.error("[Upload Error]", errorMsg);
-                        showAlert(errorMsg, "error");
-                        return false; // 저장 프로세스 중단
+                        throw new Error("R2 직접 전송 실패");
                     }
                 } catch (err) {
                     console.error(`이미지 처리 중 오류 (${file.name}):`, err);
@@ -836,17 +868,28 @@ export async function deleteMemo(id) {
         // [추가] 삭제 전 메모 정보(이미지 URL) 확인
         const memo = state.memos.find(m => m.id === id);
         
-        // 1. 구글 드라이브 파일 삭제 (이미지가 있는 경우)
+        // 1. 첨부 파일 삭제 (R2 또는 구글 드라이브)
         if (memo && memo.image_url) {
             const urls = memo.image_url.split(',');
             for (const url of urls) {
-                // URL에서 구글 드라이브 파일 ID 추출 (다양한 형식 대응)
-                const fileIdMatch = url.match(/(?:id=|\/d\/|d\/)([a-zA-Z0-9_-]{25,})/);
-                if (fileIdMatch && fileIdMatch[1]) {
+                const trimmedUrl = url.trim();
+                if (!trimmedUrl) continue;
+
+                if (trimmedUrl.includes('r2.dev')) {
+                    // R2 파일 삭제
+                    const filePath = trimmedUrl.replace(R2_BASE_URL + '/', '');
                     try {
-                        await callApi('deletePhoto', { fileId: fileIdMatch[1] });
-                    } catch (err) {
-                        console.warn("드라이브 파일 삭제 실패 (무시하고 진행):", url);
+                        await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': WORKER_AUTH_KEY }
+                        });
+                    } catch (err) { console.warn("R2 삭제 실패:", filePath); }
+                } else {
+                    // 구글 드라이브 파일 삭제
+                    const fileIdMatch = trimmedUrl.match(/(?:id=|\/d\/|d\/)([a-zA-Z0-9_-]{25,})/);
+                    if (fileIdMatch) {
+                        try { await callApi('deletePhoto', { fileId: fileIdMatch[1] }); } 
+                        catch (err) { console.warn("드라이브 삭제 실패:", trimmedUrl); }
                     }
                 }
             }
@@ -885,11 +928,13 @@ export function resizeImage(file, maxWidth = 1024, quality = 0.6) {
                 cvs.width = w; cvs.height = h;
                 const ctx = cvs.getContext('2d');
                 ctx.drawImage(img, 0, 0, w, h);
-                // Base64 문자열 반환 (헤더 제거)
-                resolve(cvs.toDataURL('image/jpeg', quality).split(',')[1]);
-                // [최적화] 캔버스 메모리 해제 도움
-                cvs.width = 0;
-                cvs.height = 0;
+                // [수정] R2 업로드 효율을 위해 Base64 대신 Blob으로 반환
+                cvs.toBlob((blob) => {
+                    resolve(blob);
+                    // [최적화] 캔버스 메모리 해제
+                    cvs.width = 0;
+                    cvs.height = 0;
+                }, 'image/jpeg', quality);
             };
             img.onerror = () => reject(new Error("이미지 로드 실패"));
             img.src = e.target.result;

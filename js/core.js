@@ -3,6 +3,10 @@
 export const API_URL = "https://script.google.com/macros/s/AKfycbyBjiUmdE_ISu1Uk-3zwb75owaRWNIyRZu-RgAqmvxvvAho8RsGotvqF4PnHZ34_1r6/exec";
 export const R2_BASE_URL = "https://pub-64820218d8b845c7860fb4ea3b6d7ec3.r2.dev"; 
 
+// [추가] Cloudflare Worker 설정
+export const WORKER_URL = "https://asin-r2-worker.jeonhongchan.workers.dev"; // 본인의 Worker 주소로 변경하세요
+export const WORKER_AUTH_KEY = "asin_tech_secret_2024"; // Worker 환경변수에 설정한 값과 동일하게 입력하세요
+
 // 전역 상태 관리
 export const state = {
     allProjects: [],

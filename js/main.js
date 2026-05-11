@@ -1,5 +1,5 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
-import { state, callApi, callSupabaseDirect, showAlert } from './core.js';
+import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
 import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, runFullSync, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV } from './managers.js';
 
@@ -299,13 +299,23 @@ document.addEventListener('DOMContentLoaded', function() {
   initProj4Defs();
   initCadViewer(); // 초기 탭(Map Viewer) 초기화
 
-  callApi('getSupabaseConfig').then(async res => {
+  // [수정] GAS 대신 Cloudflare Worker에서 설정 정보를 가져옵니다.
+  fetch(`${WORKER_URL}/config`, {
+      method: 'GET',
+      headers: { 'Authorization': WORKER_AUTH_KEY }
+  })
+  .then(response => {
+      if (!response.ok) throw new Error("Worker Config Fetch Failed");
+      return response.json();
+  })
+  .then(async res => {
       if (res.success && res.url && res.key) {
-          state.supabaseConfig = { url: res.url, key: res.key, vworldKey: res.vworldKey, colabUrl: res.colabUrl };
-          // [추가] GAS에서 전달받은 관리자 ID 저장 (GAS 스크립트에 AD_USER 속성 반환 로직 필요)
+          // vworldKey나 colabUrl 등이 더 필요하다면 Worker의 Variables에 추가 후 res로 내려주면 됩니다.
+          state.supabaseConfig = { url: res.url, key: res.key };
+          
+          // [수정] Worker에서 전달받은 관리자 ID 저장
           if (res.adminUser) state.adminUser = res.adminUser;
           
-          // [추가] Config 로드 전 이미 로그인이 수행된 경우 설정 가져오기
           if (state.currentUser) {
               // [수정] 앱 진입 시 캐시된 유저가 DB에 여전히 존재하는지 확인 (삭제된 유저 진입 차단)
               const isValid = await fetchUserSettings(state.currentUser);
