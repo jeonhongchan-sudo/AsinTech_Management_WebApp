@@ -1036,6 +1036,63 @@ async function processMemoSaveBackground(data) {
     }
 }
 
+// [추가] 특정 프로젝트의 모든 메모 및 첨부 파일 삭제 (관리자/방장 전용)
+export async function deleteProjectMemos() {
+    const curUserLower = state.currentUser ? state.currentUser.toLowerCase() : "";
+    const isAdmin = state.adminUser && curUserLower === state.adminUser.toLowerCase();
+    
+    // 1. 권한 체크
+    if (!isAdmin && !state.isRoomManager) {
+        alert("관리자/방장 등급 이상만 삭제할 수 있습니다");
+        return;
+    }
+
+    // 2. 필터링된 프로젝트 확인
+    if (!state.memoFilterProjectId) {
+        alert("일괄 삭제를 위해 먼저 프로젝트 필터를 선택해주세요.");
+        return;
+    }
+
+    const project = state.allProjects.find(p => String(p.id) === String(state.memoFilterProjectId));
+    const projectName = project ? project.name : "선택된 프로젝트";
+    const targetMemos = state.memos.filter(m => m.project_id === state.memoFilterProjectId);
+
+    if (targetMemos.length === 0) {
+        return showAlert("해당 프로젝트에 삭제할 메모가 없습니다.", "info");
+    }
+
+    if (!confirm(`'${projectName}' 프로젝트의 모든 메모(${targetMemos.length}건)와 첨부 파일을 완전히 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+
+    try {
+        showAlert(`${projectName} 프로젝트 메모 및 파일 삭제 중...`, "info");
+
+        // 3. R2 첨부 파일 삭제
+        for (const m of targetMemos) {
+            if (m.image_url) {
+                const urls = m.image_url.split(',').filter(u => u.trim());
+                for (const url of urls) {
+                    if (url.includes('r2.dev')) {
+                        const filePath = url.replace(R2_BASE_URL + '/', '');
+                        await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': WORKER_AUTH_KEY }
+                        }).catch(e => console.warn("R2 파일 삭제 실패:", filePath));
+                    }
+                }
+            }
+        }
+
+        // 4. Supabase DB 레코드 삭제
+        await callSupabaseDirect(`memos?project_id=eq.${state.memoFilterProjectId}`, 'DELETE');
+
+        showAlert(`${projectName} 프로젝트의 모든 메모가 삭제되었습니다.`);
+        loadMemoList(); // 목록 갱신
+        if (window.loadMapMemos) window.loadMapMemos(); // 지도 마커 갱신
+    } catch (e) {
+        showAlert("삭제 실패: " + e.message, "error");
+    }
+}
+
 export async function deleteMemo(id) {
     if(!confirm("메모를 삭제하시겠습니까?")) return;
     try {

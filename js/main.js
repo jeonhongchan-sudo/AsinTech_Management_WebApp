@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode } from './viewers.js';
-import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, deleteAllPhotos } from './managers.js';
+import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, deleteProjectMemos, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, deleteAllPhotos } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
@@ -44,6 +44,7 @@ window.deleteUser = deleteUser;
 window.renameUser = renameUser;
 window.loadMemoList = loadMemoList; // [추가]
 window.deleteMemo = deleteMemo; // [추가]
+window.deleteProjectMemos = deleteProjectMemos; // [추가] 프로젝트별 일괄 삭제
 window.handleMemoFileSelect = handleMemoFileSelect; // 파일 통합 핸들러
 window.handleMemoImageSelect = handleMemoFileSelect; // [추가] 지도 팝업 호환성용 별칭
 window.removeMemoFile = removeMemoFile; // 파일 삭제 핸들러
