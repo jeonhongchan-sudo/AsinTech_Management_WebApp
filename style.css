@@ -9,7 +9,7 @@
 body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--primary-gradient); min-height: 100vh; padding: 20px; }
 .container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 15px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; min-height: 800px; display: flex; flex-direction: column; }
 
-.header { background: var(--primary-gradient); color: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; }
+.header { background: var(--primary-gradient); color: white; padding: 10px 30px; display: flex; justify-content: space-between; align-items: center; }
 .header h1 { font-size: 24px; margin: 0; }
 .header p { opacity: 0.9; font-size: 14px; margin: 0; }
 

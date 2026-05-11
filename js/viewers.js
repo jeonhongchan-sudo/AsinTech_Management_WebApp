@@ -658,8 +658,8 @@ let memoMarkers = []; // [추가] 메모 마커 관리용 배열
 let currentPopup = null; // [추가] 현재 열린 팝업 추적용
 
 export async function initCadViewer() {
-    const statusEl = document.getElementById('cadStatus');
-    statusEl.innerText = '설정 로드 중...';
+    const select = document.getElementById('cadProjectSelect');
+    if (select) select.innerHTML = '<option value="">서버 설정 로드 중...</option>';
     try {
         if (!state.supabaseConfig) {
             const sbRes = await callApi('getSupabaseConfig');
@@ -676,17 +676,16 @@ export async function initCadViewer() {
             maplibregl.addProtocol("pmtiles", cadProtocol.tile);
         }
         await loadCadProjects();
-        statusEl.innerText = '프로젝트를 선택해주세요.';
         cadLayers.clear(); cadLayerColors = {};
         document.getElementById('cadLayerPanel').style.display = 'none';
         const toggleBtn = document.getElementById('cadLayerToggleBtn');
         if (toggleBtn) toggleBtn.style.display = 'none';
-    } catch (e) { console.error(e); statusEl.innerText = '초기화 실패: ' + e.message; }
+    } catch (e) { console.error(e); if (select) select.innerHTML = '<option value="">초기화 실패</option>'; }
 }
 
 async function loadCadProjects() {
     const select = document.getElementById('cadProjectSelect');
-    select.innerHTML = '<option value="">로딩 중...</option>';
+    select.innerHTML = '<option value="">프로젝트 목록 로딩 중...</option>';
     try {
         const curUser = state.currentUser;
         if (!curUser) return;
@@ -732,7 +731,7 @@ async function loadCadProjects() {
         // [추가] 계산된 최종 날짜(최신순)로 정렬
         projects.sort((a, b) => b.finalDate - a.finalDate);
 
-        select.innerHTML = '<option value="">프로젝트를 선택하세요</option>';
+        select.innerHTML = '<option value="">열람할 프로젝트를 선택하세요</option>';
         projects.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.id;
@@ -743,11 +742,30 @@ async function loadCadProjects() {
     } catch (e) { select.innerHTML = '<option value="">목록 로드 실패</option>'; showAlert('CAD 프로젝트 목록 로드 실패: ' + e.message, 'error'); }
 }
 
+// [추가] 상단 맵 제어 메뉴 토글
+export function toggleMapMenu(event) {
+    if (event) event.stopPropagation();
+    const menu = document.getElementById('mapMenuDropdown');
+    if (!menu) return;
+    
+    const isVisible = menu.style.display === 'block';
+    menu.style.display = isVisible ? 'none' : 'block';
+
+    if (!isVisible) {
+        // 외부 클릭 시 닫기 위한 일회성 이벤트
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target) && e.target.id !== 'btnMapMenu') {
+                menu.style.display = 'none';
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+        document.addEventListener('click', closeMenu);
+    }
+}
+
 export async function loadCadMap(projectId) {
     if (!projectId) return;
     state.currentCadProjectId = projectId; // [수정] 전역 상태에 프로젝트 ID 저장
-    const statusEl = document.getElementById('cadStatus');
-    statusEl.innerText = '지도 데이터 로딩 중...';
     if (cadMap) { cadMap.remove(); cadMap = null; }
     cadLayers.clear(); cadLayerColors = {}; cadHiddenLayers.clear();
     document.getElementById('cadLayerList').innerHTML = '';
@@ -755,7 +773,7 @@ export async function loadCadMap(projectId) {
 
     try {
         const files = await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.pmtiles&select=*,source_crs&limit=1`);
-        if (!files || files.length === 0) { statusEl.innerText = '이 프로젝트에는 변환된 PMTiles 파일이 없습니다.'; return; }
+        if (!files || files.length === 0) { showAlert('이 프로젝트에는 변환된 지도 데이터(PMTiles)가 없습니다.', 'error'); return; }
         
         const fileData = files[0];
         state.currentProjectSourceCrs = fileData.source_crs || 'EPSG:5179';
@@ -838,14 +856,12 @@ export async function loadCadMap(projectId) {
 
             const chkLineLabels = document.getElementById('chkLineLabels');
             if (chkLineLabels) toggleLineLabels(chkLineLabels.checked);
-
-            statusEl.innerText = '도면 로드 완료'; 
             
             // [추가] 메모 데이터 로드 (지도 표시용)
             loadMapMemos();
         });
         cadMap.on('idle', updateLayerDiscovery); // 지도가 멈췄을 때 실제 레이어 명칭 감지 실행
-    } catch (e) { console.error(e); statusEl.innerText = '지도 로드 오류: ' + e.message; }
+    } catch (e) { console.error(e); showAlert('지도 로드 중 오류가 발생했습니다.', 'error'); }
 }
 
 // [추가] 배경지도 토글 기능
@@ -1649,20 +1665,27 @@ function openMemoPopup(feature) {
 }
 
 // [추가] 거리 측정 모드 토글
-export function toggleDistanceMode() {
-    state.isDistanceMode = !state.isDistanceMode;
-    const btn = document.getElementById('btnDistanceMeasure');
-    const statusEl = document.getElementById('cadStatus');
+// [수정] 거리 측정 모드 토글 (스위치 상태 동기화 추가)
+export function toggleDistanceMode(forceValue) {
+    state.isDistanceMode = (forceValue !== undefined) ? forceValue : !state.isDistanceMode;
+    
+    const chk = document.getElementById('chkDistanceMode');
+    if (chk) chk.checked = state.isDistanceMode;
+    
+    const btn = document.getElementById('btnDistanceMeasure'); // 레거시 버튼 대응
     
     if (state.isDistanceMode) {
-        btn.classList.add('active');
-        btn.style.backgroundColor = '#ffc107'; // 활성화 색상
-        statusEl.innerText = '거리 측정: 첫 번째 지점을 선택하세요.';
+        if (btn) {
+            btn.classList.add('active');
+            btn.style.backgroundColor = '#ffc107';
+        }
+        showAlert('거리 측정 모드: 지도에서 첫 번째 지점을 선택하세요.', 'info');
         cadMap.getCanvas().style.cursor = 'crosshair'; // 커서 변경
     } else {
-        btn.classList.remove('active');
-        btn.style.backgroundColor = '';
-        statusEl.innerText = '도면 로드 완료';
+        if (btn) {
+            btn.classList.remove('active');
+            btn.style.backgroundColor = '';
+        }
         cadMap.getCanvas().style.cursor = '';
         clearDistanceMeasurement();
     }
@@ -1672,7 +1695,6 @@ export function toggleDistanceMode() {
 function handleDistanceClick(coords) {
     const lon = coords[0];
     const lat = coords[1];
-    const statusEl = document.getElementById('cadStatus');
 
     // 1. 시작점이 없는 경우 (첫 번째 클릭)
     if (!state.distanceStartPoint) {
@@ -1683,8 +1705,6 @@ function handleDistanceClick(coords) {
             .setLngLat([lon, lat])
             .addTo(cadMap);
         state.distanceMarkers.push(startMarker);
-        
-        statusEl.innerText = '거리 측정: 두 번째 지점을 선택하세요.';
     } 
     // 2. 시작점이 있는 경우 (두 번째 클릭 -> 거리 계산)
     else {
@@ -1751,7 +1771,6 @@ function handleDistanceClick(coords) {
 
         // 상태 초기화 (연속 측정을 위해 시작점 리셋)
         state.distanceStartPoint = null;
-        statusEl.innerText = `측정 완료: ${distance.toFixed(2)}m. 다시 측정하려면 첫 지점을 선택하세요.`;
     }
 }
 
@@ -1773,19 +1792,26 @@ function clearDistanceMeasurement() {
 }
 
 // [추가] 조사 모드 토글
-export function toggleSurveyMode() {
-    state.isSurveyMode = !state.isSurveyMode;
-    const btn = document.getElementById('btnSurveyMode');
-    const statusEl = document.getElementById('cadStatus');
+// [수정] 조사 모드 토글 (스위치 상태 동기화 추가)
+export function toggleSurveyMode(forceValue) {
+    state.isSurveyMode = (forceValue !== undefined) ? forceValue : !state.isSurveyMode;
+    
+    const chk = document.getElementById('chkSurveyMode');
+    if (chk) chk.checked = state.isSurveyMode;
+
+    const btn = document.getElementById('btnSurveyMode'); // 레거시 버튼 대응   
     
     if (state.isSurveyMode) {
-        btn.classList.add('active');
-        btn.style.backgroundColor = '#4dabf7'; // 파란색 계열 활성화
-        statusEl.innerText = '조사 모드 활성 (사진 원본 저장)';
+        if (btn) {
+            btn.classList.add('active');
+            btn.style.backgroundColor = '#4dabf7';
+        }
+        showAlert('조사 모드가 활성화되었습니다. (사진 원본 저장)', 'info');
     } else {
-        btn.classList.remove('active');
-        btn.style.backgroundColor = '';
-        statusEl.innerText = '도면 로드 완료';
+        if (btn) {
+            btn.classList.remove('active');
+            btn.style.backgroundColor = '';
+        }
     }
 }
 

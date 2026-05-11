@@ -44,9 +44,9 @@
     }
 
     /* 캐드 뷰어 스타일 */
-    #cad-map { width: 100%; height: calc(100vh - 180px); border-radius: 8px; border: 1px solid #ddd; margin-top: 10px; }
-    .cad-controls { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
-    .cad-controls select { padding: 8px; border-radius: 4px; border: 1px solid #ccc; min-width: 150px; max-width: 220px; }
+    #cad-map { width: 100%; height: calc(100vh - 165px); border-radius: 8px; border: 1px solid #ddd; margin-top: 5px; }
+    .cad-controls { display: flex; gap: 10px; margin-bottom: 5px; align-items: center; flex-wrap: wrap; }
+    .cad-controls select { padding: 5px 8px; border-radius: 4px; border: 1px solid #ccc; min-width: 150px; max-width: 220px; font-size: 13px; }
     .cad-legend { font-size: 12px; color: #666; margin-left: auto; }
 
     /* 레이어 목록 패널 */
@@ -84,6 +84,34 @@
         align-items: center !important;
         justify-content: center !important;
     }
+
+    /* [추가] 맵 제어 메뉴 드롭다운 스타일 */
+    .map-menu-dropdown {
+        position: absolute; top: 38px; left: 0; width: 200px;
+        background: white; border: 1px solid #ccc; border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 2000; padding: 5px 0;
+    }
+    .map-menu-item {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 10px 15px; border-bottom: 1px solid #f0f0f0; font-size: 13px; color: #333;
+    }
+    .map-menu-item:last-child { border-bottom: none; }
+    
+    /* [추가] 토글 스위치 디자인 */
+    .switch { position: relative; display: inline-block; width: 34px; height: 18px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+        position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+        background-color: #ccc; transition: .3s; border-radius: 18px;
+    }
+    .slider:before {
+        position: absolute; content: ""; height: 14px; width: 14px; left: 2px; bottom: 2px;
+        background-color: white; transition: .3s; border-radius: 50%;
+    }
+    input:checked + .slider { background-color: #2196F3; }
+    input:checked + .slider:before { transform: translateX(16px); }
+    input:checked + .slider.orange { background-color: #ffc107; }
+    input:checked + .slider.blue { background-color: #4dabf7; }
   </style>
 </head>
 <body>
@@ -136,20 +164,38 @@
       <!-- 4. 앱뷰어 탭 -->
       <div id="cadViewer-tab" class="tab-content active">
         <div class="cad-controls">
-            <label for="cadProjectSelect"><strong>프로젝트 선택:</strong></label>
-            <select id="cadProjectSelect" onchange="loadCadMap(this.value)">
+            <div style="position: relative; display: flex; gap: 8px; align-items: center;">
+              <select id="cadProjectSelect" onchange="loadCadMap(this.value)">
                 <option value="">프로젝트를 선택하세요</option>
-            </select>
-            <!-- [추가] 지도 제어 컨트롤 -->
-            <label style="font-size: 13px; display: flex; align-items: center; gap: 5px;"><input type="checkbox" id="chkMap" checked onchange="toggleBackgroundMap(this.checked)"> 지도</label>
-            <label style="font-size: 13px; display: flex; align-items: center; gap: 5px;"><input type="checkbox" id="chkMarkers" checked onchange="toggleMarkers(this.checked)"> 마커</label>
-            <label style="font-size: 13px; display: flex; align-items: center; gap: 5px;"><input type="checkbox" id="chkLineLabels" onchange="toggleLineLabels(this.checked)"> 선 레이어 명</label>
-            <!-- [추가] 거리 측정 버튼 -->
-            <button id="btnDistanceMeasure" class="btn btn-outline" onclick="window.toggleDistanceMode()" title="거리 측정" style="padding: 4px 8px; font-size: 13px;">📏</button>
-            <!-- [추가] 조사 모드 버튼 -->
-            <button id="btnSurveyMode" class="btn btn-outline" onclick="window.toggleSurveyMode()" title="조사 모드 (원본 저장)" style="padding: 4px 8px; font-size: 13px;">📋</button>
-            
-            <span class="cad-legend" id="cadStatus">준비됨</span>
+              </select>
+              
+              <!-- [수정] 통합 메뉴 버튼 -->
+              <button id="btnMapMenu" class="btn btn-outline" onclick="window.toggleMapMenu(event)" style="padding: 4px 10px; font-size: 13px; font-weight: bold;">☰ 메뉴</button>
+              
+              <!-- [추가] 드롭다운 메뉴 패널 -->
+              <div id="mapMenuDropdown" class="map-menu-dropdown" style="display:none;">
+                  <div class="map-menu-item">
+                      <span>지도 켜기/끄기</span>
+                      <label class="switch"><input type="checkbox" id="chkMap" checked onchange="toggleBackgroundMap(this.checked)"><span class="slider"></span></label>
+                  </div>
+                  <div class="map-menu-item">
+                      <span>마커 켜기/끄기</span>
+                      <label class="switch"><input type="checkbox" id="chkMarkers" checked onchange="toggleMarkers(this.checked)"><span class="slider"></span></label>
+                  </div>
+                  <div class="map-menu-item">
+                      <span>선레이어 명 켜기/끄기</span>
+                      <label class="switch"><input type="checkbox" id="chkLineLabels" onchange="toggleLineLabels(this.checked)"><span class="slider"></span></label>
+                  </div>
+                  <div class="map-menu-item">
+                      <span>거리측정 활성화</span>
+                      <label class="switch"><input type="checkbox" id="chkDistanceMode" onchange="window.toggleDistanceMode()"><span class="slider orange"></span></label>
+                  </div>
+                  <div class="map-menu-item">
+                      <span>조사메모 활성화</span>
+                      <label class="switch"><input type="checkbox" id="chkSurveyMode" onchange="window.toggleSurveyMode()"><span class="slider blue"></span></label>
+                  </div>
+              </div>
+            </div>
         </div>
         <div style="position: relative;">
             <div id="cad-map"></div>
