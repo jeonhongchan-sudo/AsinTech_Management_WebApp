@@ -31,7 +31,8 @@ export const state = {
     distanceStartPoint: null, // [추가] 거리 측정 시작점 {lon, lat}
     distanceMarkers: [],     // [추가] 거리 측정용 마커/팝업 관리 배열
     isSurveyMode: false,      // [추가] 조사 모드 활성화 여부
-    memoFilterProjectId: null // [추가] 메모 필터링용 프로젝트 ID
+    memoFilterProjectId: null, // [추가] 메모 필터링용 프로젝트 ID
+    vworldFailed: false        // [추가] 브이월드 로드 실패 여부 (자동 Fallback용)
 };
 
 // 유틸리티 함수

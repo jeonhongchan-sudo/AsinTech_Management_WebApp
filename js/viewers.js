@@ -818,11 +818,13 @@ export async function loadCadMap(projectId) {
                 version: 8, glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
                 sources: {
                     'cad_source': { type: 'vector', url: pmtilesUrl, attribution: '© AsinTech Map Viewer', maxzoom: maxDataZoom },
-                    'osm': { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '&copy; OpenStreetMap', maxzoom: 19 }
+                    'osm': { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '&copy; OpenStreetMap', maxzoom: 19 },
+                    'vworld': { type: 'raster', tiles: ['https://api.vworld.kr/req/wmts/1.0.0/87DAAA56-E320-35C4-BB2D-704AC776F8F3/Base/{z}/{y}/{x}.png'], tileSize: 256, attribution: '© VWorld', maxzoom: 19 }
                 },
                 layers: [
-                    // [수정] 배경지도 투명도를 1.0으로 변경하여 전체화면 시 어두워지는 현상 해결
-                    { id: 'background-layer', type: 'raster', source: 'osm', paint: { 'raster-opacity': 1.0 } },
+                    // [수정] 배경지도 레이어 분리 (VWorld를 기본값으로 설정)
+                    { id: 'osm-layer', type: 'raster', source: 'osm', layout: { visibility: 'none' }, paint: { 'raster-opacity': 1.0 } },
+                    { id: 'vworld-layer', type: 'raster', source: 'vworld', layout: { visibility: 'visible' }, paint: { 'raster-opacity': 1.0 } },
                     // [추가] 폭이 있는 폴리라인을 변환한 Polygon 레이어
                     { 
                         id: 'cad-polygons',
@@ -851,6 +853,10 @@ export async function loadCadMap(projectId) {
             const chkMap = document.getElementById('chkMap');
             if (chkMap) toggleBackgroundMap(chkMap.checked);
             
+            // [추가] 브이월드 전환 상태 초기 확인
+            const chkVWorld = document.getElementById('chkVWorld');
+            if (chkVWorld && chkVWorld.checked) switchMapProvider(true);
+            
             const chkMarkers = document.getElementById('chkMarkers');
             if (chkMarkers) toggleMarkers(chkMarkers.checked);
 
@@ -860,14 +866,56 @@ export async function loadCadMap(projectId) {
             // [추가] 메모 데이터 로드 (지도 표시용)
             loadMapMemos();
         });
+        
+        // [추가] 자동 배경지도 Fallback 로직 (브이월드 실패 시 OSM 전환)
+        cadMap.on('error', (e) => {
+            const chkVWorld = document.getElementById('chkVWorld');
+            if (chkVWorld && chkVWorld.checked && !state.vworldFailed) {
+                const isVWorldError = (e.error && e.error.message && e.error.message.includes('vworld')) || 
+                                      (e.tile && e.tile.url && e.tile.url.includes('vworld'));
+                if (isVWorldError) {
+                    state.vworldFailed = true;
+                    chkVWorld.checked = false;
+                    switchMapProvider(false);
+                    showAlert("브이월드 지도를 불러올 수 없어 OpenStreetMap으로 자동 전환되었습니다.", "info");
+                }
+            }
+        });
+
         cadMap.on('idle', updateLayerDiscovery); // 지도가 멈췄을 때 실제 레이어 명칭 감지 실행
     } catch (e) { console.error(e); showAlert('지도 로드 중 오류가 발생했습니다.', 'error'); }
 }
 
 // [추가] 배경지도 토글 기능
 export function toggleBackgroundMap(isVisible) {
-    if (!cadMap || !cadMap.getLayer('background-layer')) return;
-    cadMap.setLayoutProperty('background-layer', 'visibility', isVisible ? 'visible' : 'none');
+    if (!cadMap) return;
+    const useVWorld = document.getElementById('chkVWorld')?.checked;
+
+    if (!isVisible) {
+        if (cadMap.getLayer('osm-layer')) cadMap.setLayoutProperty('osm-layer', 'visibility', 'none');
+        if (cadMap.getLayer('vworld-layer')) cadMap.setLayoutProperty('vworld-layer', 'visibility', 'none');
+    } else {
+        // 지도 켜기가 활성화되면 현재 선택된 맵 종류만 활성화
+        if (cadMap.getLayer('osm-layer')) cadMap.setLayoutProperty('osm-layer', 'visibility', useVWorld ? 'none' : 'visible');
+        if (cadMap.getLayer('vworld-layer')) cadMap.setLayoutProperty('vworld-layer', 'visibility', useVWorld ? 'visible' : 'none');
+    }
+    updateCadStyle();
+}
+
+// [추가] 지도 제공자 전환 기능 (OSM <-> VWorld)
+export function switchMapProvider(useVWorld) {
+    if (!cadMap) return;
+    const isMapOn = document.getElementById('chkMap')?.checked;
+    
+    // 마스터 지도 스위치가 켜져 있을 때만 실제 레이어 전환 수행
+    if (isMapOn) {
+        if (cadMap.getLayer('osm-layer')) {
+            cadMap.setLayoutProperty('osm-layer', 'visibility', useVWorld ? 'none' : 'visible');
+        }
+        if (cadMap.getLayer('vworld-layer')) {
+            cadMap.setLayoutProperty('vworld-layer', 'visibility', useVWorld ? 'visible' : 'none');
+        }
+    }
     updateCadStyle();
 }
 
@@ -896,8 +944,9 @@ window.toggleLineLabels = toggleLineLabels;
 function updateCadStyle() {
     if (!cadMap) return;
 
-    const bgLayer = cadMap.getLayer('background-layer');
-    const isBgVisible = bgLayer && cadMap.getLayoutProperty('background-layer', 'visibility') !== 'none';
+    const osmVisible = cadMap.getLayer('osm-layer') && cadMap.getLayoutProperty('osm-layer', 'visibility') === 'visible';
+    const vworldVisible = cadMap.getLayer('vworld-layer') && cadMap.getLayoutProperty('vworld-layer', 'visibility') === 'visible';
+    const isBgVisible = osmVisible || vworldVisible;
 
     const canvasContainer = cadMap.getCanvasContainer();
     const mapContainer = cadMap.getContainer();
@@ -1244,6 +1293,7 @@ export function cleanupCadViewer() {
     if (cadMap) { cadMap.remove(); cadMap = null; }
     state.r2Config = null; cadLayers.clear(); cadLayerColors = {}; cadHiddenLayers.clear();
     state.currentCadProjectId = null; // [추가] 초기화
+    state.vworldFailed = false; // [추가] 실패 플래그 초기화
     state.highlightedMemoId = null; // [추가] 강조 메모 초기화
     document.getElementById('cadLayerPanel').style.display = 'none';
     document.getElementById('cadLayerToggleBtn').style.display = 'none';

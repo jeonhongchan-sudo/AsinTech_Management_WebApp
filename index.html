@@ -112,6 +112,7 @@
     input:checked + .slider:before { transform: translateX(16px); }
     input:checked + .slider.orange { background-color: #ffc107; }
     input:checked + .slider.blue { background-color: #4dabf7; }
+    input:checked + .slider.green { background-color: #40c057; }
   </style>
 </head>
 <body>
@@ -185,6 +186,10 @@
                   <div class="map-menu-item">
                       <span>선레이어 명 켜기/끄기</span>
                       <label class="switch"><input type="checkbox" id="chkLineLabels" onchange="toggleLineLabels(this.checked)"><span class="slider"></span></label>
+                  </div>
+                  <div class="map-menu-item">
+                      <span>브이월드(VWorld) 사용</span>
+                      <label class="switch"><input type="checkbox" id="chkVWorld" checked onchange="window.switchMapProvider(this.checked)"><span class="slider green"></span></label>
                   </div>
                   <div class="map-menu-item">
                       <span>거리측정 활성화</span>
