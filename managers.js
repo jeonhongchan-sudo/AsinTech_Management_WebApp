@@ -90,7 +90,12 @@ export function openPhotoManager(id, name) {
   loadPhotos(id);
 }
 
-export function closePhotoManager() { state.currentProjectId = null; document.getElementById('photo-manager-interface').style.display = 'none'; document.getElementById('mainTabs').style.display = 'flex'; switchTab('projects'); }
+export function closePhotoManager() {
+    state.currentProjectId = null;
+    document.getElementById('photo-manager-interface').style.display = 'none';
+    document.getElementById('mainTabs').style.display = 'flex';
+    if (window.switchTab) window.switchTab('projects');
+}
 
 export async function loadPhotos(id) {
   document.getElementById('pmPhotoContainer').innerHTML = '<span class="spinner"></span> 로딩 중...';
@@ -588,7 +593,7 @@ export function roomUploadCad(id) {
     document.getElementById('cadFileSelector').click();
 }
 
-// [복구] 파일 선택기 이벤트 리스너 등록 (CAD 업로드 및 분석 트리거)
+// 파일 선택기 이벤트 리스너 등록
 setTimeout(() => {
     const selector = document.getElementById('cadFileSelector');
     if (selector) {
@@ -598,11 +603,11 @@ setTimeout(() => {
             
             const fileName = file.name.toLowerCase();
             if (!fileName.endsWith('.dxf')) {
-                return alert("DXF 파일만 선택 가능합니다. (DWG 변환은 지원하지 않습니다)");
+                return alert("DXF 파일만 업로드 가능합니다.");
             }
             
             processCadUpload(file, state.uploadingProjectId);
-            e.target.value = ''; // 같은 파일을 다시 선택할 수 있도록 초기화
+            e.target.value = '';
         });
     }
 }, 1000);
@@ -619,10 +624,8 @@ async function processCadUpload(file, projectId) {
     
     try {
         // 1. R2 업로드 경로 설정
-        const ext = file.name.split('.').pop().toLowerCase();
-        // [수정] 사용자의 요청에 따라 경로를 cad_data/CAD_{id}.{ext} 형식으로 통일
-        const fileName = `CAD_${projectId}.${ext}`;
-        const r2Path = `cad_data/${fileName}`;
+        const fileName = file.name;
+        const r2Path = `cad_data/raw/${projectId}/${fileName}`;
         statusText.innerText = "파일 업로드 중...";
 
         // 2. Presigned URL 획득 및 업로드
@@ -634,10 +637,10 @@ async function processCadUpload(file, projectId) {
         await fetch(uploadUrl, { method: 'PUT', body: file });
 
         // 3. Supabase 상태 업데이트 (ANALYZING)
-        // [수정] raw_file_path를 기록하지 않음 (payload로만 전달)
         statusText.innerText = "도면 분석 요청 중...";
         await callSupabaseDirect(`cad_projects?id=eq.${projectId}`, 'PATCH', {
-            status: 'ANALYZING'
+            status: 'ANALYZING',
+            raw_file_path: r2Path
         });
 
         // 4. GitHub Action 트리거 (분석용)
@@ -657,27 +660,8 @@ async function processCadUpload(file, projectId) {
         if (dispatchResult.success) {
             statusText.innerHTML = `
                 분석이 시작되었습니다.<br>도면 크기에 따라 1~3분 정도 소요됩니다.<br><br>
-                <div class="spinner"></div>
-                <p style="font-size:12px; color:#888;">분석이 완료되면 자동으로 설정을 불러옵니다...</p>
                 <button class="btn btn-primary" onclick="window.openCadConfigUI('${projectId}')">상태 확인 및 설정</button>
             `;
-
-            // [추가] 분석 상태 자동 체크 (5초 간격)
-            const pollTimer = setInterval(async () => {
-                try {
-                    const [p] = await callSupabaseDirect(`cad_projects?id=eq.${projectId}&select=status`);
-                    if (p && p.status === 'ANALYZED') {
-                        clearInterval(pollTimer);
-                        window.openCadConfigUI(projectId); // 분석 완료 시 자동으로 다음 단계로 이동
-                    } else if (p && p.status === 'ERROR') {
-                        clearInterval(pollTimer);
-                        statusText.innerHTML = "❌ 분석 중 오류가 발생했습니다.<br>도면 형식을 확인해주세요.";
-                    }
-                } catch (e) { console.warn("Status check failed", e); }
-            }, 5000);
-
-            // 15분 후 자동 종료
-            setTimeout(() => clearInterval(pollTimer), 900000);
         } else {
             throw new Error("분석 트리거 실패");
         }
@@ -687,7 +671,7 @@ async function processCadUpload(file, projectId) {
     }
 }
 
-/** [추가] CAD 설정 UI 열기 */
+/** [추가] 3단계: 분석 완료 후 레이어 선택 및 변환 설정 UI 출력 */
 export async function openCadConfigUI(projectId) {
     const configArea = document.getElementById('cadProcessConfig');
     const statusContent = document.getElementById('cadProcessStatus');
@@ -787,7 +771,7 @@ export async function executeCadConversion(projectId) {
                 reverse_chainage: false,
                 cache_control: "public, max-age=31536000", // 365일 캐시
                 input_type: "dxf",
-                output_formats: ["pmtiles"] // [수정] JSON 결과 파일은 생성/업로드하지 않음
+                output_formats: ["pmtiles", "json"]
               }
             })
         });
@@ -803,8 +787,6 @@ export async function executeCadConversion(projectId) {
             `;
             // 상태 업데이트
             await callSupabaseDirect(`cad_projects?id=eq.${projectId}`, 'PATCH', { status: 'CONVERTING' });
-            // [추가] 관찰자 즉시 실행
-            if (window.startConversionObserver) window.startConversionObserver();
         } else {
             throw new Error("변환 요청 실패");
         }

@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
-import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider, openLayerStyleModal, closeLayerStyleModal, switchStyleTab, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, updateIndividualStyle } from './viewers.js';
-import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, deleteProjectMemos, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, deleteAllPhotos } from './managers.js';
+import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider, openLayerStyleModal, closeLayerStyleModal, switchStyleTab, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, updateIndividualStyle, loadCadProjects } from './viewers.js';
+import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, deleteProjectMemos, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, deleteAllPhotos, saveMemo, roomCreateProject, roomDeleteProject, roomUploadCad, openCadConfigUI, executeCadConversion } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
@@ -118,6 +118,47 @@ window.viewMemoOnMap = async function(projectId, lon, lat, memoId) {
     // 지도 로드 후 이동 (약간의 지연 필요할 수 있음)
     setTimeout(() => flyToLocation(lon, lat), 500);
 };
+
+// [추가] CAD 변환 상태 백그라운드 관찰자
+let conversionWatcher = null;
+export async function startConversionObserver() {
+    if (conversionWatcher) return; // 중복 실행 방지
+
+    console.log("🛰️ CAD conversion observer active...");
+    conversionWatcher = setInterval(async () => {
+        if (!state.currentUser || !state.supabaseConfig) return;
+
+        try {
+            // 1. 현재 변환 중('CONVERTING')인 프로젝트가 있는지 확인
+            const projects = await callSupabaseDirect(`cad_projects?status=eq.CONVERTING&select=id,name`);
+            
+            if (!projects || projects.length === 0) {
+                console.log("📴 No active conversions. Observer resting.");
+                clearInterval(conversionWatcher);
+                conversionWatcher = null;
+                return;
+            }
+
+            // 2. 각 프로젝트에 대해 cad_files에 pmtiles가 올라왔는지 확인 (파일 테이블 감시)
+            for (const p of projects) {
+                const files = await callSupabaseDirect(`cad_files?project_id=eq.${p.id}&file_type=eq.pmtiles&select=updated_at`);
+                
+                if (files && files.length > 0) {
+                    // pmtiles 파일 기록이 발견됨 = 변환 성공!
+                    showAlert(`🎉 [${p.name}] 도면의 PMTiles 변환이 완료되었습니다!\n이제 지도 선택 목록에서 확인하실 수 있습니다.`, "success");
+                    
+                    // 웹 앱에서만 상태를 COMPLETED로 동기화 (다음 폴링 방지 및 UI 표시용)
+                    await callSupabaseDirect(`cad_projects?id=eq.${p.id}`, 'PATCH', { status: 'COMPLETED' });
+
+                    if (window.loadCadProjects) window.loadCadProjects();
+                    loadProjects(); // 사진관리 탭용
+                }
+            }
+        } catch (e) {
+            console.warn("Status check failed", e);
+        }
+    }, 20000); // 20초 간격으로 체크
+}
 
 // 탭 전환 로직
 export function switchTab(tabName) {
@@ -239,6 +280,7 @@ export async function performLogin(username, isAuto = false) {
     }
     updateHeaderWithUser(username);
     loadProjects(); // [추가] 로그인 성공 직후 유저 권한에 맞는 프로젝트 목록 로드
+    startConversionObserver(); // [추가] 로그인 시 변환 중인 작업이 있는지 확인 시작
     return true;
 }
 

@@ -683,7 +683,9 @@ export async function initCadViewer() {
     } catch (e) { console.error(e); if (select) select.innerHTML = '<option value="">초기화 실패</option>'; }
 }
 
-async function loadCadProjects() {
+window.loadCadProjects = loadCadProjects; // [추가] 외부 호출을 위해 전역 연결
+
+export async function loadCadProjects() {
     const select = document.getElementById('cadProjectSelect');
     select.innerHTML = '<option value="">프로젝트 목록 로딩 중...</option>';
     try {

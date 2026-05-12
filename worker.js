@@ -42,6 +42,28 @@ export default {
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // --- [추가] 5. GitHub Action 트리거 (Dispatch) ---
+    if (url.pathname === "/dispatch" && request.method === "POST") {
+      const payload = await request.json();
+      const GITHUB_TOKEN = env.GITHUB_TOKEN; // Worker 환경변수에 등록 필요
+      const REPO_OWNER = env.GITHUB_REPO_OWNER;
+      const REPO_NAME = env.GITHUB_REPO_NAME;
+
+      const response = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/dispatches`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${GITHUB_TOKEN}`,
+          "Accept": "application/vnd.github.v3+json",
+          "User-Agent": "Asin-Worker"
+        },
+        body: JSON.stringify({
+          event_type: payload.event_type || "analyze_cad",
+          client_payload: payload.client_payload
+        })
+      });
+      return new Response(JSON.stringify({ success: response.status === 204 }), { headers: corsHeaders });
+    }
+
     // --- [추가] 4. R2 파일 이름 변경 (Copy + Delete) ---
     if (url.pathname === "/rename" && request.method === "POST") {
       const from = url.searchParams.get("from");

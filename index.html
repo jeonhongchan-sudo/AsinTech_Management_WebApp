@@ -426,9 +426,12 @@
 
         <!-- 3. 프로젝트 관리 섹션 -->
         <div id="roomProjectSection" style="display:none;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px;">
-                <button class="btn btn-outline" onclick="window.switchRoomView('main')" style="padding:5px 10px;">← 뒤로</button>
-                <h3 style="margin:0;">프로젝트 관리</h3>
+            <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom:15px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <button class="btn btn-outline" onclick="window.switchRoomView('main')" style="padding:5px 10px;">← 뒤로</button>
+                    <h3 style="margin:0;">프로젝트 관리</h3>
+                </div>
+                <button class="btn btn-primary" onclick="window.roomCreateProject()" style="padding: 5px 12px; font-size: 12px; font-weight: bold;">+ 생성</button>
             </div>
             <div id="roomProjectList" style="max-height: 400px; overflow-y: auto;"></div>
         </div>
@@ -570,6 +573,25 @@
         </div>
     </div>
   </div>
+
+  <!-- [추가] CAD 업로드/분석 및 변환 설정 모달 -->
+  <div id="cadProcessModal" class="lightbox-overlay" style="display: none; z-index: 3200;">
+    <div class="container" style="max-width: 500px; width: 95%; min-height: auto; padding: 20px; background: white; border-radius: 8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;">
+            <h3 style="margin:0; font-size: 18px;">CAD 데이터 처리</h3>
+            <button class="btn btn-secondary" onclick="document.getElementById('cadProcessModal').style.display='none'">닫기</button>
+        </div>
+        
+        <div id="cadProcessStatus" style="text-align:center; padding: 20px;">
+            <div class="spinner"></div>
+            <p id="cadProcessStatusText" style="margin-top:10px; color:#666;">준비 중...</p>
+        </div>
+
+        <div id="cadProcessConfig" style="display:none;"></div>
+    </div>
+  </div>
+
+  <input type="file" id="cadFileSelector" accept=".dwg,.dxf" style="display:none;">
 
   <script type="module" src="js/main.js"></script>
 </body>
