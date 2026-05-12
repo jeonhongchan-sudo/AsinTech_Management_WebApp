@@ -865,6 +865,10 @@ export async function loadCadMap(projectId) {
             
             // [추가] 메모 데이터 로드 (지도 표시용)
             loadMapMemos();
+
+            // [추가] 사진 목록 로드 및 인터랙션 설정 통합
+            loadProjectPhotos();
+            setupMapInteraction();
         });
         
         // [추가] 자동 배경지도 Fallback 로직 (브이월드 실패 시 OSM 전환)
@@ -963,19 +967,23 @@ function updateCadStyle() {
 }
 
 // [복구 및 수정] 실제 캐드 레이어명을 감지하는 함수
-function updateLayerDiscovery() {
+function updateLayerDiscovery() { // [수정] 기하학적 메타데이터 수집 로직 강화
     if (!cadMap) return;
-    // 화면에 렌더링된 피처들 중 선, 점, 폴리곤 레이어에서 속성 추출
     const features = cadMap.queryRenderedFeatures({ layers: ['cad-lines', 'cad-points', 'cad-polygons'] });
     let updated = false;
 
+    if (!state.cadLayerMetadata) state.cadLayerMetadata = {};
+
     features.forEach(f => {
-        const layerName = f.properties.layer; // 실제 캐드 레이어명 (예: '도로중심선')
+        const layerName = f.properties.layer;
         
-        // 레이어명이 존재하고, 아직 목록에 없으며, 무의미한 소스 레이어명이 아닌 경우만 추가
+        if (!state.cadLayerMetadata[layerName]) state.cadLayerMetadata[layerName] = { hasPoint: false, hasLine: false, hasPolygon: false };
+        if (f.geometry.type === 'Point') state.cadLayerMetadata[layerName].hasPoint = true;
+        else if (f.geometry.type.includes('LineString')) state.cadLayerMetadata[layerName].hasLine = true;
+        else if (f.geometry.type.includes('Polygon')) state.cadLayerMetadata[layerName].hasPolygon = true;
+
         if (layerName && !cadLayers.has(layerName) && !['line', 'point', 'polygon'].includes(layerName)) {
             cadLayers.add(layerName);
-            
             const storageKey = `${state.currentCadProjectId}_${layerName}`;
             const savedStyle = state.userSettings?.layer_styles?.[storageKey];
 
@@ -1002,63 +1010,129 @@ function getRandomColor() {
 }
 
 function renderLayerList() {
-    const listEl = document.getElementById('cadLayerList'); listEl.innerHTML = '';
-    
-    // [추가] 전체 레이어 색상 변경 컨트롤
-    const globalDiv = document.createElement('div');
-    globalDiv.className = 'layer-item';
-    globalDiv.style.cssText = 'border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; font-weight: bold; display: flex; align-items: center; justify-content: space-between;';
-    globalDiv.innerHTML = `
-        <span style="flex:1;">전체 스타일 변경</span>
-        <input type="number" class="layer-width-input" value="1.5" min="0.1" max="20" step="0.5" onchange="window.changeAllLayerWidths(parseFloat(this.value))" title="모든 레이어 굵기 변경" style="margin-right:5px;">
-        <input type="color" class="layer-color-picker" onchange="window.changeAllLayerColors(this.value)" title="모든 레이어 색상 변경">
-    `;
-    listEl.appendChild(globalDiv);
+    const listEl = document.getElementById('cadLayerList'); 
+    listEl.innerHTML = '';
 
-    // [추가] 선 레이어명 스타일 변경 컨트롤
-    const labelStyleDiv = document.createElement('div');
-    labelStyleDiv.className = 'layer-item';
-    labelStyleDiv.style.cssText = 'border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; font-weight: bold; display: flex; align-items: center; justify-content: space-between;';
-    const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
-    const savedLabelStyle = state.userSettings?.layer_styles?.[labelStyleKey] || { size: 12, color: '#000000' };
-    labelStyleDiv.innerHTML = `
-        <span style="flex:1;">선레이어명 스타일</span>
-        <input type="number" class="layer-width-input" value="${savedLabelStyle.size || 12}" min="1" max="50" step="1" onchange="window.changeLineLabelSize(parseInt(this.value))" title="글자 크기 변경" style="margin-right:5px;">
-        <input type="color" class="layer-color-picker" value="${savedLabelStyle.color || '#000000'}" onchange="window.changeLineLabelColor(this.value)" title="글자 색상 변경">
-    `;
-    listEl.appendChild(labelStyleDiv);
-
-    Array.from(cadLayers).sort().forEach(layer => {
+    const sortedLayers = Array.from(cadLayers).sort();
+    sortedLayers.forEach(layer => {
         const storageKey = `${state.currentCadProjectId}_${layer}`;
         const layerStyle = state.userSettings?.layer_styles?.[storageKey] || {};
         const color = layerStyle.color || cadLayerColors[layer]; // cadLayerColors는 하위 호환용
         const isChecked = layerStyle.visible !== false; // visible이 false가 아니면 체크됨
         const lineWidth = layerStyle.width || 1.5; // 기본 굵기
 
-        const div = document.createElement('div'); div.className = 'layer-item';
-        
-        // [수정] UI 간소화: 체크박스 | 색상 | 굵기 | 이름
-        // [추가] 선 굵기 조절 input 추가
+        // [수정] 아이콘 형태 정의: 점이 있으면 원형, 없으면 선형
+        const meta = state.cadLayerMetadata?.[layer] || {};
+        const iconClass = meta.hasPoint ? 'layer-icon-circle' : 'layer-icon-line';
+
+        const div = document.createElement('div'); 
+        div.className = 'layer-item';
         div.innerHTML = `
-            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="window.toggleLayer('${layer}', this.checked)" title="켜기/끄기">
-            <input type="color" class="layer-color-picker" value="${color}" onchange="window.changeLayerColor('${layer}', this.value)" title="색상 변경">
+            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="window.toggleLayer('${layer}', this.checked)" style="width:16px; height:16px; cursor:pointer;">
+            <div class="layer-icon-wrapper">
+                <div class="${iconClass}" style="background-color:${color};"></div>
+                <input type="color" class="layer-icon-input" value="${color}" onchange="window.changeLayerColor('${layer}', this.value)">
+            </div>
             <span class="layer-name" title="${layer}" style="margin-left:5px;">${layer}</span>
         `;
-        listEl.appendChild(div);
+        listEl.appendChild(div);      
         
-        // [추가] 선 레이어에만 굵기 조절 추가
-        // PMTiles 내의 모든 레이어는 기본적으로 라인 레이어('cad-lines')로 렌더링되므로 굵기 조절창을 노출합니다.
-        const widthInput = document.createElement('input');
-        widthInput.type = 'number';
-        widthInput.className = 'layer-width-input';
-        widthInput.value = lineWidth;
-        widthInput.min = 0.1; widthInput.max = 20; widthInput.step = 0.5;
-        widthInput.title = "선 굵기 조절";
-        widthInput.onchange = (e) => window.changeLayerWidth(layer, parseFloat(e.target.value));
-        
-        // 색상 선택기와 레이어 이름 사이에 삽입
-        div.insertBefore(widthInput, div.querySelector('.layer-name'));
     });
+}
+
+/** [추가] 스타일 편집 모달 제어 함수들 */
+export function openLayerStyleModal() {
+    const modal = document.getElementById('layerStyleModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    // 현재 라벨 설정값 동기화
+    const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
+    const savedLabelStyle = state.userSettings?.layer_styles?.[labelStyleKey] || { size: 12, color: '#000000' };
+    document.getElementById('inputLineLabelSize').value = savedLabelStyle.size || 12;
+    document.getElementById('inputLineLabelColor').value = savedLabelStyle.color || '#000000';
+
+     renderModalEditLists();
+}
+
+function renderModalEditLists() {
+    const lineList = document.getElementById('layerEditListLine');
+    const pointList = document.getElementById('layerEditListPoint');
+    const textList = document.getElementById('layerEditListText');
+    lineList.innerHTML = ''; pointList.innerHTML = ''; textList.innerHTML = '';
+
+    Array.from(cadLayers).sort().forEach(layer => {
+        const storageKey = `${state.currentCadProjectId}_${layer}`;
+        const style = state.userSettings?.layer_styles?.[storageKey] || {};
+        const meta = state.cadLayerMetadata?.[layer] || {};
+
+        // 1. 선 편집 리스트
+        if (meta.hasLine || meta.hasPolygon) {
+            const row = document.createElement('div'); row.className = 'style-edit-row';
+            row.innerHTML = `
+                <span title="${layer}">${layer}</span>
+                <input type="color" value="${style.color || cadLayerColors[layer]}" onchange="window.updateIndividualStyle('${layer}', 'color', this.value)">
+                <input type="number" value="${style.width || 1.5}" step="0.1" onchange="window.updateIndividualStyle('${layer}', 'width', parseFloat(this.value))">
+            `;
+            lineList.appendChild(row);
+        }
+
+        // 2. 점 편집 리스트
+        if (meta.hasPoint) {
+            const row = document.createElement('div'); row.className = 'style-edit-row';
+            row.innerHTML = `
+                <span title="${layer}">${layer}</span>
+                <input type="color" value="${style.point_color || style.color || cadLayerColors[layer]}" onchange="window.updateIndividualStyle('${layer}', 'point_color', this.value)">
+                <input type="number" value="${style.point_size || 3}" step="0.5" onchange="window.updateIndividualStyle('${layer}', 'point_size', parseFloat(this.value))">
+            `;
+            pointList.appendChild(row);
+        }
+
+        // 3. 텍스트 편집 리스트 (점 레이어에 텍스트가 포함된 경우)
+        if (meta.hasPoint) {
+            const row = document.createElement('div'); row.className = 'style-edit-row';
+            row.innerHTML = `
+                <span title="${layer}">${layer}</span>
+                <input type="color" value="${style.text_color || '#000000'}" onchange="window.updateIndividualStyle('${layer}', 'text_color', this.value)">
+                <input type="number" value="${style.text_size || 12}" step="1" onchange="window.updateIndividualStyle('${layer}', 'text_size', parseFloat(this.value))">
+            `;
+            textList.appendChild(row);
+        }
+    });
+}
+
+export function closeLayerStyleModal() {
+    document.getElementById('layerStyleModal').style.display = 'none';
+}
+
+export function switchStyleTab(tab) {
+    const btnLine = document.getElementById('tabLineStyle');
+    const btnPoint = document.getElementById('tabPointStyle');
+    const btnText = document.getElementById('tabTextStyle');
+    const secLine = document.getElementById('styleSectionLine');
+    const secPoint = document.getElementById('styleSectionPoint');
+    const secText = document.getElementById('styleSectionText');
+
+    [btnLine, btnPoint, btnText].forEach(b => b.classList.remove('active'));
+    [secLine, secPoint, secText].forEach(s => s.style.display = 'none');
+
+    if (tab === 'line') { btnLine.classList.add('active'); secLine.style.display = 'block'; }
+    else if (tab === 'point') { btnPoint.classList.add('active'); secPoint.style.display = 'block'; }
+    else { btnText.classList.add('active'); secText.style.display = 'block'; }
+}
+
+/** [추가] 개별 속성 변경 통합 함수 */
+export function updateIndividualStyle(layer, property, value) {
+    const storageKey = `${state.currentCadProjectId}_${layer}`;
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    if (!state.userSettings.layer_styles[storageKey]) state.userSettings.layer_styles[storageKey] = {};
+    
+    state.userSettings.layer_styles[storageKey][property] = value;
+    if (property === 'color') cadLayerColors[layer] = value;
+
+    updateMapStyle();
+    saveUserStyles();
+    if (property === 'color') renderLayerList(); // 사이드바 아이콘 색상 동기화
 }
 
 export function toggleLayer(layerName, isVisible) { 
@@ -1101,10 +1175,9 @@ export function changeAllLayerColors(newColor) {
         const storageKey = `${state.currentCadProjectId}_${layer}`;
         const isVisible = !cadHiddenLayers.has(layer);
         
-        state.userSettings.layer_styles[storageKey] = {
+        state.userSettings.layer_styles[storageKey] = { // [수정] 기존 설정 보존을 위해 spread 사용
+            ...state.userSettings.layer_styles[storageKey],
             color: newColor,
-            visible: isVisible,
-            width: state.userSettings.layer_styles[storageKey]?.width || 1.5 // 기존 굵기 유지
         };
     }
     updateMapStyle();
@@ -1124,12 +1197,66 @@ export function changeAllLayerWidths(newWidth) {
         state.userSettings.layer_styles[storageKey] = {
             ...state.userSettings.layer_styles[storageKey],
             width: newWidth,
-            visible: isVisible
         };
     }
     updateMapStyle();
     renderLayerList();
     saveUserStyles();
+}
+
+/** [추가] 전체 점/마커 스타일 일괄 변경 함수 */
+export function changeAllPointColors(newColor) {
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    for (const layer of cadLayers) {
+        const storageKey = `${state.currentCadProjectId}_${layer}`;
+        state.userSettings.layer_styles[storageKey] = {
+            ...state.userSettings.layer_styles[storageKey],
+            point_color: newColor
+        };
+    }
+    updateMapStyle();
+    saveUserStyles();
+}
+
+export function changeAllPointSizes(newSize) {
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    for (const layer of cadLayers) {
+        const storageKey = `${state.currentCadProjectId}_${layer}`;
+        state.userSettings.layer_styles[storageKey] = {
+            ...state.userSettings.layer_styles[storageKey],
+            point_size: newSize
+        };
+    }
+    updateMapStyle();
+    saveUserStyles();
+}
+
+export function changeAllTextColors(newColor) {
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    for (const layer of cadLayers) {
+        const storageKey = `${state.currentCadProjectId}_${layer}`;
+        state.userSettings.layer_styles[storageKey] = {
+            ...state.userSettings.layer_styles[storageKey],
+            text_color: newColor
+        };
+    }
+    updateMapStyle();
+    saveUserStyles();
+    renderModalEditLists();
+}
+
+export function changeAllTextSizes(newSize) {
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    for (const layer of cadLayers) {
+        const storageKey = `${state.currentCadProjectId}_${layer}`;
+        state.userSettings.layer_styles[storageKey] = {
+            ...state.userSettings.layer_styles[storageKey],
+            text_size: newSize
+        };
+    }
+    updateMapStyle();
+    saveUserStyles();
+    renderModalEditLists();
 }
 
 // [추가] 선 레이어명 글자 크기 변경 함수
@@ -1251,42 +1378,45 @@ function updateMapFilter() {
 function updateMapStyle() {
     if (!cadMap) return;
 
-    // [수정] 레이어가 하나도 감지되지 않은 경우 match 표현식 생성 시 발생하는 오류 방지
-    if (cadLayers.size === 0) {
-        const defaultColor = '#cccccc';
-        const defaultWidth = 1.5;
-        if (cadMap.getLayer('cad-lines')) {
-            cadMap.setPaintProperty('cad-lines', 'line-color', defaultColor);
-            cadMap.setPaintProperty('cad-lines', 'line-width', defaultWidth);
-        }
-        if (cadMap.getLayer('cad-polygons')) cadMap.setPaintProperty('cad-polygons', 'fill-color', defaultColor);
-        if (cadMap.getLayer('cad-points')) {
-            cadMap.setPaintProperty('cad-points', 'circle-color', defaultColor);
-            cadMap.setPaintProperty('cad-points', 'circle-radius', defaultWidth);
-        }
-        return;
-    }
+    // [수정] 선, 점, 텍스트 스타일 표현식을 모두 개별 분리
+    const lineColorExpr = ['match', ['get', 'layer']];
+    const lineWidthExpr = ['match', ['get', 'layer']];
+    const pointColorExpr = ['match', ['get', 'layer']];
+    const pointSizeExpr = ['match', ['get', 'layer']];
+    const textColorExpr = ['match', ['get', 'layer']];
+    const textSizeExpr = ['match', ['get', 'layer']];
 
-    const matchExpr = ['match', ['get', 'layer']];
-    const widthMatchExpr = ['match', ['get', 'layer']]; // [추가] 굵기 매칭 표현식
+    if (cadLayers.size === 0) return;
 
-    for (const layer of cadLayers) { // [수정] cadLayers를 순회하며 스타일 적용
+    for (const layer of cadLayers) {
         const storageKey = `${state.currentCadProjectId}_${layer}`;
         const layerStyle = state.userSettings.layer_styles[storageKey] || {};
-        const color = layerStyle.color || cadLayerColors[layer] || '#cccccc'; // 기본 색상
-        const width = layerStyle.width || 1.5; // 기본 굵기
+        const baseColor = layerStyle.color || cadLayerColors[layer] || '#cccccc';
 
-        matchExpr.push(layer, color);
-        widthMatchExpr.push(layer, width); // [추가] 굵기 매칭 표현식에 추가
+        lineColorExpr.push(layer, baseColor);
+        lineWidthExpr.push(layer, layerStyle.width || 1.5);
+        pointColorExpr.push(layer, layerStyle.point_color || baseColor);
+        pointSizeExpr.push(layer, layerStyle.point_size || 3);
+        textColorExpr.push(layer, layerStyle.text_color || '#000000');
+        textSizeExpr.push(layer, layerStyle.text_size || 12);
     }
-    matchExpr.push('#cccccc'); // 기본 색상 (매칭되지 않는 레이어)
-    widthMatchExpr.push(1.5); // 기본 굵기 (매칭되지 않는 레이어)
+    lineColorExpr.push('#cccccc'); lineWidthExpr.push(1.5);
+    pointColorExpr.push('#cccccc'); pointSizeExpr.push(3);
+    textColorExpr.push('#000000'); textSizeExpr.push(12);
     
-    if (cadMap.getLayer('cad-lines')) cadMap.setPaintProperty('cad-lines', 'line-color', matchExpr); // [수정] 색상 적용
-    if (cadMap.getLayer('cad-lines')) cadMap.setPaintProperty('cad-lines', 'line-width', widthMatchExpr); // [추가] 굵기 적용
-    if (cadMap.getLayer('cad-polygons')) cadMap.setPaintProperty('cad-polygons', 'fill-color', matchExpr); // [수정] 색상 적용
-    if (cadMap.getLayer('cad-points')) cadMap.setPaintProperty('cad-points', 'circle-color', matchExpr);
-    if (cadMap.getLayer('cad-points')) cadMap.setPaintProperty('cad-points', 'circle-radius', widthMatchExpr); // [추가] 마커 크기를 선 굵기 설정과 동기화
+    if (cadMap.getLayer('cad-lines')) {
+        cadMap.setPaintProperty('cad-lines', 'line-color', lineColorExpr);
+        cadMap.setPaintProperty('cad-lines', 'line-width', lineWidthExpr);
+    }
+    if (cadMap.getLayer('cad-text')) {
+        cadMap.setPaintProperty('cad-text', 'text-color', textColorExpr);
+        cadMap.setLayoutProperty('cad-text', 'text-size', textSizeExpr);
+    }
+    if (cadMap.getLayer('cad-polygons')) cadMap.setPaintProperty('cad-polygons', 'fill-color', lineColorExpr);
+    if (cadMap.getLayer('cad-points')) {
+        cadMap.setPaintProperty('cad-points', 'circle-color', pointColorExpr);
+        cadMap.setPaintProperty('cad-points', 'circle-radius', pointSizeExpr);
+    }
 }
 
 export function cleanupCadViewer() {
@@ -1865,11 +1995,4 @@ export function toggleSurveyMode(forceValue) {
     }
 }
 
-// loadCadMap 완료 시 인터랙션 설정 호출
-const originalLoadCadMap = loadCadMap;
-loadCadMap = async function(projectId) {
-    await originalLoadCadMap(projectId);
-    loadProjectPhotos(); // [추가] 사진 목록 로드 (비동기)
-    setupMapInteraction();
-};
 window.toggleSurveyMode = toggleSurveyMode;

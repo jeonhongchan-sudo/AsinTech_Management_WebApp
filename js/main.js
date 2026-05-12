@@ -1,6 +1,6 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
-import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider } from './viewers.js';
+import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider, openLayerStyleModal, closeLayerStyleModal, switchStyleTab, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, updateIndividualStyle } from './viewers.js';
 import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, deleteProjectMemos, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, deleteAllPhotos } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
@@ -59,6 +59,14 @@ window.setMemoFilter = setMemoFilter;
 window.downloadPhotoFile = downloadPhotoFile;
 window.downloadAllPhotos = downloadAllPhotos;
 window.deleteAllPhotos = deleteAllPhotos; // [추가] 전체 삭제 함수 바인딩
+window.openLayerStyleModal = openLayerStyleModal; // [추가]
+window.closeLayerStyleModal = closeLayerStyleModal; // [추가]
+window.switchStyleTab = switchStyleTab; // [추가]
+window.changeAllPointColors = changeAllPointColors; // [추가]
+window.changeAllPointSizes = changeAllPointSizes; // [추가]
+window.changeAllTextColors = changeAllTextColors; // [추가]
+window.changeAllTextSizes = changeAllTextSizes; // [추가]
+window.updateIndividualStyle = updateIndividualStyle; // [추가]
 
 // [추가] 지도 팝업 내 사진 탐색(Lightbox) 연동 브릿지 함수
 window.openMatchedLightbox = function(index) {

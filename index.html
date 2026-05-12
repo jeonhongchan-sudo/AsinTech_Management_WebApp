@@ -113,6 +113,43 @@
     input:checked + .slider.orange { background-color: #ffc107; }
     input:checked + .slider.blue { background-color: #4dabf7; }
     input:checked + .slider.green { background-color: #40c057; }
+
+    /* [추가] 스타일 편집 모달 탭 디자인 */
+    .style-tabs { display: flex; border-bottom: 1px solid #ddd; margin-bottom: 15px; }
+    .style-tab-btn { 
+        flex: 1; padding: 8px; border: none; background: #f8f9fa; cursor: pointer; 
+        font-size: 12px; font-weight: bold; color: #666; border-bottom: 2px solid transparent;
+    }
+    .style-tab-btn.active { color: #2196F3; border-bottom: 2px solid #2196F3; background: #fff; }
+
+    /* [추가] 스타일 편집 모달 - 상단 전체 설정용 컴팩트 레이아웃 */
+    .style-compact-group {
+        display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+        background: #f8f9fa; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px;
+        border: 1px solid #eee;
+    }
+    .style-compact-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .style-compact-item label { font-weight: bold; color: #555; margin: 0; white-space: nowrap; }
+    .style-compact-item input { padding: 2px 5px; border: 1px solid #ccc; border-radius: 4px; height: 26px; font-size: 11px; }
+    .style-compact-item input[type="color"] { width: 35px; padding: 1px; cursor: pointer; border: none; background: none; }
+    .style-compact-item input[type="number"] { width: 48px; }
+    .style-compact-divider { width: 1px; height: 16px; background: #ddd; margin: 0 2px; }
+
+    /* [추가] 레이어별 편집 리스트 스타일 */
+    .style-edit-list { max-height: 380px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 0; }
+    .style-edit-row { 
+        display: grid; grid-template-columns: 1fr 50px 70px; gap: 8px; align-items: center; 
+        padding: 5px 8px; border-bottom: 1px solid #f5f5f5; font-size: 12px;
+    }
+    .style-edit-row input { height: 24px; padding: 1px 4px; font-size: 11px; border-radius: 3px; border: 1px solid #ddd; }
+    .style-edit-row:last-child { border-bottom: none; }
+    .style-edit-row span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* [추가] 레이어 목록 아이콘 커스텀 */
+    .layer-icon-wrapper { position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .layer-icon-circle { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); }
+    .layer-icon-line { width: 18px; height: 4px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.2); }
+    .layer-icon-input { position: absolute; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -206,7 +243,11 @@
             <div id="cad-map"></div>
             <button id="cadLayerToggleBtn" class="map-overlay-btn" onclick="toggleLayerPanel()">☰ 레이어 목록</button>
             <div id="cadLayerPanel" class="layer-panel">
-                <h4 style="margin: 0 0 10px 0; font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 5px;">레이어 목록</h4>
+                <!-- [수정] 헤더 정리 및 편집 버튼 추가 -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:5px;">
+                    <span style="font-weight:bold; font-size:14px; color:#333;">레이어 관리</span>
+                    <button class="btn btn-outline" onclick="window.openLayerStyleModal()" style="padding:2px 8px; font-size:11px;">🎨 편집</button>
+                </div>
                 <div id="cadLayerList"></div>
             </div>
         </div>
@@ -451,6 +492,82 @@
             <button class="btn btn-secondary" onclick="document.getElementById('memoFilterModal').style.display='none'">닫기</button>
         </div>
         <div id="memoFilterList" style="max-height: 400px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px;"></div>
+    </div>
+  </div>
+
+  <!-- [추가] 레이어 스타일 편집 모달 -->
+  <div id="layerStyleModal" class="lightbox-overlay" style="display: none; z-index: 3100;">
+    <div class="container" style="max-width: 600px; min-height: auto; padding: 15px; background: white; border-radius: 8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:8px;">
+            <h3 style="margin:0; font-size: 18px;">스타일 상세 편집</h3>
+            <button class="btn btn-secondary" onclick="window.closeLayerStyleModal()">닫기</button>
+        </div>
+        
+        <div class="style-tabs">
+            <button class="style-tab-btn active" id="tabLineStyle" onclick="window.switchStyleTab('line')">선</button>
+            <button class="style-tab-btn" id="tabPointStyle" onclick="window.switchStyleTab('point')">점</button>
+            <button class="style-tab-btn" id="tabTextStyle" onclick="window.switchStyleTab('text')">텍스트</button>
+        </div>
+
+        <!-- 선 편집 탭 -->
+        <div id="styleSectionLine">
+            <div class="style-compact-group">
+                <div class="style-compact-item">
+                    <label>전체 색상</label>
+                    <input type="color" onchange="window.changeAllLayerColors(this.value)">
+                </div>
+                <div class="style-compact-item">
+                    <label>굵기</label>
+                    <input type="number" value="1.5" min="0.1" max="10" step="0.1" onchange="window.changeAllLayerWidths(parseFloat(this.value))">
+                </div>
+                <div class="style-compact-divider"></div>
+                <div class="style-compact-item">
+                    <label>라벨(명칭)</label>
+                    <input type="number" id="inputLineLabelSize" onchange="window.changeLineLabelSize(parseInt(this.value))" title="글자 크기">
+                    <input type="color" id="inputLineLabelColor" onchange="window.changeLineLabelColor(this.value)" title="글자 색상">
+                </div>
+            </div>
+            <div class="style-edit-list">
+                <div style="display: grid; grid-template-columns: 1fr 50px 70px; gap: 8px; padding: 5px 8px; font-weight: bold; font-size: 11px; background: #eee;"><span>레이어명</span><span>색상</span><span>굵기</span></div>
+                <div id="layerEditListLine"></div>
+            </div>
+        </div>
+
+        <!-- 점 편집 탭 -->
+        <div id="styleSectionPoint" style="display:none;">
+            <div class="style-compact-group">
+                <div class="style-compact-item">
+                    <label>전체 색상</label>
+                    <input type="color" onchange="window.changeAllPointColors(this.value)">
+                </div>
+                <div class="style-compact-item">
+                    <label>점 크기</label>
+                    <input type="number" value="3" min="0.5" max="20" step="0.5" onchange="window.changeAllPointSizes(parseFloat(this.value))">
+                </div>
+            </div>
+            <div class="style-edit-list">
+                <div style="display: grid; grid-template-columns: 1fr 50px 70px; gap: 8px; padding: 5px 8px; font-weight: bold; font-size: 11px; background: #eee;"><span>레이어명</span><span>색상</span><span>크기</span></div>
+                <div id="layerEditListPoint"></div>
+            </div>
+        </div>
+
+        <!-- 텍스트 편집 탭 -->
+        <div id="styleSectionText" style="display:none;">
+            <div class="style-compact-group">
+                <div class="style-compact-item">
+                    <label>전체 색상</label>
+                    <input type="color" onchange="window.changeAllTextColors(this.value)">
+                </div>
+                <div class="style-compact-item">
+                    <label>텍스트 크기</label>
+                    <input type="number" value="12" min="1" max="100" step="1" onchange="window.changeAllTextSizes(parseFloat(this.value))">
+                </div>
+            </div>
+            <div class="style-edit-list">
+                <div style="display: grid; grid-template-columns: 1fr 50px 70px; gap: 8px; padding: 5px 8px; font-weight: bold; font-size: 11px; background: #eee;"><span>레이어명</span><span>색상</span><span>크기</span></div>
+                <div id="layerEditListText"></div>
+            </div>
+        </div>
     </div>
   </div>
 
