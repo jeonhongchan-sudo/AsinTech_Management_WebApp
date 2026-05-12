@@ -15,3 +15,11 @@ __pycache__/
 # 사용자 요청 제외 항목 (수정됨: 프로젝트 폴더명 제거)
 Export_Json(ODB, LDB).lsp
 projects_cache.json
+
+# GitHub Actions 관련 파일 (별도 레포지토리에서 관리)
+convert_r2.py
+requirements.txt
+cad_schema.json
+analyze_cad.py
+.github/workflows/convert_pmtiles.yml
+.github/workflows/analyze_cad.yml
