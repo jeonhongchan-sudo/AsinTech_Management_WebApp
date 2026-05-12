@@ -575,6 +575,32 @@ export async function roomDeleteProject(id, name) {
     if (!state.isRoomManager) return alert("방장 권한이 필요합니다.");
     if (!confirm(`'${name}' 프로젝트를 삭제하시겠습니까?\n이 프로젝트와 연결된 모든 CAD 파일 및 객체 정보가 삭제됩니다.`)) return;
     try {
+        // 1. 프로젝트에 연결된 CAD 파일 목록 조회 (R2 파일 경로 확보)
+        const cadFiles = await callSupabaseDirect(`cad_files?project_id=eq.${id}&select=file_path`);
+
+        // 2. R2 Storage에서 실제 파일 삭제
+        if (cadFiles && cadFiles.length > 0) {
+            for (const file of cadFiles) {
+                if (file.file_path) {
+                    try {
+                        const filePath = file.file_path;
+                        await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': WORKER_AUTH_KEY }
+                        });
+                        console.log(`R2 파일 삭제 성공: ${filePath}`);
+                    } catch (r2Err) {
+                        console.warn(`R2 파일 삭제 실패 (${file.file_path}):`, r2Err);
+                        // R2 삭제 실패해도 다음 단계 진행 (DB는 삭제해야 함)
+                    }
+                }
+            }
+        }
+
+        // 3. Supabase cad_files 테이블에서 해당 프로젝트의 모든 파일 레코드 삭제
+        await callSupabaseDirect(`cad_files?project_id=eq.${id}`, 'DELETE');
+        
+        // 4. Supabase cad_projects 테이블에서 프로젝트 레코드 삭제
         await callSupabaseDirect(`cad_projects?id=eq.${id}`, 'DELETE');
         showAlert("프로젝트가 삭제되었습니다.");
         loadRoomProjectData();
@@ -1581,17 +1607,25 @@ export function handleMemoFileSelect(input, previewId) {
         }
     }
 
-    renderMemoFiles(previewId);
+    renderMemoFiles(previewId, input);
     syncSurveyMemoText(); // [추가] 파일 선택 및 이름 입력 완료 후 텍스트 동기화
     
     input.value = '';
 }
 
 // [추가] 선택된 사진들 미리보기 렌더링
-function renderMemoFiles(previewId) {
+function renderMemoFiles(previewId, input = null) {
     let preview = document.getElementById(previewId);
-    
-    // [개선] 일반적인 방법으로 못 찾을 경우 MapLibre 팝업 내부를 강제로 뒤짐
+
+    // [개선] MapViewer 팝업과 같이 동적으로 생성된 DOM에서 ID를 더 확실히 찾기 위해 input 기준 탐색 추가
+    if (!preview && input) {
+        const container = input.closest('.maplibregl-popup-content') || input.parentElement;
+        if (container) {
+            preview = container.querySelector(`#${previewId}`);
+        }
+    }
+
+    // [추가 개선] 여전히 못 찾을 경우 모든 팝업 컨텐츠를 뒤짐
     if (!preview) {
         const popups = document.querySelectorAll('.maplibregl-popup-content');
         for (let p of popups) {
@@ -1623,8 +1657,9 @@ function renderMemoFiles(previewId) {
             const div = document.createElement('div');
             div.style.cssText = 'position:relative; display:inline-block; width:60px; height:60px;';
             
+            // [수정] onload 시점에 revokeObjectURL을 호출하면 팝업 재렌더링 시 이미지가 깨질 수 있어 제거
             const previewHtml = isImg 
-                ? `<img src="${url}" style="width:100%; height:100%; object-fit:cover; border-radius:4px; border:1px solid #ddd;" onload="window.URL.revokeObjectURL(this.src)">`
+                ? `<img src="${url}" style="width:100%; height:100%; object-fit:cover; border-radius:4px; border:1px solid #ddd;">`
                 : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#eee; border-radius:4px; font-size:10px; text-align:center; overflow:hidden;">${displayName.split('.').pop().toUpperCase()}</div>`;
 
             div.innerHTML = `
