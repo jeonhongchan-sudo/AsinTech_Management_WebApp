@@ -516,7 +516,7 @@ async function loadRoomProjectData() {
 
     try {
         const projects = await callSupabaseDirect('cad_projects?select=*&order=created_at.desc');
-        let html = '<table class="list-view-table" style="display: table !important; width: 100%; table-layout: fixed;"><thead><tr style="display: table-row !important;"><th style="width: 45%; display: table-cell !important; text-align: left !important; padding-left: 10px !important;">프로젝트명</th><th style="width: 55%; text-align:center; display: table-cell !important;">설정</th></tr></thead><tbody>';
+        let html = '<table class="list-view-table" style="display: table !important; width: 100%; table-layout: fixed;"><thead><tr style="display: table-row !important;"><th style="width: 40%; display: table-cell !important; text-align: left !important; padding-left: 10px !important;">프로젝트명</th><th style="width: 60%; text-align:center; display: table-cell !important;">설정</th></tr></thead><tbody>';
         
         if (projects && projects.length > 0) {
             projects.forEach(p => {
@@ -524,10 +524,10 @@ async function loadRoomProjectData() {
                 const privateBtnClass = isPrivate ? 'btn-primary' : 'btn-outline';
 
                 html += `<tr style="display: table-row !important;">
-                    <td style="width: 45%; display: table-cell !important; text-align: left !important; padding-left: 10px !important; vertical-align: middle; word-break: break-all;">${p.name}</td>
-                    <td style="width: 55%; display: table-cell !important; text-align:center; white-space:nowrap; vertical-align: middle;">
-                        <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
-                            <button class="btn ${privateBtnClass}" style="width:34px; height:34px; padding:0; display:flex; align-items:center; justify-content:center; font-size:18px;" onclick="window.toggleProjectPrivate(${p.id}, ${!isPrivate})" title="${isPrivate ? '비공개(나만보기)' : '전체공개'}">${isPrivate ? '🔒' : '🔓'}</button>
+                    <td style="width: 40%; display: table-cell !important; text-align: left !important; padding-left: 10px !important; vertical-align: middle; word-break: break-all;">${p.name}</td>
+                    <td style="width: 60%; display: table-cell !important; text-align:center; white-space:nowrap; vertical-align: middle;">
+                        <div style="display: flex; gap: 4px; justify-content: flex-end; align-items: center;">
+                            <button class="btn ${privateBtnClass}" style="padding:4px 8px; font-size:14px; display:flex; align-items:center; justify-content:center;" onclick="window.toggleProjectPrivate(${p.id}, ${!isPrivate})" title="${isPrivate ? '비공개(나만보기)' : '전체공개'}">${isPrivate ? '🔒' : '🔓'}</button>
                             <button class="btn btn-info" style="padding:4px 8px; font-size:14px;" onclick="window.roomUploadCad('${p.id}')" title="CAD 업로드">☁️</button>
                             <button class="btn btn-danger" style="padding:4px 8px; font-size:14px;" onclick="window.roomDeleteProject('${p.id}', '${p.name}')" title="삭제">🗑️</button>
                         </div>
