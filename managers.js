@@ -1150,6 +1150,9 @@ async function processMemoSaveBackground(data) {
                     // [수정] 사용자가 지정한 커스텀 명칭이 있으면 사용, 없으면 메모 내용이나 원본명 사용
                     let fileNameToUse = file.customSurveyName || content.replace(/[\\/:*?"<>|]/g, "_").substring(0, 50) || "file";
                     
+                    // [수정] 최종 파일명에서 [메모] 제거
+                    fileNameToUse = fileNameToUse.replace(/^\[메모\]\s*/, '');
+                    
                     // 확장자 강제 (이미지의 경우 .jpg)
                     if (contentType.startsWith('image/') && !fileNameToUse.toLowerCase().endsWith('.jpg')) {
                         fileNameToUse += '.jpg';
@@ -1465,7 +1468,10 @@ function syncSurveyMemoText() {
         });
     }
 
-    textarea.value = names.join('/');
+    // [수정] 기존 메모 내용을 유지하면서 파일명만 추가
+    const existingContent = textarea.value.split('/').filter(n => n.trim() !== '' && !names.includes(n.trim()));
+    const allNames = [...existingContent, ...names];
+    textarea.value = allNames.join('/');
 }
 
 // [추가] 일반 메모 작성 모달 열기
@@ -1564,7 +1570,7 @@ export function handleMemoFileSelect(input, previewId) {
         // [추가] 조사 모드일 경우 파일마다 명칭 입력 받기
         if (state.isSurveyMode) {
             const contentInput = document.getElementById('popupMemoInput') || document.getElementById('memoContentInput');
-            const defaultName = (contentInput && contentInput.value.trim()) || file.name.split('.')[0];
+            const defaultName = ''; // [수정] 공란으로 제시
             
             const customName = prompt(`파일 '${file.name}'의 조사 명칭(파일명)을 입력하세요:`, defaultName);
             
@@ -1586,7 +1592,7 @@ export function handleMemoFileSelect(input, previewId) {
 }
 
 // [추가] 선택된 사진들 미리보기 렌더링
-function renderMemoFiles(previewId) {
+async function renderMemoFiles(previewId) {
     let preview = document.getElementById(previewId);
     
     // [개선] 일반적인 방법으로 못 찾을 경우 MapLibre 팝업 내부를 강제로 뒤짐
@@ -1614,9 +1620,22 @@ function renderMemoFiles(previewId) {
     newContainer.innerHTML = '';
     
     if (window.currentMemoFiles) {
-        window.currentMemoFiles.forEach((file, index) => {
+        for (let index = 0; index < window.currentMemoFiles.length; index++) {
+            const file = window.currentMemoFiles[index];
             const isImg = file.type.startsWith('image/');
-            const url = isImg ? (window.URL || window.webkitURL).createObjectURL(file) : '';
+            let url = '';
+            
+            if (isImg) {
+                // [수정] LTE 속도 개선을 위해 미리보기용 작은 썸네일 생성 (100px)
+                try {
+                    const thumbnailBlob = await resizeImage(file, 100, 0.8);
+                    url = (window.URL || window.webkitURL).createObjectURL(thumbnailBlob);
+                } catch (e) {
+                    // 실패 시 원본 사용
+                    url = (window.URL || window.webkitURL).createObjectURL(file);
+                }
+            }
+            
             const displayName = file.customSurveyName || file.name; // [추가] 커스텀 이름 표시
             const div = document.createElement('div');
             div.style.cssText = 'position:relative; display:inline-block; width:60px; height:60px;';
@@ -1631,7 +1650,7 @@ function renderMemoFiles(previewId) {
                 <button onclick="window.removeMemoFile(${index}, '${previewId}')" style="position:absolute; top:-5px; right:-5px; background:#dc3545; color:white; border:1px solid white; border-radius:50%; width:20px; height:20px; font-size:14px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; z-index:10;">&times;</button>
             `;
             newContainer.appendChild(div);
-        });
+        }
     }
 }
 
