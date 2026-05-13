@@ -129,35 +129,54 @@ export async function startConversionObserver() {
         if (!state.currentUser || !state.supabaseConfig) return;
 
         try {
-            // 1. 현재 변환 중('CONVERTING')인 프로젝트가 있는지 확인
-            const projects = await callSupabaseDirect(`cad_projects?status=eq.CONVERTING&select=id,name`);
+            // 1. 변환 중이거나 방금 완료된 프로젝트 확인
+            const projects = await callSupabaseDirect(`cad_projects?status=in.(CONVERTING,COMPLETED)&select=id,name,status`);
             
-            if (!projects || projects.length === 0) {
+            const modal = document.getElementById('cadProcessModal');
+            const isModalOpen = modal && modal.style.display !== 'none';
+
+            if ((!projects || projects.length === 0) && !isModalOpen) {
                 console.log("📴 No active conversions. Observer resting.");
                 clearInterval(conversionWatcher);
                 conversionWatcher = null;
                 return;
             }
 
-            // 2. 각 프로젝트에 대해 cad_files에 pmtiles가 올라왔는지 확인 (파일 테이블 감시)
+            // 2. 각 프로젝트에 대해 cad_files에 최신 pmtiles가 올라왔는지 확인
             for (const p of projects) {
-                const files = await callSupabaseDirect(`cad_files?project_id=eq.${p.id}&file_type=eq.pmtiles&select=updated_at`);
+                // [수정] 중요: 현재 세션에서 변환을 시작한 기록이 없는 프로젝트는 무시 (과거 데이터 중복 알림 방지)
+                if (!state.conversionStartTimes || state.conversionStartTimes[p.id] === undefined) continue;
+
+                const files = await callSupabaseDirect(`cad_files?project_id=eq.${p.id}&file_type=eq.pmtiles&select=updated_at&order=updated_at.desc&limit=1`, 'GET');
                 
                 if (files && files.length > 0) {
-                    // pmtiles 파일 기록이 발견됨 = 변환 성공!
-                    showAlert(`🎉 [${p.name}] 도면의 PMTiles 변환이 완료되었습니다!\n이제 지도 선택 목록에서 확인하실 수 있습니다.`, "success");
-                    
-                    // 웹 앱에서만 상태를 COMPLETED로 동기화 (다음 폴링 방지 및 UI 표시용)
-                    await callSupabaseDirect(`cad_projects?id=eq.${p.id}`, 'PATCH', { status: 'COMPLETED' });
+                    const lastUpdated = new Date(files[0].updated_at).getTime();
+                    const startTime = state.conversionStartTimes[p.id];
 
-                    if (window.loadCadProjects) window.loadCadProjects();
-                    loadProjects(); // 사진관리 탭용
+                    // 기존 파일 시간보다 나중이거나, 아예 새로 생긴 경우에만 성공으로 간주
+                    if (lastUpdated <= startTime) continue;
+                    
+                    // 변환 성공 시 동작
+                    if (isModalOpen) {
+                        // [추가] 성공 후에는 다시 알림이 뜨지 않도록 추적 목록에서 제거
+                        delete state.conversionStartTimes[p.id];
+
+                        modal.style.display = 'none';
+                        
+                        if (p.status !== 'COMPLETED') {
+                            await callSupabaseDirect(`cad_projects?id=eq.${p.id}`, 'PATCH', { status: 'COMPLETED' });
+                        }
+
+                        alert("지도가 생성되었습니다. Map Viewer에서 확인바랍니다");
+                        if (window.loadCadProjects) window.loadCadProjects();
+                        loadProjects();
+                    }
                 }
             }
         } catch (e) {
             console.warn("Status check failed", e);
         }
-    }, 20000); // 20초 간격으로 체크
+    }, 5000); // 5초 간격으로 더 민감하게 체크
 }
 
 // 탭 전환 로직

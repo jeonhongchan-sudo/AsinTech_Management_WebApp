@@ -662,7 +662,11 @@ async function processCadUpload(file, projectId) {
         const fileBuffer = await file.arrayBuffer();
         
         statusText.innerText = "파일 업로드 중...";
-        await fetch(uploadUrl, { method: 'PUT', body: fileBuffer });
+        await fetch(uploadUrl, { 
+            method: 'PUT', 
+            body: fileBuffer,
+            headers: { 'Cache-Control': 'public, max-age=31536000' } // 365일 캐시 설정
+        });
 
         // 3. Supabase 상태 업데이트 (ANALYZING)
         // [수정] raw_file_path를 기록하지 않음 (payload로만 전달)
@@ -688,10 +692,8 @@ async function processCadUpload(file, projectId) {
         if (dispatchResult.success) {
             showAlert("도면 업로드 및 분석 요청이 성공했습니다.", "success");
             statusText.innerHTML = `
-                분석이 시작되었습니다.<br>도면 크기에 따라 1~3분 정도 소요됩니다.<br><br>
-                <div class="spinner"></div>
+                분석이 시작되었습니다.<br>도면 크기에 따라 1~2분 정도 소요됩니다.<br><br>
                 <p style="font-size:12px; color:#888;">분석이 완료되면 자동으로 설정을 불러옵니다...</p>
-                <button class="btn btn-primary" onclick="window.openCadConfigUI('${projectId}')">상태 확인 및 설정</button>
             `;
 
             // [추가] 분석 상태 자동 체크 (5초 간격)
@@ -765,10 +767,9 @@ export async function openCadConfigUI(projectId) {
             <div style="margin-bottom:15px;">
                 <label style="font-weight:bold; display:block; margin-bottom:5px;">2. 좌표계 설정</label>
                 <select id="cadCrsSelect" style="width:100%; padding:8px;">
-                    <option value="EPSG:5187">EPSG:5187 (중부원점, 20만, 50만)</option>
-                    <option value="EPSG:5186">EPSG:5186 (서부원점)</option>
-                    <option value="EPSG:5179">EPSG:5179 (네이버/공공 데이터)</option>
-                    <option value="EPSG:3857">EPSG:3857 (구글/OSM)</option>
+                    <option value="EPSG:5187">EPSG:5187</option>
+                    <option value="EPSG:5186">EPSG:5186</option>
+                    <option value="EPSG:5179">EPSG:5179</option>
                 </select>
             </div>
 
@@ -806,6 +807,15 @@ export async function executeCadConversion(projectId) {
     const configArea = document.getElementById('cadProcessConfig');
     configArea.innerHTML = '<div style="text-align:center; padding:30px;"><div class="spinner"></div><p style="margin-top:10px;">GitHub Action 요청 중...</p></div>';
 
+    // [추가] 변환 시작 전 현재 파일의 업데이트 시간을 기록 (덮어쓰기 감지용)
+    if (!state.conversionStartTimes) state.conversionStartTimes = {};
+    try {
+        const existingFile = await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.pmtiles&select=updated_at&order=updated_at.desc&limit=1`);
+        state.conversionStartTimes[projectId] = (existingFile && existingFile.length > 0) 
+            ? new Date(existingFile[0].updated_at).getTime() 
+            : 0;
+    } catch (e) { state.conversionStartTimes[projectId] = 0; }
+
     try {
         const dispatchRes = await fetch(`${WORKER_URL}/dispatch`, {
             method: 'POST',
@@ -829,9 +839,9 @@ export async function executeCadConversion(projectId) {
         if (result.success) {
             configArea.innerHTML = `
                 <div style="text-align:center; padding:20px;">
-                    <h4 style="color:#28a745;">🚀 변환 요청 성공!</h4>
-                    <p style="font-size:13px; color:#666;">지도가 생성되기까지 약 3~5분 정도 소요됩니다.<br>완료 후 Map Viewer 탭에서 확인 가능합니다.</p>
-                    <button class="btn btn-secondary" onclick="document.getElementById('cadProcessModal').style.display='none'">닫기</button>
+                    <h4 style="color:#007bff;">지도 생성 중</h4>
+                    <p style="font-size:14px; color:#333; line-height:1.6;">약 1분 후에 지도가 생성됩니다<br>잠시 기다려 주십시요</p>
+                    <div class="spinner" style="margin-top:15px;"></div>
                 </div>
             `;
             // 상태 업데이트
