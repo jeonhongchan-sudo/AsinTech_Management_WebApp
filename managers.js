@@ -634,7 +634,12 @@ async function processCadUpload(file, projectId) {
         });
         const { url: uploadUrl } = await presignRes.json();
         
-        await fetch(uploadUrl, { method: 'PUT', body: file });
+        // [수정] 클라우드 스토리지 파일 대응: 데이터를 메모리로 미리 로드하여 전송 안정성 확보
+        statusText.innerText = "파일 준비 중...";
+        const fileBuffer = await file.arrayBuffer();
+        
+        statusText.innerText = "파일 업로드 중...";
+        await fetch(uploadUrl, { method: 'PUT', body: fileBuffer });
 
         // 3. Supabase 상태 업데이트 (ANALYZING)
         // [수정] 삭제된 raw_file_path 컬럼 참조 제거
@@ -658,6 +663,7 @@ async function processCadUpload(file, projectId) {
 
         const dispatchResult = await dispatchRes.json();
         if (dispatchResult.success) {
+            showAlert("도면 분석 요청이 성공적으로 전달되었습니다.", "success");
             statusText.innerHTML = `
                 분석이 시작되었습니다.<br>도면 크기에 따라 1~3분 정도 소요됩니다.<br><br>
                 <button class="btn btn-primary" onclick="window.openCadConfigUI('${projectId}')">상태 확인 및 설정</button>
