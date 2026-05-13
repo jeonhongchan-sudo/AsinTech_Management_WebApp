@@ -637,10 +637,10 @@ async function processCadUpload(file, projectId) {
         await fetch(uploadUrl, { method: 'PUT', body: file });
 
         // 3. Supabase 상태 업데이트 (ANALYZING)
+        // [수정] 삭제된 raw_file_path 컬럼 참조 제거
         statusText.innerText = "도면 분석 요청 중...";
         await callSupabaseDirect(`cad_projects?id=eq.${projectId}`, 'PATCH', {
-            status: 'ANALYZING',
-            raw_file_path: r2Path
+            status: 'ANALYZING'
         });
 
         // 4. GitHub Action 트리거 (분석용)
