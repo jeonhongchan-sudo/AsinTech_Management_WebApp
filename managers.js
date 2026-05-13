@@ -1137,11 +1137,12 @@ async function processMemoSaveBackground(data) {
         
         console.log("[Save] Starting with existing images:", finalImageUrls);
 
-        // 2. 새 사진 파일 업로드 (순차 처리)
+        // 2. 새 사진 파일 업로드 (병렬 처리로 속도 향상)
         if (files && files.length > 0) {
-            console.log(`[Save] Uploading ${files.length} new files...`);
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
+            console.log(`[Save] Uploading ${files.length} new files in parallel...`);
+            
+            // 각 파일의 업로드를 Promise로 변환
+            const uploadPromises = files.map(async (file, i) => {
                 try {
                     let uploadData = file; // 기본은 원본
                     let contentType = file.type || "application/octet-stream";
@@ -1187,15 +1188,24 @@ async function processMemoSaveBackground(data) {
 
                     if (uploadRes.ok) {
                         const finalUrl = `${R2_BASE_URL}/${r2Path}`;
-                        finalImageUrls.push(finalUrl);
                         console.log(`[R2 Upload Success] ${i+1}/${files.length}:`, finalUrl);
+                        return finalUrl; // 성공한 URL 반환
                     } else {
                         throw new Error("R2 직접 전송 실패");
                     }
                 } catch (err) {
                     console.error(`이미지 처리 중 오류 (${file.name}):`, err);
-                    return false;
+                    throw err; // 에러 전파
                 }
+            });
+
+            // 병렬 업로드 실행 및 결과 수집
+            try {
+                const uploadedUrls = await Promise.all(uploadPromises);
+                finalImageUrls.push(...uploadedUrls); // 성공한 URL들 추가
+            } catch (err) {
+                console.error("병렬 업로드 중 일부 실패:", err);
+                // 필요시 부분 실패 처리 로직 추가
             }
         }
 
