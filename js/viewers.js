@@ -837,6 +837,7 @@ export async function loadCadMap(projectId) {
                     },
                     // [복원] 단일 라인 레이어로 통합 (누락 방지)
                     { id: 'cad-lines', source: 'cad_source', 'source-layer': 'line', type: 'line', paint: { 'line-color': '#555555', 'line-width': 1.5 } },
+                    { id: 'cad-lines-dashed', source: 'cad_source', 'source-layer': 'line', type: 'line', paint: { 'line-color': '#555555', 'line-width': 1.5, 'line-dasharray': [3, 2] } },
                     
                     { id: 'cad-points', source: 'cad_source', 'source-layer': 'point', type: 'circle', paint: { 'circle-color': '#FF0000', 'circle-radius': 3, 'circle-stroke-width': 1, 'circle-stroke-color': '#333333' } },
                     { id: 'cad-text', type: 'symbol', source: 'cad_source', 'source-layer': 'point', filter: ['has', 'text'], layout: { 'text-field': ['get', 'text'], 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-anchor': 'bottom-left', 'text-offset': [0, 0], 'text-font': ['Open Sans Regular'], 'text-rotate': ['get', 'rotation'], 'text-rotation-alignment': 'map' }, paint: { 'text-color': '#000000' } },
@@ -1075,6 +1076,7 @@ function renderModalEditLists() {
                 <span title="${layer}">${layer}</span>
                 <input type="color" value="${style.color || cadLayerColors[layer]}" onchange="window.updateIndividualStyle('${layer}', 'color', this.value)">
                 <input type="number" value="${style.width || 1.5}" step="0.1" onchange="window.updateIndividualStyle('${layer}', 'width', parseFloat(this.value))">
+                <input type="checkbox" ${style.is_dashed ? 'checked' : ''} onchange="window.updateIndividualStyle('${layer}', 'is_dashed', this.checked)" style="width:16px; height:16px; justify-self:center; cursor:pointer;">
             `;
             lineList.appendChild(row);
         }
@@ -1130,7 +1132,10 @@ export function updateIndividualStyle(layer, property, value) {
     if (!state.userSettings.layer_styles[storageKey]) state.userSettings.layer_styles[storageKey] = {};
     
     state.userSettings.layer_styles[storageKey][property] = value;
+    
     if (property === 'color') cadLayerColors[layer] = value;
+    // 점선 속성 변경 시 필터 재적용 필요
+    if (property === 'is_dashed') updateMapFilter();
 
     updateMapStyle();
     saveUserStyles();
@@ -1358,8 +1363,30 @@ function updateMapFilter() {
     const hiddenLayersArray = Array.from(cadHiddenLayers);
     const commonFilter = hiddenLayersArray.length > 0 ? ['!in', 'layer', ...hiddenLayersArray] : null;
 
-    // 1. 라인, 폴리곤, 텍스트는 사용자의 가시성 설정(commonFilter)만 따름
-    if (cadMap.getLayer('cad-lines')) cadMap.setFilter('cad-lines', commonFilter); // [수정] cad-lines 필터 적용
+    // 점선 레이어 명단 추출
+    const dashedLayers = [];
+    if (state.userSettings?.layer_styles) {
+        Object.keys(state.userSettings.layer_styles).forEach(key => {
+            if (key.startsWith(`${state.currentCadProjectId}_`) && state.userSettings.layer_styles[key].is_dashed) {
+                dashedLayers.push(key.replace(`${state.currentCadProjectId}_`, ''));
+            }
+        });
+    }
+
+    // 1. 선 레이어 필터링 (실선 vs 점선 분리)
+    const dashedInFilter = dashedLayers.length > 0 ? ['in', 'layer', ...dashedLayers] : ['literal', false];
+    const dashedNotInFilter = dashedLayers.length > 0 ? ['!in', 'layer', ...dashedLayers] : null;
+
+    if (cadMap.getLayer('cad-lines')) {
+        const solidFilter = commonFilter ? (dashedNotInFilter ? ['all', commonFilter, dashedNotInFilter] : commonFilter) : (dashedNotInFilter || null);
+        cadMap.setFilter('cad-lines', solidFilter);
+    }
+    if (cadMap.getLayer('cad-lines-dashed')) {
+        const dashFilter = commonFilter ? ['all', commonFilter, dashedInFilter] : dashedInFilter;
+        cadMap.setFilter('cad-lines-dashed', dashFilter);
+    }
+
+    // 2. 폴리곤, 텍스트는 기존 필터 유지
     if (cadMap.getLayer('cad-polygons')) cadMap.setFilter('cad-polygons', commonFilter); // [수정] cad-polygons 필터 적용
 
     if (cadMap.getLayer('cad-text')) {
@@ -1409,6 +1436,10 @@ function updateMapStyle() {
     if (cadMap.getLayer('cad-lines')) {
         cadMap.setPaintProperty('cad-lines', 'line-color', lineColorExpr);
         cadMap.setPaintProperty('cad-lines', 'line-width', lineWidthExpr);
+    }
+    if (cadMap.getLayer('cad-lines-dashed')) {
+        cadMap.setPaintProperty('cad-lines-dashed', 'line-color', lineColorExpr);
+        cadMap.setPaintProperty('cad-lines-dashed', 'line-width', lineWidthExpr);
     }
     if (cadMap.getLayer('cad-text')) {
         cadMap.setPaintProperty('cad-text', 'text-color', textColorExpr);

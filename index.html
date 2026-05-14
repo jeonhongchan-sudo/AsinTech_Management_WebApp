@@ -138,7 +138,7 @@
     /* [추가] 레이어별 편집 리스트 스타일 */
     .style-edit-list { max-height: 380px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 0; }
     .style-edit-row { 
-        display: grid; grid-template-columns: 1fr 50px 70px; gap: 8px; align-items: center; 
+        display: grid; grid-template-columns: 1fr 50px 70px 40px; gap: 8px; align-items: center; 
         padding: 5px 8px; border-bottom: 1px solid #f5f5f5; font-size: 12px;
     }
     .style-edit-row input { height: 24px; padding: 1px 4px; font-size: 11px; border-radius: 3px; border: 1px solid #ddd; }
@@ -534,7 +534,7 @@
                 </div>
             </div>
             <div class="style-edit-list">
-                <div style="display: grid; grid-template-columns: 1fr 50px 70px; gap: 8px; padding: 5px 8px; font-weight: bold; font-size: 11px; background: #eee;"><span>레이어명</span><span>색상</span><span>굵기</span></div>
+                <div style="display: grid; grid-template-columns: 1fr 50px 70px 40px; gap: 8px; padding: 5px 8px; font-weight: bold; font-size: 11px; background: #eee;"><span>레이어명</span><span>색상</span><span>굵기</span><span style="text-align:center;">점선</span></div>
                 <div id="layerEditListLine"></div>
             </div>
         </div>
@@ -552,7 +552,7 @@
                 </div>
             </div>
             <div class="style-edit-list">
-                <div style="display: grid; grid-template-columns: 1fr 50px 70px; gap: 8px; padding: 5px 8px; font-weight: bold; font-size: 11px; background: #eee;"><span>레이어명</span><span>색상</span><span>크기</span></div>
+                <div style="display: grid; grid-template-columns: 1fr 50px 70px 40px; gap: 8px; padding: 5px 8px; font-weight: bold; font-size: 11px; background: #eee;"><span>레이어명</span><span>색상</span><span>크기</span><span></span></div>
                 <div id="layerEditListPoint"></div>
             </div>
         </div>
@@ -570,7 +570,7 @@
                 </div>
             </div>
             <div class="style-edit-list">
-                <div style="display: grid; grid-template-columns: 1fr 50px 70px; gap: 8px; padding: 5px 8px; font-weight: bold; font-size: 11px; background: #eee;"><span>레이어명</span><span>색상</span><span>크기</span></div>
+                <div style="display: grid; grid-template-columns: 1fr 50px 70px 40px; gap: 8px; padding: 5px 8px; font-weight: bold; font-size: 11px; background: #eee;"><span>레이어명</span><span>색상</span><span>크기</span><span></span></div>
                 <div id="layerEditListText"></div>
             </div>
         </div>
