@@ -270,16 +270,12 @@ export async function cleanupR2Orphans() {
 
 // [추가] 개별 사진 파일 다운로드 (브라우저 다운로드 강제)
 export async function downloadPhotoFile(url, fileName, isSurvey) {
-    // [수정] 조사 메모 활성화 여부 체크
-    if (!isSurvey) {
-        alert("조사메모가 활성화된 메모만 다운로드 가능합니다.");
-        return;
-    }
     if (!url) return;
 
-    // [수정] R2 저장소인 경우, Preview 대신 원본(orig) 경로를 찾아 다운로드 시도
+    // [수정] 조사 모드(isSurvey: true)인 경우에만 원본(/orig/) 경로를 시도함.
+    // 일반 메모나 원본이 없는 사진은 Preview를 그대로 사용하여 404 에러 방지.
     let downloadUrl = url;
-    if (url.includes('r2.dev') && url.includes('/preview/')) {
+    if (isSurvey && url.includes('r2.dev') && url.includes('/preview/')) {
         downloadUrl = url.replace('/preview/', '/orig/');
     }
 
@@ -468,9 +464,10 @@ function updateLightboxImage() {
     const p = state.currentPhotosData[state.currentLightboxIndex]; 
     let fullImageUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=w1920-h1080`;
 
-    // [수정] R2 저장소인 경우, '원본 열기' 버튼은 Preview(1280px)가 아닌 Original(원본) 경로를 가리키도록 처리
+    // [수정] 조사 모드(isSurvey: true)인 경우에만 원본(/orig/) 경로로 연결함.
+    // 원본이 저장되지 않는 일반 메모의 경우 Preview(1280px) URL을 그대로 유지하여 404 에러를 방지합니다.
     let originalUrl = fullImageUrl;
-    if (fullImageUrl.includes('r2.dev') && fullImageUrl.includes('/preview/')) {
+    if (p.isSurvey && fullImageUrl.includes('r2.dev') && fullImageUrl.includes('/preview/')) {
         originalUrl = fullImageUrl.replace('/preview/', '/orig/');
     }
 
@@ -1412,14 +1409,16 @@ async function processMemoSaveBackground(data) {
                         if (!uploadRes.ok) throw new Error("Preview 업로드 실패");
                     })());
 
-                    // 3. Original (사용자가 입력한 이름 유지)
-                    const origPath = `${r2FolderPath}/orig/${uuid}/${fileNameToUse}`;
-                    uploadTasks.push((async () => {
-                        const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(origPath)}&type=${encodeURIComponent(origContentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
-                        const { url } = await res.json();
-                        const uploadRes = await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: file, headers: { 'Content-Type': origContentType } });
-                        if (uploadRes.ok) console.log(`[R2 Original Success] ${i+1}:`, origPath);
-                    })());
+                    // 3. Original (조사 모드 활성화 시에만 원본 저장)
+                    if (isSurvey) {
+                        const origPath = `${r2FolderPath}/orig/${uuid}/${fileNameToUse}`;
+                        uploadTasks.push((async () => {
+                            const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(origPath)}&type=${encodeURIComponent(origContentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
+                            const { url } = await res.json();
+                            const uploadRes = await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: file, headers: { 'Content-Type': origContentType } });
+                            if (uploadRes.ok) console.log(`[R2 Original Success] ${i+1}:`, origPath);
+                        })());
+                    }
 
                     await Promise.all(uploadTasks);
                     return `${R2_BASE_URL}/${previewPath}`;
