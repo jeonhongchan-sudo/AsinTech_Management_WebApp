@@ -1328,6 +1328,16 @@ async function processMemoSaveBackground(data) {
     const user = state.currentUser || 'anonymous';
     const isSurvey = state.isSurveyMode; // [추가] 현재 조사 모드 여부 캡처
     
+    // [검증] 조사 모드일 경우 모든 파일에 사용자 입력 명칭이 있는지 엄격히 체크
+    if (isSurvey && files && files.length > 0) {
+        for (const f of files) {
+            if (!f.customSurveyName || !f.customSurveyName.trim()) {
+                alert("조사 메모는 모든 사진에 파일명을 입력해야 합니다. 명칭이 누락된 항목이 있으니 다시 확인해주세요.");
+                return false;
+            }
+        }
+    }
+
     try {
         // [추가] 수정 모드일 때, 기존 이미지 중 사용자가 삭제한 이미지를 R2에서 제거
         if (memoId) {
@@ -1359,57 +1369,73 @@ async function processMemoSaveBackground(data) {
 
         // 2. 새 사진 파일 업로드 (병렬 처리 및 원본 업로드 복구)
         if (files && files.length > 0) {
-            console.log(`[Save] Parallel uploading ${files.length} images (3 versions each)...`);
+            console.log(`[Save] Parallel uploading ${files.length} images (Mode: ${isSurvey ? 'Survey' : 'General'})...`);
             
             const uploadPromises = files.map(async (file, i) => {
                 try {
-                     const origContentType = file.type || "application/octet-stream";
+                    const origContentType = file.type || "application/octet-stream";
                     let contentType = origContentType;
-                    
-                    let safeCustomName = file.customSurveyName ? file.customSurveyName.replace(/[\\/:*?"<>|]/g, "_") : null;
-                    let fileNameToUse = safeCustomName || content.replace(/[\\/:*?"<>|]/g, "_").substring(0, 50) || "file";
-                    fileNameToUse = fileNameToUse.replace(/^\[메모\]\s*/, '');
 
+                    // [파일명 및 경로 결정] 조사 모드 여부에 따라 엄격히 분리
+                    let fileNameToUse;
+                    let r2FolderPath = isSurvey ? `survey_memo_photo/${projectId}` : `memos_photo/${projectId}`;
+
+                    // 파일명 생성용 타임스탬프 (예: 20240523_143005)
+                    const now = new Date();
+                    const timestamp = now.getFullYear() + 
+                                    String(now.getMonth() + 1).padStart(2, '0') + 
+                                    String(now.getDate()).padStart(2, '0') + "_" +
+                                    String(now.getHours()).padStart(2, '0') + 
+                                    String(now.getMinutes()).padStart(2, '0') + 
+                                    String(now.getSeconds()).padStart(2, '0');
+
+                    if (isSurvey) {
+                        // 조사모드: 사용자 입력 명칭 필수 (임의 명칭 사용 금지)
+                        fileNameToUse = file.customSurveyName.replace(/[\\/:*?"<>|]/g, "_");
+                    } else {
+                        // 일반모드: 메모 내용 대신 날짜_시간_인덱스 기반의 자동 명칭 부여
+                        fileNameToUse = `memo_${timestamp}_${i}`;
+                    }
+
+                    // [메모] 접두사 제거 및 확장자 보정
+                    fileNameToUse = fileNameToUse.replace(/^\[메모\]\s*/, '');
                     if (contentType.startsWith('image/') && !fileNameToUse.toLowerCase().endsWith('.jpg')) {
                         fileNameToUse += '.jpg';
                     }
-
-                    let r2FolderPath = isSurvey ? `survey_memo_photo/${projectId}` : `memos_photo/${projectId}`;
                    
                     const uuid = generateUUID();
-                    
                     let previewBlob = file;
                     let thumbBlob = null;
 
                     if (file.type.startsWith('image/')) {
-                        previewBlob = await resizeImage(file, 1280, 0.7);
+                        // 미리보기(1280px), 썸네일(300px) 생성
+                        previewBlob = await resizeImage(file, 1280, 0.8);
                         thumbBlob = await resizeImage(file, 300, 0.6);
                         contentType = "image/jpeg";
                     }
 
                     const uploadTasks = [];
 
-                    // 1. Thumbnail
-
+                    // [Task 1] Thumbnail 업로드
                     if (thumbBlob) {
                         const thumbPath = `${r2FolderPath}/thumb/${uuid}/${fileNameToUse}`;
-                         uploadTasks.push((async () => {
+                        uploadTasks.push((async () => {
                             const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(thumbPath)}&type=${encodeURIComponent(contentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
                             const { url } = await res.json();
                             await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: thumbBlob, headers: { 'Content-Type': contentType } });
                         })());
                     }
 
-                    // 2. Preview (DB 저장용 URL 기준)
+                    // [Task 2] Preview 업로드 (DB 저장용 URL 기준)
                     const previewPath = `${r2FolderPath}/preview/${uuid}/${fileNameToUse}`;
-                     uploadTasks.push((async () => {
+                    uploadTasks.push((async () => {
                         const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(previewPath)}&type=${encodeURIComponent(contentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
                         const { url } = await res.json();
                         const uploadRes = await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: previewBlob, headers: { 'Content-Type': contentType } });
                         if (!uploadRes.ok) throw new Error("Preview 업로드 실패");
                     })());
 
-                    // 3. Original (조사 모드 활성화 시에만 원본 저장)
+                    // [Task 3] Original 업로드 (조사 모드 활성화 시에만 실행)
                     if (isSurvey) {
                         const origPath = `${r2FolderPath}/orig/${uuid}/${fileNameToUse}`;
                         uploadTasks.push((async () => {
