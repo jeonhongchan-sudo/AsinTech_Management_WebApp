@@ -1626,10 +1626,10 @@ async function renderMemoFiles(previewId) {
             let url = '';
             
             if (isImg) {
-                // [수정] LTE 속도 개선을 위해 미리보기용 작은 썸네일 생성 (100px)
+                // [개선] 업로드 전 미리보기 단계에서도 리사이징된 썸네일을 사용하여 메모리 부하 및 렉 방지
                 try {
-                    const thumbnailBlob = await resizeImage(file, 100, 0.8);
-                    url = (window.URL || window.webkitURL).createObjectURL(thumbnailBlob);
+                    const thumbnailBlob = await resizeImage(file, 100, 0.7);
+                    url = (window.URL || window.webkitURL).createObjectURL(tempThumb);
                 } catch (e) {
                     // 실패 시 원본 사용
                     url = (window.URL || window.webkitURL).createObjectURL(file);

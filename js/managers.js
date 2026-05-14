@@ -158,7 +158,11 @@ function renderPhotos(res) {
    
    let html = '';
    res.photos.forEach((p, i) => {
-       const thumbnailUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=s400`;
+       // [수정] R2 경로인 경우 preview 대신 thumb 경로를 사용하여 로딩 속도 획기적 개선
+       let thumbnailUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=s400`;
+       if (thumbnailUrl.includes('r2.dev') && thumbnailUrl.includes('/preview/')) {
+           thumbnailUrl = thumbnailUrl.replace('/preview/', '/thumb/');
+       }
        
        const downloadBtn = `<button class="btn btn-info" style="padding:2px 5px; font-size:11px; margin-right:5px;" onclick="window.downloadPhotoFile('${p.url}', '${p.fileName}', ${p.isSurvey})">저장</button>`;
        const deleteBtn = p.isMemoPhoto 
@@ -1240,7 +1244,6 @@ async function processMemoSaveBackground(data) {
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 try {
-                    let uploadData = file; // 기본은 원본
                     let contentType = file.type || "application/octet-stream";
                     
                     // [수정] 사용자가 지정한 커스텀 명칭이 있으면 사용, 없으면 메모 내용이나 원본명 사용
@@ -1252,38 +1255,48 @@ async function processMemoSaveBackground(data) {
                     }
 
                     let r2FolderPath = isSurvey ? `survey_memo_photo/${projectId}` : `memos_photo/${projectId}`;
+                   
+                    const uuid = generateUUID();
+                    
+                    // [핵심 변경] 이미지일 경우 Preview와 Thumbnail 두 가지를 생성
+                    let previewBlob = file;
+                    let thumbBlob = null;
 
-                    if (!isSurvey) {
-                        // 일반 메모일 경우 사진 리사이징 수행
-                        if (file.type.startsWith('image/')) {
-                            uploadData = await resizeImage(file);
-                            contentType = "image/jpeg";
-                        }
+                    if (file.type.startsWith('image/')) {
+                        // Preview (상세보기용): 1280px
+                        previewBlob = await resizeImage(file, 1280, 0.7);
+                        // Thumbnail (리스트용): 300px
+                        thumbBlob = await resizeImage(file, 300, 0.6);
+                        contentType = "image/jpeg";
                     }
 
-                    const uuid = generateUUID();
-                    // [수정] 경로 구조 변경: UUID를 폴더로 사용하여 다운로드 시 파일명 보존 (UUID/1001.jpg)
-                    const r2Path = `${r2FolderPath}/${uuid}/${fileNameToUse}`;
+                    // 1. Thumbnail 업로드 (있는 경우)
+                    if (thumbBlob) {
+                        const thumbPath = `${r2FolderPath}/thumb/${uuid}/${fileNameToUse}`;
+                        const presignThumb = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(thumbPath)}&type=${encodeURIComponent(contentType)}`, {
+                            headers: { 'Authorization': WORKER_AUTH_KEY }
+                        });
+                        const { url: signedThumbUrl } = await presignThumb.json();
+                        await fetch(signedThumbUrl.trim().replace(/[<>]/g, ''), { method: 'PUT', body: thumbBlob, headers: { 'Content-Type': contentType } });
+                    }
 
-                    // 1. Worker에게 서명된 URL 요청
-                    const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}&type=${encodeURIComponent(contentType)}`, {
+                    // 2. Preview 업로드 및 DB 경로로 사용
+                    const previewPath = `${r2FolderPath}/preview/${uuid}/${fileNameToUse}`;
+                    const presignPreview = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(previewPath)}&type=${encodeURIComponent(contentType)}`, {
                         method: 'GET',
                         headers: { 'Authorization': WORKER_AUTH_KEY }
                     });
 
-                    if (!presignRes.ok) throw new Error("Worker 승인 실패: " + await presignRes.text());
-                    let { url: signedUrl } = await presignRes.json();
-                    signedUrl = signedUrl.trim().replace(/[<>]/g, '');
-
-                    // 2. R2로 직접 전송 (Presigned URL 방식)
-                    const uploadRes = await fetch(signedUrl, {
+                    if (!presignPreview.ok) throw new Error("Worker 승인 실패");
+                    let { url: signedPreviewUrl } = await presignPreview.json();
+                    const uploadRes = await fetch(signedPreviewUrl.trim().replace(/[<>]/g, ''), {
                         method: 'PUT',
-                        body: uploadData,
+                        body: previewBlob,
                         headers: { 'Content-Type': contentType }
                     });
 
                     if (uploadRes.ok) {
-                        const finalUrl = `${R2_BASE_URL}/${r2Path}`;
+                        const finalUrl = `${R2_BASE_URL}/${previewPath}`;
                         finalImageUrls.push(finalUrl);
                         console.log(`[R2 Upload Success] ${i+1}/${files.length}:`, finalUrl);
                     } else {
