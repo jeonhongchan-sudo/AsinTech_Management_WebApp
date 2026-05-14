@@ -1557,7 +1557,7 @@ async function handleMapClick(e) {
     }
 
     // 1. 스냅 (Snap) - 클릭 지점 주변의 포인트 피처 검색
-    const snapRadius = 15; // 픽셀 단위 검색 반경
+    const snapRadius = 8; // [수정] 스냅 범위를 15px에서 8px로 좁혀 인접 포인트 간섭 방지
     const bbox = [
         [e.point.x - snapRadius, e.point.y - snapRadius],
         [e.point.x + snapRadius, e.point.y + snapRadius]
@@ -1612,10 +1612,10 @@ function openMemoPopup(feature) {
     const layer = feature.properties.layer || 'unknown';
     
     // 기존 메모 찾기 (좌표 기준, 약간의 오차 허용)
-    // [수정] 좌표 매칭 허용 오차를 0.0000001에서 0.00005(약 5m)로 완화하여 안정성 확보
+    // [재수정] 오차 범위를 0.00005(5m)에서 0.000001(약 10cm)로 대폭 축소하여 인접 포인트 간 메모 섞임 방지
     const existingMemo = state.memos.find(m => 
-        Math.abs(m.lon - coords[0]) < 0.00005 && 
-        Math.abs(m.lat - coords[1]) < 0.00005
+        Math.abs(m.lon - coords[0]) < 0.000001 && 
+        Math.abs(m.lat - coords[1]) < 0.000001
     );
 
     const content = existingMemo ? existingMemo.content : '';
