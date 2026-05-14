@@ -160,16 +160,24 @@ export async function startConversionObserver() {
                     if (isModalOpen) {
                         // [추가] 성공 후에는 다시 알림이 뜨지 않도록 추적 목록에서 제거
                         delete state.conversionStartTimes[p.id];
-
-                        modal.style.display = 'none';
                         
-                        if (p.status !== 'COMPLETED') {
-                            await callSupabaseDirect(`cad_projects?id=eq.${p.id}`, 'PATCH', { status: 'COMPLETED' });
-                        }
+                        // 진행바 강제 100% 및 완료 메시지
+                        const bar = document.getElementById('cadProgressBar');
+                        const pText = document.getElementById('cadProgressPercent');
+                        const sText = document.getElementById('cadProcessStatusText');
+                        if (bar) bar.style.width = '100%';
+                        if (pText) pText.innerText = '100%';
+                        if (sText) sText.innerText = '지도 생성 완료!';
 
-                        alert("지도가 생성되었습니다. Map Viewer에서 확인바랍니다");
-                        if (window.loadCadProjects) window.loadCadProjects();
-                        loadProjects();
+                        setTimeout(async () => {
+                            modal.style.display = 'none';
+                            if (p.status !== 'COMPLETED') {
+                                await callSupabaseDirect(`cad_projects?id=eq.${p.id}`, 'PATCH', { status: 'COMPLETED' });
+                            }
+                            alert("지도가 생성되었습니다. Map Viewer에서 확인바랍니다");
+                            if (window.loadCadProjects) window.loadCadProjects();
+                            loadProjects();
+                        }, 1000);
                     }
                 }
             }

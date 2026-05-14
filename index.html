@@ -585,13 +585,18 @@
         <div id="cadProcessStatus" style="text-align:center; padding: 20px;">
             <div class="spinner"></div>
             <p id="cadProcessStatusText" style="margin-top:10px; color:#666;">준비 중...</p>
+            <!-- [추가] 진행 막대 UI -->
+            <div id="cadProgressBarContainer" style="width: 100%; background-color: #eee; border-radius: 10px; margin-top: 20px; height: 12px; display: none; overflow: hidden; border: 1px solid #ddd;">
+                <div id="cadProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #4dabf7, #2196f3); transition: width 0.3s ease-out;"></div>
+            </div>
+            <div id="cadProgressPercent" style="margin-top: 8px; font-weight: bold; color: #2196f3; font-size: 14px; display: none;">0%</div>
         </div>
 
         <div id="cadProcessConfig" style="display:none;"></div>
     </div>
   </div>
 
-  <input type="file" id="cadFileSelector" accept=".dwg,.dxf" style="display:none;">
+  <input type="file" id="cadFileSelector" accept=".dxf,application/dxf" style="display:none;">
 
   <script type="module" src="js/main.js"></script>
 </body>

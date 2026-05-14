@@ -633,6 +633,34 @@ setTimeout(() => {
     }
 }, 1000);
 
+let processSimTimer = null; // 시뮬레이션용 타이머
+
+/** [추가] 진행 상태 바 업데이트 유틸리티 */
+function updateProcessProgress(percent, statusText = null) {
+    const container = document.getElementById('cadProgressBarContainer');
+    const bar = document.getElementById('cadProgressBar');
+    const text = document.getElementById('cadProgressPercent');
+    const statusEl = document.getElementById('cadProcessStatusText');
+    if (container) container.style.display = 'block';
+    if (text) { text.style.display = 'block'; text.innerText = Math.floor(percent) + '%'; }
+    if (bar) bar.style.width = percent + '%';
+    if (statusText && statusEl) statusEl.innerHTML = statusText;
+}
+
+/** [추가] 진행바 시뮬레이션 시작 */
+function startProgressSimulation(targetPercent, durationMs) {
+    if (processSimTimer) clearInterval(processSimTimer);
+    let current = 0;
+    const interval = 1000; // 1초마다 업데이트
+    const step = (targetPercent / (durationMs / interval));
+    updateProcessProgress(0);
+    processSimTimer = setInterval(() => {
+        current += step;
+        if (current >= targetPercent) { current = targetPercent; clearInterval(processSimTimer); }
+        updateProcessProgress(current);
+    }, interval);
+}
+
 /** [추가] 2단계: CAD 파일 업로드 및 분석 트리거 */
 async function processCadUpload(file, projectId) {
     const statusModal = document.getElementById('cadProcessModal');
@@ -691,10 +719,10 @@ async function processCadUpload(file, projectId) {
         const dispatchResult = await dispatchRes.json();
         if (dispatchResult.success) {
             showAlert("도면 업로드 및 분석 요청이 성공했습니다.", "success");
-            statusText.innerHTML = `
-                분석이 시작되었습니다.<br>도면 크기에 따라 1~2분 정도 소요됩니다.<br><br>
-                <p style="font-size:12px; color:#888;">분석이 완료되면 자동으로 설정을 불러옵니다...</p>
-            `;
+            statusText.innerHTML = "도면 분석을 진행 중입니다.<br>잠시만 기다려 주세요.";
+            
+            // 시뮬레이션 시작 (90초 동안 90%까지 서서히 상승)
+            startProgressSimulation(90, 90000);
 
             // [추가] 분석 상태 자동 체크 (5초 간격)
             const pollTimer = setInterval(async () => {
@@ -702,10 +730,16 @@ async function processCadUpload(file, projectId) {
                     const [p] = await callSupabaseDirect(`cad_projects?id=eq.${projectId}&select=status`);
                     if (p && p.status === 'ANALYZED') {
                         clearInterval(pollTimer);
-                        showAlert("도면 분석이 성공적으로 완료되었습니다.", "success");
-                        window.openCadConfigUI(projectId); // 분석 완료 시 자동으로 다음 단계로 이동
+                        if (processSimTimer) clearInterval(processSimTimer);
+                        updateProcessProgress(100, "분석 완료!"); // 즉시 100%
+                        
+                        setTimeout(() => {
+                            showAlert("도면 분석이 성공적으로 완료되었습니다.", "success");
+                            window.openCadConfigUI(projectId); 
+                        }, 600);
                     } else if (p && p.status === 'ERROR') {
                         clearInterval(pollTimer);
+                        if (processSimTimer) clearInterval(processSimTimer);
                         statusText.innerHTML = "❌ 분석 중 오류가 발생했습니다.<br>도면 형식을 확인해주세요.";
                     }
                 } catch (e) { console.warn("Status check failed", e); }
@@ -746,6 +780,11 @@ export async function openCadConfigUI(projectId) {
         statusContent.style.display = 'none';
         configArea.style.display = 'block';
         
+        // 설정창 진입 시 진행바 초기화
+        if (processSimTimer) clearInterval(processSimTimer);
+        const pbContainer = document.getElementById('cadProgressBarContainer');
+        if (pbContainer) pbContainer.style.display = 'none';
+
         const layers = p.available_layers || [];
         
         let html = `
@@ -805,6 +844,8 @@ export async function executeCadConversion(projectId) {
     const centerlineLayer = useChainage ? document.getElementById('centerlineLayerSelect').value : null;
 
     const configArea = document.getElementById('cadProcessConfig');
+    const statusContent = document.getElementById('cadProcessStatus');
+    const statusText = document.getElementById('cadProcessStatusText');
     configArea.innerHTML = '<div style="text-align:center; padding:30px;"><div class="spinner"></div><p style="margin-top:10px;">GitHub Action 요청 중...</p></div>';
 
     // [추가] 변환 시작 전 현재 파일의 업데이트 시간을 기록 (덮어쓰기 감지용)
@@ -837,13 +878,14 @@ export async function executeCadConversion(projectId) {
 
         const result = await dispatchRes.json();
         if (result.success) {
-            configArea.innerHTML = `
-                <div style="text-align:center; padding:20px;">
-                    <h4 style="color:#007bff;">지도 생성 중</h4>
-                    <p style="font-size:14px; color:#333; line-height:1.6;">약 1분 후에 지도가 생성됩니다<br>잠시 기다려 주십시요</p>
-                    <div class="spinner" style="margin-top:15px;"></div>
-                </div>
-            `;
+            // 다시 상태 안내 화면으로 전환하여 진행바 표시
+            configArea.style.display = 'none';
+            statusContent.style.display = 'block';
+            
+            // 변환 시뮬레이션 시작 (180초 동안 95%까지)
+            startProgressSimulation(95, 180000);
+            statusText.innerHTML = "지도를 생성하고 있습니다...<br>약 3~5분 정도 소요될 수 있습니다.";
+
             // 상태 업데이트
             await callSupabaseDirect(`cad_projects?id=eq.${projectId}`, 'PATCH', { status: 'CONVERTING' });
             // [추가] 관찰자 즉시 실행
