@@ -466,9 +466,16 @@ export function closeLightbox(e) {
 export function navigateLightbox(d) { const n = state.currentLightboxIndex + d; if(n >= 0 && n < state.currentPhotosData.length) { state.currentLightboxIndex = n; updateLightboxImage(); } }
 function updateLightboxImage() { 
     const p = state.currentPhotosData[state.currentLightboxIndex]; 
-    const fullImageUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=w1920-h1080`;
-    document.getElementById('lightboxImg').src = fullImageUrl; 
-    document.getElementById('lightboxDownloadBtn').href = fullImageUrl; 
+    let fullImageUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=w1920-h1080`;
+
+    // [수정] R2 저장소인 경우, '원본 열기' 버튼은 Preview(1280px)가 아닌 Original(원본) 경로를 가리키도록 처리
+    let originalUrl = fullImageUrl;
+    if (fullImageUrl.includes('r2.dev') && fullImageUrl.includes('/preview/')) {
+        originalUrl = fullImageUrl.replace('/preview/', '/orig/');
+    }
+
+    document.getElementById('lightboxImg').src = fullImageUrl; // 미리보기 화면은 속도를 위해 Preview 유지
+    document.getElementById('lightboxDownloadBtn').href = originalUrl; // 버튼은 실제 원본 연결
     
     // [추가] 하단 캡션 업데이트 (현재 번호 / 전체 개수 및 파일명 표시)
     const caption = document.getElementById('lightboxCaption');
