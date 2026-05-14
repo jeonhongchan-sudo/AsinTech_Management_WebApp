@@ -972,7 +972,7 @@ function updateCadStyle() {
 // [복구 및 수정] 실제 캐드 레이어명을 감지하는 함수
 function updateLayerDiscovery() { // [수정] 기하학적 메타데이터 수집 로직 강화
     if (!cadMap) return;
-    const features = cadMap.queryRenderedFeatures({ layers: ['cad-lines', 'cad-points', 'cad-polygons'] });
+    const features = cadMap.queryRenderedFeatures({ layers: ['cad-lines', 'cad-lines-dashed', 'cad-points', 'cad-polygons'] });
     let updated = false;
 
     if (!state.cadLayerMetadata) state.cadLayerMetadata = {};
