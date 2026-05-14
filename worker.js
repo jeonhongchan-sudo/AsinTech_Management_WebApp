@@ -64,6 +64,38 @@ export default {
       return new Response(JSON.stringify({ success: response.status === 204 }), { headers: corsHeaders });
     }
 
+    // --- [추가] 6. R2 고아 파일 정리 (Cleanup) ---
+    if (url.pathname === "/cleanup" && request.method === "POST") {
+      const { validPaths, cursor, prefixIndex = 0 } = await request.json();
+      const validSet = new Set(validPaths);
+      let deletedCount = 0;
+      const prefixes = ["memos_photo/", "survey_memo_photo/"];
+      
+      if (prefixIndex >= prefixes.length) {
+        return new Response(JSON.stringify({ success: true, finished: true, deletedCount: 0 }), { headers: corsHeaders });
+      }
+
+      const prefix = prefixes[prefixIndex];
+      const list = await env.MY_BUCKET.list({ prefix, cursor, limit: 1000 });
+      
+      // 삭제 대상을 찾고 병렬로 삭제 처리 (성능 최적화)
+      const deletePromises = [];
+      for (const obj of list.objects) {
+        if (!validSet.has(obj.key)) {
+          deletePromises.push(env.MY_BUCKET.delete(obj.key));
+          deletedCount++;
+        }
+      }
+      await Promise.all(deletePromises);
+
+      // 다음 페이지 정보 계산
+      const nextCursor = list.truncated ? list.cursor : undefined;
+      const nextPrefixIndex = (!list.truncated && prefixIndex < prefixes.length - 1) ? prefixIndex + 1 : prefixIndex;
+      const finished = !list.truncated && prefixIndex >= prefixes.length - 1;
+
+      return new Response(JSON.stringify({ success: true, finished, deletedCount, cursor: nextCursor, prefixIndex: nextPrefixIndex }), { headers: corsHeaders });
+    }
+
     // --- [추가] 4. R2 파일 이름 변경 (Copy + Delete) ---
     if (url.pathname === "/rename" && request.method === "POST") {
       const from = url.searchParams.get("from");

@@ -187,14 +187,17 @@
             <button class="btn btn-secondary" onclick="closePhotoManager()">← 뒤로</button>
             <h2 id="pmProjectName" style="margin-right: 10px;">프로젝트 이름</h2>
           </div>
-          <div class="pm-actions">
+          <div class="pm-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
             <div class="view-toggle-group">
                 <button class="btn btn-outline active" id="btnViewGrid" onclick="toggleViewMode('grid')" title="썸네일 보기">▦</button>
                 <button class="btn btn-outline" id="btnViewList" onclick="toggleViewMode('list')" title="리스트 보기">☰</button>
             </div>
+            <div style="display: flex; gap: 4px;">
+                <button id="pmSyncR2Btn" class="btn btn-warning" style="padding: 5px 10px; font-size: 16px;" onclick="window.cleanupR2Orphans()" title="전체 저장소 동기화">🔄</button>
+                <button id="pmDownloadAllBtn" class="btn btn-success" style="padding: 5px 10px; font-size: 16px;" onclick="window.downloadAllPhotos()" title="전체 사진 다운로드">📥</button>
+                <button id="pmDeleteAllBtn" class="btn btn-danger" style="padding: 5px 10px; font-size: 16px;" onclick="window.deleteAllPhotos()" title="전체 사진 삭제">🗑️</button>
+            </div>
           </div>
-          <button id="pmDownloadAllBtn" class="btn btn-success" style="margin-left: 10px; padding: 5px 12px; font-size: 12px;" onclick="window.downloadAllPhotos()">📥 전체 사진 다운로드</button>
-          <button id="pmDeleteAllBtn" class="btn btn-danger" style="margin-left: 10px; padding: 5px 12px; font-size: 12px;" onclick="window.deleteAllPhotos()">🗑️ 전체 사진 삭제</button>
         </div>
         <div id="pmPhotoContainer" class="photo-container grid-view"></div>
       </div>

@@ -129,7 +129,7 @@ export async function loadPhotos(id) {
           const fileNameFromUrl = urlParts[urlParts.length - 1];
           
           memoPhotos.push({
-            fileName: `[메모] ${fileNameFromUrl}`,
+            fileName: fileNameFromUrl, // [수정] [메모] 접두사 제거
             url: url,
             memoId: row.id,
             fileId: null, // 메모 사진은 file_id 대신 URL 직접 사용
@@ -175,6 +175,99 @@ function renderPhotos(res) {
    container.innerHTML = html;
 }
 
+export async function cleanupR2Orphans() {
+    const isAdmin = state.adminUser && state.currentUser && state.currentUser.toLowerCase() === state.adminUser.toLowerCase();
+    if (!isAdmin && !state.isRoomManager) {
+        return alert("관리자 또는 방장 등급만 저장소 정리가 가능합니다.");
+    }
+
+    if (!confirm("R2 저장소의 고아 파일을 정리하시겠습니까?\n파일 양에 따라 여러 단계에 걸쳐 진행됩니다.")) return;
+
+    showAlert("DB 분석 중...", "info");
+
+    try {
+        const [memos, photos] = await Promise.all([
+            // [최적화] 대량 데이터 로딩 시 속도 향상을 위해 꼭 필요한 컬럼만 가져옴
+            callSupabaseDirect('memos?select=image_url&image_url=not.is.null'),
+            callSupabaseDirect('photos?select=file_url&file_url=not.is.null')
+        ]);
+
+        const validPaths = new Set();
+        const r2Prefix = R2_BASE_URL + '/';
+
+        // 메모 테이블 URL 파싱 (콤마 구분)
+        memos.forEach(m => {
+            if (m.image_url) {
+                m.image_url.split(',').forEach(url => {
+                    const trimmed = url.trim();
+                    if (trimmed.includes(R2_BASE_URL)) {
+                        const path = trimmed.replace(r2Prefix, '');
+                        validPaths.add(path);
+                        
+                        // [수정] 이원화 저장(preview/thumb/orig) 대응: 하나가 유효하면 모든 버전의 경로를 유효 목록에 추가
+                        const versions = ['preview', 'thumb', 'orig'];
+                        const currentVersion = versions.find(v => path.includes(`/${v}/`));
+                        if (currentVersion) {
+                            versions.forEach(v => {
+                                if (v !== currentVersion) {
+                                    validPaths.add(path.replace(`/${currentVersion}/`, `/${v}/`));
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+        });
+
+        // 일반 사진 테이블 URL 수집
+        photos.forEach(p => {
+            if (p.file_url && p.file_url.includes(R2_BASE_URL)) {
+                const path = p.file_url.replace(r2Prefix, '');
+                validPaths.add(path);
+
+                // 일반 사진 테이블 데이터도 구조화된 경로를 가질 경우를 대비해 동일 로직 적용
+                const versions = ['preview', 'thumb', 'orig'];
+                const currentVersion = versions.find(v => path.includes(`/${v}/`));
+                if (currentVersion) {
+                    versions.forEach(v => {
+                        if (v !== currentVersion) validPaths.add(path.replace(`/${currentVersion}/`, `/${v}/`));
+                    });
+                }
+            }
+        });
+
+        const validPathsArray = Array.from(validPaths);
+        let totalDeleted = 0;
+        let cursor = undefined;
+        let prefixIndex = 0;
+        let isFinished = false;
+
+        showAlert(`정리 시작 (유효 파일 ${validPathsArray.length}개)...`, "info");
+
+        // [핵심 루프] 워커가 다 끝났다고 할 때까지 페이징 처리
+        while (!isFinished) {
+            const response = await fetch(`${WORKER_URL}/cleanup`, {
+                method: 'POST',
+                headers: { 'Authorization': WORKER_AUTH_KEY, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ validPaths: validPathsArray, cursor, prefixIndex })
+            });
+
+            const result = await response.json();
+            if (!result.success) throw new Error(result.error || "정리 실패");
+
+            totalDeleted += (result.deletedCount || 0);
+            cursor = result.cursor;
+            prefixIndex = result.prefixIndex;
+            isFinished = result.finished;
+            showAlert(`진행 중... (삭제됨: ${totalDeleted}개)`, "info");
+        }
+
+        showAlert(`정리 완료! 총 ${totalDeleted}개의 고아 파일이 삭제되었습니다.`, "success");
+    } catch (e) {
+        showAlert("R2 정리 오류: " + e.message, "error");
+    }
+}
+
 // [추가] 개별 사진 파일 다운로드 (브라우저 다운로드 강제)
 export async function downloadPhotoFile(url, fileName, isSurvey) {
     // [수정] 조사 메모 활성화 여부 체크
@@ -183,8 +276,15 @@ export async function downloadPhotoFile(url, fileName, isSurvey) {
         return;
     }
     if (!url) return;
+
+    // [수정] R2 저장소인 경우, Preview 대신 원본(orig) 경로를 찾아 다운로드 시도
+    let downloadUrl = url;
+    if (url.includes('r2.dev') && url.includes('/preview/')) {
+        downloadUrl = url.replace('/preview/', '/orig/');
+    }
+
     try {
-        const response = await fetch(url);
+        const response = await fetch(downloadUrl);
         const blob = await response.blob();
         const blobUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -195,8 +295,8 @@ export async function downloadPhotoFile(url, fileName, isSurvey) {
         document.body.removeChild(link);
         window.URL.revokeObjectURL(blobUrl);
     } catch (e) {
-        console.error("다운로드 실패:", e);
-        window.open(url, '_blank'); // 실패 시 새 탭으로 열기
+        console.error("원본 다운로드 실패 (Preview로 대체):", e);
+        window.open(url, '_blank'); // 원본이 없는 경우 기존 URL(Preview)로 열기
     }
 }
 
@@ -227,6 +327,35 @@ export async function downloadAllPhotos() {
     btn.disabled = false;
     btn.innerText = "📥 전체 사진 다운로드";
     showAlert("조사메모 사진 다운로드가 완료되었습니다.");
+}
+
+/** [추가] R2 사진의 모든 버전(원본, 프리뷰, 썸네일) 삭제 헬퍼 */
+async function deleteR2PhotoVersions(url) {
+    if (!url || !url.includes('r2.dev')) return;
+    
+    const r2Prefix = R2_BASE_URL + '/';
+    const baseFilePath = url.replace(r2Prefix, '');
+    const pathsToDelete = [baseFilePath];
+
+    // [개선] 모든 경로 버전(/preview/, /thumb/, /orig/)을 상호 교차 생성하여 완벽 삭제 보장
+    const versions = ['preview', 'thumb', 'orig'];
+    const currentVersion = versions.find(v => baseFilePath.includes(`/${v}/`));
+
+    if (currentVersion) {
+        versions.forEach(v => {
+            if (v !== currentVersion) {
+                pathsToDelete.push(baseFilePath.replace(`/${currentVersion}/`, `/${v}/`));
+            }
+        });
+    }
+
+    const uniquePaths = [...new Set(pathsToDelete)];
+    await Promise.all(uniquePaths.map(path => 
+        fetch(`${WORKER_URL}/${encodeURIComponent(path)}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': WORKER_AUTH_KEY }
+        }).catch(e => console.warn(`R2 삭제 실패 (${path}):`, e))
+    ));
 }
 
 // [추가] 현재 프로젝트의 모든 사진 일괄 삭제
@@ -262,13 +391,9 @@ export async function deleteAllPhotos() {
                 await callSupabaseDirect(`photos?file_id=eq.${p.fileId}`, 'DELETE');
             }
 
-            // 3. R2 실제 파일 삭제 (Worker 호출)
+            // 3. R2 실제 파일 삭제 (원본/프리뷰/썸네일 일괄 삭제)
             if (p.url && p.url.includes('r2.dev')) {
-                const filePath = p.url.split(R2_BASE_URL + '/')[1];
-                await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': WORKER_AUTH_KEY }
-                });
+                await deleteR2PhotoVersions(p.url);
             }
             deletedCount++;
         } catch (e) {
@@ -288,13 +413,7 @@ export async function deletePhoto(id) {
     // [추가] R2 파일인지 확인 (id가 URL 형태인 경우 대응)
     const photo = state.currentPhotosData.find(p => p.fileId === id);
     if (photo && photo.url && photo.url.includes('r2.dev')) {
-        const filePath = photo.url.replace(R2_BASE_URL + '/', '');
-        try {
-            await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': WORKER_AUTH_KEY }
-            });
-        } catch (e) { console.warn("R2 파일 삭제 실패:", e); }
+        await deleteR2PhotoVersions(photo.url);
     }
 
     callApi('deletePhoto', { fileId: id }).then(() => loadPhotos(state.currentProjectId)); 
@@ -322,12 +441,8 @@ export async function deleteIndividualMemoPhoto(memoId, urlToDelete) {
         if (fileIdMatch) {
             await callApi('deletePhoto', { fileId: fileIdMatch[1] });
         } else if (urlToDelete.includes('r2.dev')) {
-            // [추가] R2 파일 삭제 처리
-            const filePath = urlToDelete.replace(R2_BASE_URL + '/', '');
-            await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': WORKER_AUTH_KEY }
-            });
+            // [추가] R2 파일 삭제 처리 (원본/프리뷰/썸네일 일괄 삭제)
+            await deleteR2PhotoVersions(urlToDelete);
         }
 
         showAlert("사진이 삭제되었습니다.");
@@ -1238,18 +1353,19 @@ async function processMemoSaveBackground(data) {
         
         console.log("[Save] Starting with existing images:", finalImageUrls);
 
-        // 2. 새 사진 파일 업로드 (순차 처리)
+        // 2. 새 사진 파일 업로드 (병렬 처리 및 원본 업로드 복구)
         if (files && files.length > 0) {
-            console.log(`[Save] Uploading ${files.length} new files...`);
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
+            console.log(`[Save] Parallel uploading ${files.length} images (3 versions each)...`);
+            
+            const uploadPromises = files.map(async (file, i) => {
                 try {
-                    let contentType = file.type || "application/octet-stream";
+                     const origContentType = file.type || "application/octet-stream";
+                    let contentType = origContentType;
                     
-                    // [수정] 사용자가 지정한 커스텀 명칭이 있으면 사용, 없으면 메모 내용이나 원본명 사용
-                    let fileNameToUse = file.customSurveyName || content.replace(/[\\/:*?"<>|]/g, "_").substring(0, 50) || "file";
-                    
-                    // 확장자 강제 (이미지의 경우 .jpg)
+                    let safeCustomName = file.customSurveyName ? file.customSurveyName.replace(/[\\/:*?"<>|]/g, "_") : null;
+                    let fileNameToUse = safeCustomName || content.replace(/[\\/:*?"<>|]/g, "_").substring(0, 50) || "file";
+                    fileNameToUse = fileNameToUse.replace(/^\[메모\]\s*/, '');
+
                     if (contentType.startsWith('image/') && !fileNameToUse.toLowerCase().endsWith('.jpg')) {
                         fileNameToUse += '.jpg';
                     }
@@ -1258,59 +1374,64 @@ async function processMemoSaveBackground(data) {
                    
                     const uuid = generateUUID();
                     
-                    // [핵심 변경] 이미지일 경우 Preview와 Thumbnail 두 가지를 생성
                     let previewBlob = file;
                     let thumbBlob = null;
 
                     if (file.type.startsWith('image/')) {
-                        // Preview (상세보기용): 1280px
                         previewBlob = await resizeImage(file, 1280, 0.7);
-                        // Thumbnail (리스트용): 300px
                         thumbBlob = await resizeImage(file, 300, 0.6);
                         contentType = "image/jpeg";
                     }
 
-                    // 1. Thumbnail 업로드 (있는 경우)
+                    const uploadTasks = [];
+
+                    // 1. Thumbnail
+
                     if (thumbBlob) {
                         const thumbPath = `${r2FolderPath}/thumb/${uuid}/${fileNameToUse}`;
-                        const presignThumb = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(thumbPath)}&type=${encodeURIComponent(contentType)}`, {
-                            headers: { 'Authorization': WORKER_AUTH_KEY }
-                        });
-                        const { url: signedThumbUrl } = await presignThumb.json();
-                        await fetch(signedThumbUrl.trim().replace(/[<>]/g, ''), { method: 'PUT', body: thumbBlob, headers: { 'Content-Type': contentType } });
+                         uploadTasks.push((async () => {
+                            const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(thumbPath)}&type=${encodeURIComponent(contentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
+                            const { url } = await res.json();
+                            await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: thumbBlob, headers: { 'Content-Type': contentType } });
+                        })());
                     }
 
-                    // 2. Preview 업로드 및 DB 경로로 사용
+                    // 2. Preview (DB 저장용 URL 기준)
                     const previewPath = `${r2FolderPath}/preview/${uuid}/${fileNameToUse}`;
-                    const presignPreview = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(previewPath)}&type=${encodeURIComponent(contentType)}`, {
-                        method: 'GET',
-                        headers: { 'Authorization': WORKER_AUTH_KEY }
-                    });
+                     uploadTasks.push((async () => {
+                        const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(previewPath)}&type=${encodeURIComponent(contentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
+                        const { url } = await res.json();
+                        const uploadRes = await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: previewBlob, headers: { 'Content-Type': contentType } });
+                        if (!uploadRes.ok) throw new Error("Preview 업로드 실패");
+                    })());
 
-                    if (!presignPreview.ok) throw new Error("Worker 승인 실패");
-                    let { url: signedPreviewUrl } = await presignPreview.json();
-                    const uploadRes = await fetch(signedPreviewUrl.trim().replace(/[<>]/g, ''), {
-                        method: 'PUT',
-                        body: previewBlob,
-                        headers: { 'Content-Type': contentType }
-                    });
+                    // 3. Original (사용자가 입력한 이름 유지)
+                    const origPath = `${r2FolderPath}/orig/${uuid}/${fileNameToUse}`;
+                    uploadTasks.push((async () => {
+                        const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(origPath)}&type=${encodeURIComponent(origContentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
+                        const { url } = await res.json();
+                        const uploadRes = await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: file, headers: { 'Content-Type': origContentType } });
+                        if (uploadRes.ok) console.log(`[R2 Original Success] ${i+1}:`, origPath);
+                    })());
 
-                    if (uploadRes.ok) {
-                        const finalUrl = `${R2_BASE_URL}/${previewPath}`;
-                        finalImageUrls.push(finalUrl);
-                        console.log(`[R2 Upload Success] ${i+1}/${files.length}:`, finalUrl);
-                    } else {
-                        throw new Error("R2 직접 전송 실패");
-                    }
+                    await Promise.all(uploadTasks);
+                    return `${R2_BASE_URL}/${previewPath}`;
                 } catch (err) {
-                    console.error(`이미지 처리 중 오류 (${file.name}):`, err);
-                    return false;
+                     console.error(`이미지 처리 실패 (${file.name}):`, err);
+                    throw err;
                 }
+            });
+
+            try {
+                const uploadedUrls = await Promise.all(uploadPromises);
+                finalImageUrls.push(...uploadedUrls);
+            } catch (e) {
+                showAlert("일부 사진 업로드에 실패했습니다.", "error");
+                return false;
             }
         }
 
         // 3. 최종 이미지 URL 문자열 생성
-        // [수정] 배열이 비어있을 경우 명확히 null 처리를 하거나 빈 문자열 유지
         const imageUrlString = finalImageUrls.length > 0 ? finalImageUrls.map(u => String(u).trim()).filter(u => u !== "").join(',') : "";
 
         // [추가] 조사 모드에서 메모 내용(텍스트) 변경에 따른 R2 파일명 동기화 (Rename)
@@ -1389,7 +1510,8 @@ async function processMemoSaveBackground(data) {
         await loadMemoList(); // [수정] 데이터 로드가 끝날 때까지 대기
         if (window.loadMapMemos) await window.loadMapMemos();
         
-        // 전역 파일 배열 초기화 및 성공 반환
+        // 성공 반환 (팝업 닫힘 제어)
+        return true;
     } catch (e) {
         console.error("백그라운드 저장 실패:", e);
         showAlert("저장 중 오류가 발생했습니다: " + e.message, "error");
@@ -1663,8 +1785,8 @@ export function handleMemoFileSelect(input, previewId) {
     for (const file of files) {
         // [추가] 조사 모드일 경우 파일마다 명칭 입력 받기
         if (state.isSurveyMode) {
-            const contentInput = document.getElementById('popupMemoInput') || document.getElementById('memoContentInput');
-            const defaultName = (contentInput && contentInput.value.trim()) || file.name.split('.')[0];
+            // [수정] 입력란을 공백으로 제공하여 사용자가 직접 입력하도록 변경
+            const defaultName = ''; 
             
             const customName = prompt(`파일 '${file.name}'의 조사 명칭(파일명)을 입력하세요:`, defaultName);
             
@@ -1817,10 +1939,81 @@ export function downloadMemosCSV() {
     document.body.removeChild(link);
 }
 
+/** [추가] 백그라운드 업로드 큐 관리 */
+function addFileToUploadQueue(file, r2Path, contentType) {
+    state.uploadQueue.push({ file, r2Path, contentType });
+    processUploadQueue();
+}
+
+async function processUploadQueue() {
+    // 큐가 비어있거나, 이미 4개(MAX_CONCURRENT_UPLOADS)가 진행 중이면 중단
+    if (state.uploadQueue.length === 0 || state.activeUploads >= state.MAX_CONCURRENT_UPLOADS) {
+        updateUploadStatusUI();
+        return;
+    }
+    
+    state.activeUploads++; // 활성 업로드 카운트 증가
+    const item = state.uploadQueue.shift(); // 큐의 맨 앞 항목을 꺼냄
+    
+    // 헤더 등에 업로드 중임을 표시하는 UI 요소가 있다면 업데이트 가능
+    updateUploadStatusUI();
+
+    try {
+        console.log(`[Background Upload] Starting: ${item.r2Path}`);
+        const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(item.r2Path)}&type=${encodeURIComponent(item.contentType)}`, {
+            headers: { 'Authorization': WORKER_AUTH_KEY }
+        });
+        const { url: signedUrl } = await presignRes.json();
+        
+        // [수정] 데이터 전송 안정성을 위해 ArrayBuffer로 변환 후 PUT 요청
+        const fileBuffer = await item.file.arrayBuffer();
+        
+        const uploadRes = await fetch(signedUrl.trim().replace(/[<>]/g, ''), {
+            method: 'PUT',
+            body: fileBuffer,
+            headers: { 'Content-Type': item.contentType }
+        });
+
+        if (!uploadRes.ok) {
+            throw new Error(`R2 Upload Status: ${uploadRes.status}`);
+        }
+        
+        console.log(`[Background Upload] Completed: ${item.r2Path}`);
+    } catch (e) {
+        console.warn(`[Background Upload] Failed: ${item.r2Path}`, e);
+        // 실패 시 재시도 로직을 넣거나 큐에서 제거
+    } finally {
+        state.activeUploads--; // 활성 업로드 카운트 감소
+        updateUploadStatusUI();
+        // 작업이 하나 끝났으므로, 큐에 남은 작업이 있다면 다시 시도
+        processUploadQueue(); 
+    }
+}
+
+function updateUploadStatusUI() {
+    const count = state.uploadQueue.length;
+    let userInfo = document.getElementById('userInfoDisplay');
+    if (!userInfo) return;
+    
+    let statusEl = document.getElementById('bgUploadStatus');
+    if (!statusEl) {
+        statusEl = document.createElement('span');
+        statusEl.id = 'bgUploadStatus';
+        statusEl.style.cssText = 'margin-left: 10px; font-size: 11px; color: #ffeb3b; font-weight: bold;';
+        userInfo.appendChild(statusEl);
+    }
+    
+    if (count > 0 || state.activeUploads > 0) {
+        statusEl.innerText = `⏳ 원본 업로드 중 (대기: ${count}, 진행: ${state.activeUploads})`;
+    } else {
+        statusEl.innerText = '';
+    }
+}
 // window 객체에 바인딩 (viewers.js의 popup에서 호출)
 window.openMemoProjectFilter = openMemoProjectFilter;
 window.setMemoFilter = setMemoFilter;
 window.downloadPhotoFile = downloadPhotoFile;
+window.cleanupR2Orphans = cleanupR2Orphans;
 window.downloadAllPhotos = downloadAllPhotos;
 window.saveMemo = saveMemo; // [추가]
 window.roomCreateProject = roomCreateProject; // [추가]

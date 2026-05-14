@@ -216,7 +216,7 @@ export async function downloadAllPhotos() {
 
     const btn = document.getElementById('pmDownloadAllBtn');
     btn.disabled = true;
-    btn.innerText = "⏳ 다운로드 중...";
+    btn.innerHTML = "⏳";
 
     for (let i = 0; i < surveyPhotos.length; i++) {
         const p = surveyPhotos[i];
@@ -226,7 +226,7 @@ export async function downloadAllPhotos() {
     }
 
     btn.disabled = false;
-    btn.innerText = "📥 전체 사진 다운로드";
+    btn.innerHTML = "📥";
     showAlert("조사메모 사진 다운로드가 완료되었습니다.");
 }
 
@@ -244,7 +244,7 @@ export async function deleteAllPhotos() {
 
     for (let i = 0; i < photosToDelete.length; i++) {
         const p = photosToDelete[i];
-        btn.innerText = `⏳ 삭제 중... (${i + 1}/${photosToDelete.length})`;
+        btn.innerHTML = `⏳ ${i + 1}/${photosToDelete.length}`;
 
         try {
             if (p.isMemoPhoto) {
@@ -1137,18 +1137,19 @@ async function processMemoSaveBackground(data) {
         
         console.log("[Save] Starting with existing images:", finalImageUrls);
 
-        // 2. 새 사진 파일 업로드 (병렬 처리로 속도 향상)
+        // 2. 새 사진 파일 업로드 (프리뷰/썸네일 우선 처리)
         if (files && files.length > 0) {
-            console.log(`[Save] Uploading ${files.length} new files in parallel...`);
+            console.log(`[Save] Processing ${files.length} files...`);
             
-            // 각 파일의 업로드를 Promise로 변환
-            const uploadPromises = files.map(async (file, i) => {
+             const fastUploadPromises = files.map(async (file, i) => {
                 try {
-                    let uploadData = file; // 기본은 원본
-                    let contentType = file.type || "application/octet-stream";
+                    const origContentType = file.type || "application/octet-stream";
+                    let contentType = origContentType;
                     
                     // [수정] 사용자가 지정한 커스텀 명칭이 있으면 사용, 없으면 메모 내용이나 원본명 사용
-                    let fileNameToUse = file.customSurveyName || content.replace(/[\\/:*?"<>|]/g, "_").substring(0, 50) || "file";
+                    // [수정] 사용자 입력 명칭에도 특수문자 제거 필터 적용 (R2 경로 오류 방지)
+                    let safeCustomName = file.customSurveyName ? file.customSurveyName.replace(/[\\/:*?"<>|]/g, "_") : null;
+                    let fileNameToUse = safeCustomName || content.replace(/[\\/:*?"<>|]/g, "_").substring(0, 50) || "file";
                     
                     // [수정] 최종 파일명에서 [메모] 제거
                     fileNameToUse = fileNameToUse.replace(/^\[메모\]\s*/, '');
@@ -1159,40 +1160,60 @@ async function processMemoSaveBackground(data) {
                     }
 
                     let r2FolderPath = isSurvey ? `survey_memo_photo/${projectId}` : `memos_photo/${projectId}`;
+                   
+                    const uuid = generateUUID();
 
-                    if (!isSurvey) {
-                        // 일반 메모일 경우 사진 리사이징 수행
-                        if (file.type.startsWith('image/')) {
-                            uploadData = await resizeImage(file);
-                            contentType = "image/jpeg";
-                        }
+                     let previewBlob = file;
+                    let thumbBlob = null;
+
+                    if (file.type.startsWith('image/')) {
+                        // [최적화] 프리뷰(1280px)와 썸네일(300px) 생성 - 용량이 작아 LTE에서 매우 빠름
+                        previewBlob = await resizeImage(file, 1280, 0.7);
+                        thumbBlob = await resizeImage(file, 300, 0.6);
+                        contentType = "image/jpeg";
                     }
 
-                    const uuid = generateUUID();
-                    // [수정] 경로 구조 변경: UUID를 폴더로 사용하여 다운로드 시 파일명 보존 (UUID/1001.jpg)
-                    const r2Path = `${r2FolderPath}/${uuid}/${fileNameToUse}`;
+                    // [Fast Track 1] Thumbnail 업로드
+                    if (thumbBlob) {
+                        const thumbPath = `${r2FolderPath}/thumb/${uuid}/${fileNameToUse}`;
+                        const presignThumb = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(thumbPath)}&type=${encodeURIComponent(contentType)}`, {
+                            headers: { 'Authorization': WORKER_AUTH_KEY }
+                        });
+                        const { url: signedThumbUrl } = await presignThumb.json();
+                        await fetch(signedThumbUrl.trim().replace(/[<>]/g, ''), { method: 'PUT', body: thumbBlob, headers: { 'Content-Type': contentType } });
+                    }
 
-                    // 1. Worker에게 서명된 URL 요청
-                    const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}&type=${encodeURIComponent(contentType)}`, {
+                    // [Fast Track 2] Preview 업로드
+                    const previewPath = `${r2FolderPath}/preview/${uuid}/${fileNameToUse}`;
+                    const presignPreview = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(previewPath)}&type=${encodeURIComponent(contentType)}`, {
                         method: 'GET',
                         headers: { 'Authorization': WORKER_AUTH_KEY }
                     });
-
-                    if (!presignRes.ok) throw new Error("Worker 승인 실패: " + await presignRes.text());
-                    let { url: signedUrl } = await presignRes.json();
-                    signedUrl = signedUrl.trim().replace(/[<>]/g, '');
-
-                    // 2. R2로 직접 전송 (Presigned URL 방식)
-                    const uploadRes = await fetch(signedUrl, {
+                    const { url: signedPreviewUrl } = await presignPreview.json();
+                    const uploadRes = await fetch(signedPreviewUrl.trim().replace(/[<>]/g, ''), {
                         method: 'PUT',
-                        body: uploadData,
+                        body: previewBlob,
                         headers: { 'Content-Type': contentType }
                     });
 
                     if (uploadRes.ok) {
-                        const finalUrl = `${R2_BASE_URL}/${r2Path}`;
-                        console.log(`[R2 Upload Success] ${i+1}/${files.length}:`, finalUrl);
-                        return finalUrl; // 성공한 URL 반환
+                       // [수정] 원본 파일도 병렬로 함께 업로드 (백그라운드 큐 방식 폐기)
+                         if (isSurvey) {
+                             const origPath = `${r2FolderPath}/orig/${uuid}/${fileNameToUse}`;
+                             const presignOrig = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(origPath)}&type=${encodeURIComponent(origContentType)}`, {
+                                 headers: { 'Authorization': WORKER_AUTH_KEY }
+                             });
+                             const { url: signedOrigUrl } = await presignOrig.json();
+                             await fetch(signedOrigUrl.trim().replace(/[<>]/g, ''), {
+                                 method: 'PUT',
+                                 body: file,
+                                 headers: { 'Content-Type': origContentType }
+                             });
+                             console.log(`[R2 Original Success] ${i+1}:`, origPath);
+                         }
+
+                        const finalUrl = `${R2_BASE_URL}/${previewPath}`;
+                        return finalUrl;  
                     } else {
                         throw new Error("R2 직접 전송 실패");
                     }
@@ -1202,9 +1223,8 @@ async function processMemoSaveBackground(data) {
                 }
             });
 
-            // 병렬 업로드 실행 및 결과 수집
             try {
-                const uploadedUrls = await Promise.all(uploadPromises);
+                const uploadedUrls = await Promise.all(fastUploadPromises);
                 finalImageUrls.push(...uploadedUrls); // 성공한 URL들 추가
             } catch (err) {
                 console.error("병렬 업로드 중 일부 실패:", err);
@@ -1629,7 +1649,7 @@ async function renderMemoFiles(previewId) {
                 // [개선] 업로드 전 미리보기 단계에서도 리사이징된 썸네일을 사용하여 메모리 부하 및 렉 방지
                 try {
                     const thumbnailBlob = await resizeImage(file, 100, 0.7);
-                    url = (window.URL || window.webkitURL).createObjectURL(tempThumb);
+                    url = (window.URL || window.webkitURL).createObjectURL(thumbnailBlob);
                 } catch (e) {
                     // 실패 시 원본 사용
                     url = (window.URL || window.webkitURL).createObjectURL(file);
