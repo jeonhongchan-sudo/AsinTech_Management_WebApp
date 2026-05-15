@@ -85,8 +85,22 @@ export function openPhotoManager(id, name) {
   document.getElementById('pmProjectName').innerText = name; // 프로젝트 이름만 표시
 
   document.getElementById('projects-tab').style.display = 'none';
-  document.getElementById('photo-manager-interface').style.display = 'block';
+  const pmInterface = document.getElementById('photo-manager-interface');
+  pmInterface.style.display = 'block';
   document.getElementById('mainTabs').style.display = 'none';
+  
+  // [추가] 백업 관리 버튼 동적 삽입 (기존 버튼 옆)
+  let btnArea = document.querySelector('.pm-actions'); // [수정] index.html의 클래스명과 일치시킴
+  if (btnArea && !document.getElementById('pmBackupOpenBtn')) {
+      const backupBtn = document.createElement('button');
+      backupBtn.id = 'pmBackupOpenBtn';
+      backupBtn.className = 'btn btn-outline';
+      backupBtn.style.marginLeft = '5px';
+      backupBtn.innerHTML = '☁️';
+      backupBtn.onclick = () => openBackupManager(id, name);
+      btnArea.appendChild(backupBtn);
+  }
+
   loadPhotos(id);
 }
 
@@ -184,6 +198,87 @@ function renderPhotos(res) {
    });
    container.innerHTML = html;
 }
+
+/** [추가] 구글 드라이브 백업 관리자 오픈 */
+export async function openBackupManager(projectId, projectName) {
+    const modal = document.getElementById('backupManagerModal'); // HTML에 신규 추가 필요
+    if (!modal) {
+        alert("백업 관리 UI를 준비 중입니다. (HTML 업데이트 필요)");
+        return;
+    }
+    modal.style.display = 'flex';
+    document.getElementById('backupTargetProject').innerText = projectName;
+    loadBackupFiles(projectId);
+}
+
+/** [추가] 백업 파일 목록 로드 */
+export async function loadBackupFiles(projectId) {
+    const listEl = document.getElementById('backupFileList');
+    listEl.innerHTML = '<tr><td colspan="3" style="text-align:center;">백업 확인 중...</td></tr>';
+    
+    try {
+        const res = await callApi('getBackupFiles', { projectId });
+        if (!res.success) throw new Error(res.error);
+        
+        let html = '';
+        if (res.files && res.files.length > 0) {
+            // [추가] 라이트박스(미리보기) 연동을 위한 데이터 변환 및 전역 저장
+            window.currentBackupPhotos = res.files.map(f => ({
+                fileName: f.name,
+                fileId: f.id,
+                url: null, // ID 기반 프리뷰(lh3) 강제 사용
+                backupDownloadUrl: f.downloadUrl, // 백업 전용 다운로드 경로 보관
+                isSurvey: true // 다운로드(저장) 버튼 활성화용
+            }));
+
+            res.files.forEach((f, i) => {
+                const sizeKB = (f.size / 1024).toFixed(1);
+                html += `<tr>
+                    <td style="font-size:12px; word-break:break-all;">${f.name}</td>
+                    <td style="text-align:right; font-size:11px; color:#666;">${sizeKB}KB</td>
+                    <td style="text-align:center;">
+                        <button class="btn btn-info" style="padding:2px 5px; font-size:11px;" onclick="window.openBackupLightbox(${i})">보기</button>
+                        <button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteBackupFile('${f.id}', '${projectId}')">삭제</button>
+                    </td>
+                </tr>`;
+            });
+        } else {
+            html = '<tr><td colspan="3" style="text-align:center; padding:20px;">백업된 파일이 없습니다.</td></tr>';
+        }
+        listEl.innerHTML = html;
+        state.currentBackupProjectId = projectId;
+    } catch (e) {
+        listEl.innerHTML = `<tr><td colspan="3" style="text-align:center; color:red;">로드 실패: ${e.message}</td></tr>`;
+    }
+}
+
+/** [추가] 백업 파일 개별 삭제 */
+window.deleteBackupFile = async function(fileId, projectId) {
+    if (!confirm("구글 드라이브에서 이 백업 원본을 삭제하시겠습니까?\n(R2의 파일은 유지됩니다)")) return;
+    try {
+        const res = await callApi('deleteBackupFile', { fileId });
+        if (res.success) {
+            showAlert("백업 파일이 삭제되었습니다.");
+            loadBackupFiles(projectId);
+        }
+    } catch (e) { alert("삭제 실패: " + e.message); }
+};
+
+/** [추가] 프로젝트 백업 전체 삭제 */
+window.deleteAllBackupFiles = async function() {
+    const projectId = state.currentBackupProjectId;
+    if (!projectId) return;
+    if (!confirm("이 프로젝트의 모든 구글 드라이브 백업 파일을 삭제하시겠습니까?\n작업이 완료된 데이터 정리용으로만 사용하세요.")) return;
+    
+    try {
+        showAlert("전체 삭제 중...", "info");
+        const res = await callApi('clearBackupFolder', { projectId });
+        if (res.success) {
+            showAlert(`${res.count}개의 백업 파일이 삭제되었습니다.`);
+            loadBackupFiles(projectId);
+        }
+    } catch (e) { alert("전체 삭제 실패: " + e.message); }
+};
 
 export async function cleanupR2Orphans() {
     const isAdmin = state.adminUser && state.currentUser && state.currentUser.toLowerCase() === state.adminUser.toLowerCase();
@@ -513,6 +608,9 @@ function updateLightboxImage() {
     if (p.isSurvey && fullImageUrl.includes('r2.dev') && fullImageUrl.includes('/preview/')) {
         originalUrl = fullImageUrl.replace('/preview/', '/orig/').replace('.webp', '.jpg');
     }
+
+    // [추가] 구글 드라이브 백업 파일인 경우 전용 다운로드 URL로 교체
+    if (p.backupDownloadUrl) originalUrl = p.backupDownloadUrl;
 
     document.getElementById('lightboxImg').src = fullImageUrl; // 미리보기 화면은 속도를 위해 Preview 유지
     
@@ -2098,6 +2196,15 @@ function updateUploadStatusUI() {
         statusEl.innerText = '';
     }
 }
+
+/** [추가] 백업 파일 전용 라이트박스 오픈 함수 */
+window.openBackupLightbox = function(index) {
+    if (window.currentBackupPhotos && window.currentBackupPhotos.length > 0) {
+        state.currentPhotosData = window.currentBackupPhotos;
+        openLightbox(index);
+    }
+};
+
 // window 객체에 바인딩 (viewers.js의 popup에서 호출)
 window.openMemoProjectFilter = openMemoProjectFilter;
 window.setMemoFilter = setMemoFilter;

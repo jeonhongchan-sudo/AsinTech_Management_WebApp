@@ -344,7 +344,7 @@
     <a class="lightbox-prev" onclick="navigateLightbox(-1)">&#10094;</a>
     <a class="lightbox-next" onclick="navigateLightbox(1)">&#10095;</a>
     <div class="lightbox-tools">
-        <a id="lightboxDownloadBtn" href="#" target="_blank" class="btn btn-primary" style="padding:5px 10px; font-size:12px;">원본 열기</a>
+        <a id="lightboxDownloadBtn" href="#" target="_blank" class="btn btn-primary" style="padding:5px 10px; font-size:12px;">다운로드</a>
     </div>
   </div>
 
@@ -601,6 +601,27 @@
         </div>
 
         <div id="cadProcessConfig" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- [추가] 구글 드라이브 백업 관리 모달 -->
+  <div id="backupManagerModal" class="lightbox-overlay" style="display: none; z-index: 3020;">
+    <div class="container" style="max-width: 500px; width: 95%; min-height: auto; padding: 20px; background: white; border-radius: 8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;">
+            <h3 style="margin:0;">☁️ 백업 원본 관리</h3>
+            <button class="btn btn-secondary" onclick="document.getElementById('backupManagerModal').style.display='none'">닫기</button>
+        </div>
+        <div style="margin-bottom:10px; font-size:13px; color:#666;">
+            대상: <span id="backupTargetProject" style="font-weight:bold; color:#333;"></span>
+        </div>
+        <div style="max-height: 350px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; margin-bottom: 15px;">
+            <table class="list-view-table" style="margin-top:0; font-size:13px;">
+                <tbody id="backupFileList"></tbody>
+            </table>
+        </div>
+        <div style="display:flex; gap:10px;">
+            <button class="btn btn-danger" style="flex:1; padding:10px; font-weight:bold;" onclick="window.deleteAllBackupFiles()">폴더 내 전체삭제 (정리)</button>
+        </div>
     </div>
   </div>
 

@@ -77,6 +77,9 @@ function handleApiRequest(e) {
 
       // [메모 관리]
       case 'uploadToDrive': response = uploadToDrive(e.parameter.fileName, e.parameter.fileData, e.parameter.mimeType, e.parameter.projectId); break;
+      case 'getBackupFiles': response = getBackupFiles(e.parameter.projectId); break;
+      case 'deleteBackupFile': response = deleteBackupFile(e.parameter.fileId); break;
+      case 'clearBackupFolder': response = clearBackupFolder(e.parameter.projectId); break;
 
       default: response = { success: false, error: 'Unknown action' };
     }
@@ -646,6 +649,60 @@ function uploadToDrive(fileName, fileData, mimeType, projectId) {
     
     return { success: true, url: url, fileId: fileId };
   } catch (e) { return { success: false, error: '드라이브 업로드 실패: ' + e.toString() }; }
+}
+
+/** [추가] 백업된 파일 목록 조회 */
+function getBackupFiles(projectId) {
+  try {
+    const parentFolder = DriveApp.getFolderById(CONFIG.MEMO_PHOTO_FOLDER_ID);
+    const subFolders = parentFolder.getFoldersByName(projectId);
+    if (!subFolders.hasNext()) return { success: true, files: [] };
+    
+    const folder = subFolders.next();
+    const files = folder.getFiles();
+    const result = [];
+    while (files.hasNext()) {
+      const f = files.next();
+      result.push({
+        id: f.getId(),
+        name: f.getName(),
+        size: f.getSize(),
+        date: f.getDateCreated().getTime(),
+        url: f.getUrl(), // 드라이브 뷰어 URL
+        downloadUrl: f.getDownloadUrl() // 직접 다운로드 URL
+      });
+    }
+    // 최신순 정렬
+    result.sort((a, b) => b.date - a.date);
+    return { success: true, files: result };
+  } catch (e) { return { success: false, error: e.toString() }; }
+}
+
+/** [추가] 백업 파일 개별 삭제 */
+function deleteBackupFile(fileId) {
+  try {
+    DriveApp.getFileById(fileId).setTrashed(true);
+    return { success: true };
+  } catch (e) { return { success: false, error: e.toString() }; }
+}
+
+/** [추가] 프로젝트 백업 폴더 전체 삭제 (비우기) */
+function clearBackupFolder(projectId) {
+  try {
+    const parentFolder = DriveApp.getFolderById(CONFIG.MEMO_PHOTO_FOLDER_ID);
+    const subFolders = parentFolder.getFoldersByName(projectId);
+    if (subFolders.hasNext()) {
+      const folder = subFolders.next();
+      const files = folder.getFiles();
+      let count = 0;
+      while (files.hasNext()) {
+        files.next().setTrashed(true);
+        count++;
+      }
+      return { success: true, count: count };
+    }
+    return { success: true, count: 0 };
+  } catch (e) { return { success: false, error: e.toString() }; }
 }
 
 // [수정] 오래된 메모 아카이빙 (동기화 및 정리)
