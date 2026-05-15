@@ -1575,6 +1575,7 @@ async function processMemoSaveBackground(data) {
             username: user,
             is_public: isPublic,
             is_survey: isSurvey, // [추가] 조사 메모 여부 저장
+            backup_status: isSurvey ? 'pending' : 'none', // [추가] 백업 대기 상태 설정
             image_url: finalImageUrlString,
             tm_x: validTmX,
             tm_y: validTmY,
@@ -1591,6 +1592,18 @@ async function processMemoSaveBackground(data) {
             payload.created_at = new Date().toISOString();
             await callSupabaseDirect('memos', 'POST', payload);
             showAlert("새 메모가 저장되었습니다.");
+        }
+
+        // [추가] 조사 메모인 경우 클라우드 서버 간 백업(GitHub Actions) 트리거 전송
+        if (isSurvey) {
+            fetch(`${WORKER_URL}/dispatch`, {
+                method: 'POST',
+                headers: { 'Authorization': WORKER_AUTH_KEY, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    event_type: "backup_to_drive", // 새로 만들 워크플로우 이벤트명
+                    client_payload: { project_id: projectId }
+                })
+            }).catch(err => console.warn("[Backup] 서버 백업 요청 실패:", err));
         }
 
         // 6. UI 및 상태 갱신

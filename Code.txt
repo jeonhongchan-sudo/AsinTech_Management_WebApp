@@ -76,7 +76,7 @@ function handleApiRequest(e) {
       case 'triggerGitHubAction': response = triggerGitHubAction(e.parameter.projectId); break;
 
       // [메모 관리]
-      case 'uploadToDrive': response = uploadToDrive(e.parameter.fileName, e.parameter.fileData, e.parameter.mimeType); break;
+      case 'uploadToDrive': response = uploadToDrive(e.parameter.fileName, e.parameter.fileData, e.parameter.mimeType, e.parameter.projectId); break;
 
       default: response = { success: false, error: 'Unknown action' };
     }
@@ -611,9 +611,22 @@ function triggerGitHubAction(projectId) {
 // [메모 관리] 구글 드라이브/시트 연동 함수
 // ==========================================
 
-function uploadToDrive(fileName, fileData, mimeType) {
+function uploadToDrive(fileName, fileData, mimeType, projectId) {
   try {
-    const folder = DriveApp.getFolderById(CONFIG.MEMO_PHOTO_FOLDER_ID);
+    let folder = DriveApp.getFolderById(CONFIG.MEMO_PHOTO_FOLDER_ID);
+
+    // [추가] 프로젝트 ID별 하위 폴더 자동 생성 및 분류 로직
+    if (projectId) {
+      const subFolders = folder.getFoldersByName(projectId);
+      if (subFolders.hasNext()) {
+        folder = subFolders.next();
+      } else {
+        // 폴더가 없으면 새로 생성하고 외부 접근 권한(링크가 있는 모든 사용자) 부여
+        folder = folder.createFolder(projectId);
+        try { folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+      }
+    }
+
     const decoded = Utilities.base64Decode(fileData);
     const blob = Utilities.newBlob(decoded, mimeType, fileName);
     const file = folder.createFile(blob);
