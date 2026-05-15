@@ -102,9 +102,9 @@ document.addEventListener('click', function(e) {
 });
 
 // [수정] 메모 위치로 이동 (프로젝트 로드 -> 탭 전환 -> 지도 이동)
-window.viewMemoOnMap = async function(projectId, lon, lat, memoId, fromHistory = false) {
+window.viewMemoOnMap = async function(projectId, lon, lat, memoId) {
     state.highlightedMemoId = memoId; // [추가] 강조할 메모 ID 설정
-    switchTab('cadViewer', fromHistory);
+    switchTab('cadViewer');
     
     // 현재 로드된 프로젝트가 해당 메모의 프로젝트와 다르면 로드
     if (state.currentCadProjectId !== projectId) {
@@ -190,15 +190,13 @@ export async function startConversionObserver() {
 }
 
 // 탭 전환 로직
-export function switchTab(tabName, fromHistory = false) {
+export function switchTab(tabName) {
   if (tabName !== 'photo-manager') document.getElementById('photo-manager-interface').style.display = 'none';
   
   // [수정] 탭 전환 시 지도 뷰어 처리 (메모 탭 독립성 확보를 위해 원복)
   if (tabName === 'cadViewer') initCadViewer(); else cleanupCadViewer();
   
   document.getElementById('mainTabs').style.display = 'flex';
-
-  if (!fromHistory) history.pushState({ tab: tabName }, '');
 
   state.currentProjectId = null;
 
@@ -385,8 +383,9 @@ document.addEventListener('DOMContentLoaded', function() {
       if (input) input.value = savedUser;
   }
 
-  // [추가] 뒤로가기 버튼 처리 (모바일 종료 방지 및 모달 닫기)
-  if (!history.state) history.replaceState({ tab: 'cadViewer' }, '');
+  // [수정] 뒤로가기 버튼 처리 - 탭 기록 대신 종료 확인 및 모달 닫기만 수행
+  // 앱 시작 시 기록을 하나 추가하여 첫 뒤로가기가 앱 종료가 되지 않도록 방어
+  history.pushState({ root: true }, '');
 
   window.onpopstate = function(e) {
       const overlays = [
@@ -405,12 +404,21 @@ document.addEventListener('DOMContentLoaded', function() {
           if (el && el.style.display !== 'none' && el.style.display !== '') {
               if (o.close) o.close(true);
               else el.style.display = 'none';
+              
+              // 팝업을 닫은 후 다시 방어 상태로 복구 (기록 누적 방지)
+              history.pushState({ root: true }, '');
               return;
           }
       }
 
-      if (e.state && e.state.tab) {
-          switchTab(e.state.tab, true);
+      // 모든 팝업이 닫힌 상태에서 뒤로가기 시 종료 확인
+      if (confirm("앱을 종료하시겠습니까?")) {
+          // 사용자가 확인을 누르면 기록을 더 이상 추가하지 않고 브라우저가 뒤로 가게 둡니다.
+          // (보통 이전 사이트로 이동하거나 탭이 닫힘)
+          history.back();
+      } else {
+          // 취소를 누르면 다시 방어 상태 유지
+          history.pushState({ root: true }, '');
       }
   }
 

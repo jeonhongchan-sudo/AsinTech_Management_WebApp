@@ -87,17 +87,14 @@ export function openPhotoManager(id, name) {
   document.getElementById('projects-tab').style.display = 'none';
   document.getElementById('photo-manager-interface').style.display = 'block';
   document.getElementById('mainTabs').style.display = 'none';
-  
-  history.pushState({ overlay: 'photo' }, '');
   loadPhotos(id);
 }
 
-export function closePhotoManager(fromHistory = false) {
-    if (!fromHistory && document.getElementById('photo-manager-interface').style.display !== 'none') { history.back(); return; }
+export function closePhotoManager() {
     state.currentProjectId = null; 
     document.getElementById('photo-manager-interface').style.display = 'none'; 
     document.getElementById('mainTabs').style.display = 'flex'; 
-    switchTab('projects', fromHistory); 
+    switchTab('projects'); 
 }
 
 export async function loadPhotos(id) {
@@ -495,15 +492,12 @@ export async function deleteIndividualMemoPhoto(memoId, urlToDelete) {
 }
 
 // --- Lightbox ---
-export function openLightbox(i) { state.currentLightboxIndex = i; document.getElementById('lightboxOverlay').style.display = 'flex'; updateLightboxImage(); history.pushState({ overlay: 'lightbox' }, ''); }
+export function openLightbox(i) { state.currentLightboxIndex = i; document.getElementById('lightboxOverlay').style.display = 'flex'; updateLightboxImage(); }
 
 export function closeLightbox(e) {
-    // [수정] 배경(Overlay)을 클릭했을 때만 닫히도록 방어 로직 추가 
-    // 이전/다음 버튼이나 이미지 자체를 클릭했을 때 창이 닫히는 현상을 방지합니다.
-    if (e === true) { /* from popstate */ }
-    else if (e && e.target !== e.currentTarget) return;
-    else { if (document.getElementById('lightboxOverlay').style.display !== 'none') history.back(); return; }
-
+    // [수정] 배경(Overlay) 클릭 또는 뒤로가기(e === true) 시 닫기
+    if (e !== true && e && e.target !== e.currentTarget) return;
+    
     document.getElementById('lightboxOverlay').style.display = 'none'; 
     document.getElementById('lightboxImg').src = ''; 
 }
@@ -547,12 +541,10 @@ function updateLightboxImage() {
 // --- Admin Manager ---
 export function openAdminPage() {
     document.getElementById('adminOverlay').style.display = 'flex';
-    history.pushState({ overlay: 'admin' }, '');
     loadAdminData();
 }
 
-export function closeAdminPage(fromHistory = false) {
-    if (!fromHistory && document.getElementById('adminOverlay').style.display !== 'none') { history.back(); return; }
+export function closeAdminPage() {
     document.getElementById('adminOverlay').style.display = 'none';
 }
 
@@ -675,12 +667,10 @@ export async function renameUser(oldName) {
 
 export function openRoomManagerPage() {
     document.getElementById('roomManagerOverlay').style.display = 'flex';
-    history.pushState({ overlay: 'room' }, '');
     switchRoomView('main'); // 처음 열면 메인 메뉴 표시
 }
 
-export function closeRoomManagerPage(fromHistory = false) {
-    if (!fromHistory && document.getElementById('roomManagerOverlay').style.display !== 'none') { history.back(); return; }
+export function closeRoomManagerPage() {
     document.getElementById('roomManagerOverlay').style.display = 'none';
 }
 
@@ -1277,7 +1267,6 @@ export async function openMemoProjectFilter() {
     const listEl = document.getElementById('memoFilterList');
     listEl.innerHTML = '<div style="padding:10px; text-align:center;">로딩 중...</div>';
     modal.style.display = 'flex';
-    history.pushState({ overlay: 'memoFilter' }, '');
 
     try {
         const projects = await callSupabaseDirect('cad_projects?select=id,name&order=name.asc');
@@ -1793,7 +1782,6 @@ export async function openGeneralMemoModal() {
     
     // [추가] 전역 파일 배열 초기화
     window.currentMemoFiles = [];
-    history.pushState({ overlay: 'memo' }, '');
 
     // [수정] 일반 메모(공지/지침) 작성 시 파일 첨부 허용 및 명칭 변경 지원
     setTimeout(() => {

@@ -1048,7 +1048,6 @@ export function openLayerStyleModal() {
     const modal = document.getElementById('layerStyleModal');
     if (!modal) return;
     modal.style.display = 'flex';
-    history.pushState({ overlay: 'style' }, '');
 
     // 현재 라벨 설정값 동기화
     const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
@@ -1111,8 +1110,7 @@ function renderModalEditLists() {
     });
 }
 
-export function closeLayerStyleModal(fromHistory = false) {
-    if (!fromHistory && document.getElementById('layerStyleModal').style.display !== 'none') { history.back(); return; }
+export function closeLayerStyleModal() {
     document.getElementById('layerStyleModal').style.display = 'none';
 }
 
