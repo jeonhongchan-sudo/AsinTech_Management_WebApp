@@ -102,9 +102,9 @@ document.addEventListener('click', function(e) {
 });
 
 // [수정] 메모 위치로 이동 (프로젝트 로드 -> 탭 전환 -> 지도 이동)
-window.viewMemoOnMap = async function(projectId, lon, lat, memoId) {
+window.viewMemoOnMap = async function(projectId, lon, lat, memoId, fromHistory = false) {
     state.highlightedMemoId = memoId; // [추가] 강조할 메모 ID 설정
-    switchTab('cadViewer');
+    switchTab('cadViewer', fromHistory);
     
     // 현재 로드된 프로젝트가 해당 메모의 프로젝트와 다르면 로드
     if (state.currentCadProjectId !== projectId) {
@@ -190,13 +190,16 @@ export async function startConversionObserver() {
 }
 
 // 탭 전환 로직
-export function switchTab(tabName) {
+export function switchTab(tabName, fromHistory = false) {
   if (tabName !== 'photo-manager') document.getElementById('photo-manager-interface').style.display = 'none';
   
   // [수정] 탭 전환 시 지도 뷰어 처리 (메모 탭 독립성 확보를 위해 원복)
   if (tabName === 'cadViewer') initCadViewer(); else cleanupCadViewer();
   
   document.getElementById('mainTabs').style.display = 'flex';
+
+  if (!fromHistory) history.pushState({ tab: tabName }, '');
+
   state.currentProjectId = null;
 
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
@@ -382,6 +385,35 @@ document.addEventListener('DOMContentLoaded', function() {
       if (input) input.value = savedUser;
   }
 
+  // [추가] 뒤로가기 버튼 처리 (모바일 종료 방지 및 모달 닫기)
+  if (!history.state) history.replaceState({ tab: 'cadViewer' }, '');
+
+  window.onpopstate = function(e) {
+      const overlays = [
+          { id: 'layerStyleModal', close: window.closeLayerStyleModal },
+          { id: 'roomManagerOverlay', close: window.closeRoomManagerPage },
+          { id: 'adminOverlay', close: window.closeAdminPage },
+          { id: 'photo-manager-interface', close: window.closePhotoManager },
+          { id: 'memoModal', close: () => { document.getElementById('memoModal').style.display = 'none'; } },
+          { id: 'memoFilterModal', close: () => { document.getElementById('memoFilterModal').style.display = 'none'; } },
+          { id: 'cadProcessModal', close: () => { document.getElementById('cadProcessModal').style.display = 'none'; } },
+          { id: 'lightboxOverlay', close: window.closeLightbox }
+      ];
+
+      for (const o of overlays) {
+          const el = document.getElementById(o.id);
+          if (el && el.style.display !== 'none' && el.style.display !== '') {
+              if (o.close) o.close(true);
+              else el.style.display = 'none';
+              return;
+          }
+      }
+
+      if (e.state && e.state.tab) {
+          switchTab(e.state.tab, true);
+      }
+  }
+
   initProj4Defs();
   initCadViewer(); // 초기 탭(Map Viewer) 초기화
 
@@ -430,6 +462,14 @@ document.addEventListener('DOMContentLoaded', function() {
         if (event.key === 'ArrowRight') navigateLightbox(1);
         if (event.key === 'Escape') closeLightbox();
     }
+  });
+
+  // [추가] 앱 종료 전 확인 (중요 데이터 손실 방지)
+  window.addEventListener('beforeunload', (e) => {
+      if (state.currentUser) {
+          e.preventDefault();
+          e.returnValue = '';
+      }
   });
 });
 
