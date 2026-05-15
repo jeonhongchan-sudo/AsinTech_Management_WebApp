@@ -1056,7 +1056,7 @@ export function openLayerStyleModal() {
     document.getElementById('inputLineLabelColor').value = savedLabelStyle.color || '#000000';
 
     // 동적 텍스트 설정값 동기화
-    const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled === true;
+    const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled !== false;
     const chkDynamic = document.getElementById('chkDynamicText');
     if (chkDynamic) chkDynamic.checked = isDynamic;
 
@@ -1340,7 +1340,7 @@ export function reloadLayerStylesFromSettings() {
     }
 
     // 동적 텍스트 UI 동기화
-    const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled === true;
+    const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled !== false;
     const chkDynamic = document.getElementById('chkDynamicText');
     if (chkDynamic) chkDynamic.checked = isDynamic;
 
@@ -1440,6 +1440,7 @@ function updateMapStyle() {
     const pointSizeExpr = ['match', ['get', 'layer']];
     const textColorExpr = ['match', ['get', 'layer']];
     const textSizeExpr = ['match', ['get', 'layer']];
+    const radialOffsetExpr = ['match', ['get', 'layer']]; // [추가] 마커 크기 연동 오프셋
 
     if (cadLayers.size === 0) return;
 
@@ -1454,11 +1455,18 @@ function updateMapStyle() {
         pointSizeExpr.push(layer, layerStyle.point_size || 3);
         textColorExpr.push(layer, layerStyle.text_color || '#000000');
         textSizeExpr.push(layer, layerStyle.text_size || 12);
+
+        // [핵심] 오프셋 계산: (마커 반지름 / 글자 크기) em
+        // 마커가 커지면 글자도 자동으로 마커 밖으로 밀려나게 함
+        const pSize = layerStyle.point_size || 3;
+        const tSize = layerStyle.text_size || 12;
+        radialOffsetExpr.push(layer, pSize / tSize);
     }
     lineColorExpr.push('#cccccc'); lineWidthExpr.push(1.5);
     pointColorExpr.push('#cccccc'); pointSizeExpr.push(3);
     textColorExpr.push('#000000'); textSizeExpr.push(12);
-    
+    radialOffsetExpr.push(0.25); // 기본값 (3px / 12px)
+
     if (cadMap.getLayer('cad-lines')) {
         cadMap.setPaintProperty('cad-lines', 'line-color', lineColorExpr);
         cadMap.setPaintProperty('cad-lines', 'line-width', lineWidthExpr);
@@ -1468,15 +1476,19 @@ function updateMapStyle() {
         cadMap.setPaintProperty('cad-lines-dashed', 'line-width', lineWidthExpr);
     }
     if (cadMap.getLayer('cad-text')) {
-        const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled === true;
+        // [수정] 동적 모드 기본값 true 적용
+        const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled !== false;
         cadMap.setPaintProperty('cad-text', 'text-color', textColorExpr);
         
         cadMap.setLayoutProperty('cad-text', 'text-size', textSizeExpr);
         
-        // [핵심] 동적 위치 설정 적용
-        // 텍스트 사각형의 4개 모서리에 마커가 위치하도록 4방향 앵커 설정 (Qgis 방식)
-        cadMap.setLayoutProperty('cad-text', 'text-variable-anchor', isDynamic ? ['bottom-left', 'bottom-right', 'top-left', 'top-right'] : undefined);
-        cadMap.setLayoutProperty('cad-text', 'text-radial-offset', isDynamic ? 0.5 : 0);
+        // [수정] 4방향 앵커 설정 및 마커 크기 연동 오프셋 적용
+        cadMap.setLayoutProperty('cad-text', 'text-variable-anchor', isDynamic 
+            ? ['bottom-left', 'bottom-right', 'top-left', 'top-right'] 
+            : ['bottom-left']); 
+            
+        cadMap.setLayoutProperty('cad-text', 'text-radial-offset', radialOffsetExpr);
+
         // 패딩을 1로 줄여 인접 마커 간 가독성 확보 및 텍스트 증발 방지
         cadMap.setLayoutProperty('cad-text', 'text-padding', isDynamic ? 1 : 0);
         cadMap.setLayoutProperty('cad-text', 'text-allow-overlap', isDynamic ? false : true);
@@ -1485,10 +1497,6 @@ function updateMapStyle() {
         cadMap.setLayoutProperty('cad-text', 'text-rotation-alignment', isDynamic ? 'viewport' : 'map');
         // 앵커 위치에 따라 텍스트 정렬 방향을 자동(auto)으로 설정하여 마커가 텍스트의 끝단에 오도록 함
         cadMap.setLayoutProperty('cad-text', 'text-justify', isDynamic ? 'auto' : 'left');
-        
-        if (!isDynamic) {
-            cadMap.setLayoutProperty('cad-text', 'text-anchor', 'bottom-left');
-        }
     }
     if (cadMap.getLayer('cad-polygons')) cadMap.setPaintProperty('cad-polygons', 'fill-color', lineColorExpr);
     if (cadMap.getLayer('cad-points')) {
