@@ -159,12 +159,17 @@ function renderPhotos(res) {
    let html = '';
    res.photos.forEach((p, i) => {
        // [수정] R2 경로인 경우 preview 대신 thumb 경로를 사용하여 로딩 속도 획기적 개선
+       // [수정] WebP 변환 대응: R2 경로라면 확장자를 .webp로 치환하여 썸네일 로드
        let thumbnailUrl = p.url ? p.url : `https://lh3.googleusercontent.com/d/${p.fileId}=s400`;
        if (thumbnailUrl.includes('r2.dev') && thumbnailUrl.includes('/preview/')) {
-           thumbnailUrl = thumbnailUrl.replace('/preview/', '/thumb/');
+           thumbnailUrl = thumbnailUrl.replace('/preview/', '/thumb/').replace(/\.(jpg|jpeg|png)$/i, '.webp');
        }
        
-       const downloadBtn = `<button class="btn btn-info" style="padding:2px 5px; font-size:11px; margin-right:5px;" onclick="window.downloadPhotoFile('${p.url}', '${p.fileName}', ${p.isSurvey})">저장</button>`;
+       // [수정] 조사 메모의 원본 사진만 다운로드(로컬 저장) 가능하도록 버튼 노출 제어
+       const downloadBtn = p.isSurvey 
+           ? `<button class="btn btn-info" style="padding:2px 5px; font-size:11px; margin-right:5px;" onclick="window.downloadPhotoFile('${p.url}', '${p.fileName}', ${p.isSurvey})">저장</button>`
+           : '';
+
        const deleteBtn = p.isMemoPhoto 
            ? `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteIndividualMemoPhoto('${p.memoId}', '${p.url}')">삭제</button>`
            : `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deletePhoto('${p.fileId}')">삭제</button>`;
@@ -210,7 +215,12 @@ export async function cleanupR2Orphans() {
                         if (currentVersion) {
                             versions.forEach(v => {
                                 if (v !== currentVersion) {
-                                    validPaths.add(path.replace(`/${currentVersion}/`, `/${v}/`));
+                                   let targetPath = path.replace(`/${currentVersion}/`, `/${v}/`);
+                                   if (v === 'orig') {
+                                       validPaths.add(targetPath.replace('.webp', '.jpg'));
+                                   } else {
+                                       validPaths.add(targetPath);
+                                   }
                                 }
                             });
                         }
@@ -230,7 +240,15 @@ export async function cleanupR2Orphans() {
                 const currentVersion = versions.find(v => path.includes(`/${v}/`));
                 if (currentVersion) {
                     versions.forEach(v => {
-                        if (v !== currentVersion) validPaths.add(path.replace(`/${currentVersion}/`, `/${v}/`));
+                        if (v !== currentVersion) {
+                            let targetPath = path.replace(`/${currentVersion}/`, `/${v}/`);
+                            // [수정] 원본(orig)은 .jpg, 나머지는 .webp인 구조에 대응하여 유효 경로 목록 생성
+                            if (v === 'orig') {
+                                validPaths.add(targetPath.replace('.webp', '.jpg'));
+                            } else {
+                                validPaths.add(targetPath);
+                            }
+                        }
                     });
                 }
             }
@@ -272,27 +290,42 @@ export async function cleanupR2Orphans() {
 export async function downloadPhotoFile(url, fileName, isSurvey) {
     if (!url) return;
 
-    // [수정] 조사 모드(isSurvey: true)인 경우에만 원본(/orig/) 경로를 시도함.
-    // 일반 메모나 원본이 없는 사진은 Preview를 그대로 사용하여 404 에러 방지.
+    // [보안] 조사 메모가 활성화된 데이터가 아니면 로컬 저장 시도를 차단
+    if (!isSurvey) {
+        alert("조사 메모의 원본 파일만 로컬 저장이 가능합니다.");
+        return;
+    }
+
     let downloadUrl = url;
-    if (isSurvey && url.includes('r2.dev') && url.includes('/preview/')) {
-        downloadUrl = url.replace('/preview/', '/orig/');
+    let finalFileName = fileName;
+
+    // [수정] R2 경로인 경우 경로와 파일명 확장자를 원본(JPG)에 맞게 강제 조정
+    if (url.includes('r2.dev') && url.includes('/preview/')) {
+        downloadUrl = url.replace('/preview/', '/orig/').replace('.webp', '.jpg');
+        // [추가] 파일명 확장자도 .webp -> .jpg로 변경하여 실제 원본 포맷으로 저장되도록 함
+        finalFileName = fileName.replace(/\.webp$/i, '.jpg');
+        if (!finalFileName.toLowerCase().endsWith('.jpg')) {
+            finalFileName += '.jpg';
+        }
     }
 
     try {
         const response = await fetch(downloadUrl);
+        if (!response.ok) throw new Error("원본 파일을 찾을 수 없습니다.");
+
         const blob = await response.blob();
         const blobUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = fileName.includes('.') ? fileName : `${fileName}.jpg`;
+        link.download = finalFileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(blobUrl);
     } catch (e) {
-        console.error("원본 다운로드 실패 (Preview로 대체):", e);
-        window.open(url, '_blank'); // 원본이 없는 경우 기존 URL(Preview)로 열기
+        console.warn("브라우저 정책으로 인한 직접 다운로드 실패. 원본 링크를 새 창에서 엽니다.");
+        // [핵심 수정] 실패 시에도 프리뷰(url)가 아닌 원본 경로(downloadUrl)를 열도록 수정
+        window.open(downloadUrl, '_blank'); 
     }
 }
 
@@ -340,7 +373,12 @@ async function deleteR2PhotoVersions(url) {
     if (currentVersion) {
         versions.forEach(v => {
             if (v !== currentVersion) {
-                pathsToDelete.push(baseFilePath.replace(`/${currentVersion}/`, `/${v}/`));
+                let targetPath = baseFilePath.replace(`/${currentVersion}/`, `/${v}/`);
+                if (v === 'orig') {
+                    pathsToDelete.push(targetPath.replace('.webp', '.jpg'));
+                } else {
+                    pathsToDelete.push(targetPath);
+                }
             }
         });
     }
@@ -466,13 +504,27 @@ function updateLightboxImage() {
 
     // [수정] 조사 모드(isSurvey: true)인 경우에만 원본(/orig/) 경로로 연결함.
     // 원본이 저장되지 않는 일반 메모의 경우 Preview(1280px) URL을 그대로 유지하여 404 에러를 방지합니다.
+    // [수정] WebP 대응: 원본 다운로드 시 .webp를 .jpg로 치환
     let originalUrl = fullImageUrl;
     if (p.isSurvey && fullImageUrl.includes('r2.dev') && fullImageUrl.includes('/preview/')) {
-        originalUrl = fullImageUrl.replace('/preview/', '/orig/');
+        originalUrl = fullImageUrl.replace('/preview/', '/orig/').replace('.webp', '.jpg');
     }
 
     document.getElementById('lightboxImg').src = fullImageUrl; // 미리보기 화면은 속도를 위해 Preview 유지
-    document.getElementById('lightboxDownloadBtn').href = originalUrl; // 버튼은 실제 원본 연결
+    
+    // [수정] 라이트박스 하단의 다운로드 버튼도 조사 메모 원본일 때만 노출하도록 제어
+    const downloadBtn = document.getElementById('lightboxDownloadBtn');
+    if (downloadBtn) {
+        if (p.isSurvey) {
+            downloadBtn.style.display = 'inline-block';
+            downloadBtn.href = originalUrl;
+             // [추가] 라이트박스 다운로드 버튼에도 원본 확장자(.jpg) 명시
+            const dName = p.fileName.replace(/\.webp$/i, '.jpg');
+            downloadBtn.setAttribute('download', dName.toLowerCase().endsWith('.jpg') ? dName : dName + '.jpg');
+        } else {
+            downloadBtn.style.display = 'none';
+        }
+    }
     
     // [추가] 하단 캡션 업데이트 (현재 번호 / 전체 개수 및 파일명 표시)
     const caption = document.getElementById('lightboxCaption');
@@ -1350,11 +1402,7 @@ async function processMemoSaveBackground(data) {
                 const urlsToDelete = oldUrls.filter(u => !newExistingUrls.includes(u));
                 for (const url of urlsToDelete) {
                     if (url.includes('r2.dev')) {
-                        const filePath = url.split(R2_BASE_URL + '/')[1];
-                        await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
-                            method: 'DELETE',
-                            headers: { 'Authorization': WORKER_AUTH_KEY }
-                        }).catch(err => console.warn("수정 중 R2 삭제 실패:", filePath));
+                        await deleteR2PhotoVersions(url);
                     }
                 }
             }
@@ -1409,33 +1457,36 @@ async function processMemoSaveBackground(data) {
 
                     if (file.type.startsWith('image/')) {
                         // 미리보기(1280px), 썸네일(300px) 생성
-                        previewBlob = await resizeImage(file, 1280, 0.8);
-                        thumbBlob = await resizeImage(file, 300, 0.6);
-                        contentType = "image/jpeg";
+                        // [수정] preview와 thumb은 WebP로 변환
+                        previewBlob = await resizeImage(file, 1280, 0.8, 'image/webp');
+                        thumbBlob = await resizeImage(file, 300, 0.6, 'image/webp');
                     }
+
+                    const fileNameToUseWebp = fileNameToUse.replace(/\.(jpg|jpeg|png)$/i, "") + ".webp";
+                    const webpContentType = "image/webp";
 
                     const uploadTasks = [];
 
                     // [Task 1] Thumbnail 업로드
                     if (thumbBlob) {
-                        const thumbPath = `${r2FolderPath}/thumb/${uuid}/${fileNameToUse}`;
+                        const thumbPath = `${r2FolderPath}/thumb/${uuid}/${fileNameToUseWebp}`;
                         uploadTasks.push((async () => {
-                            const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(thumbPath)}&type=${encodeURIComponent(contentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
+                            const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(thumbPath)}&type=${encodeURIComponent(webpContentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
                             const { url } = await res.json();
-                            await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: thumbBlob, headers: { 'Content-Type': contentType } });
+                            await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: thumbBlob, headers: { 'Content-Type': webpContentType } });
                         })());
                     }
 
                     // [Task 2] Preview 업로드 (DB 저장용 URL 기준)
-                    const previewPath = `${r2FolderPath}/preview/${uuid}/${fileNameToUse}`;
+                    const previewPath = `${r2FolderPath}/preview/${uuid}/${fileNameToUseWebp}`;
                     uploadTasks.push((async () => {
-                        const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(previewPath)}&type=${encodeURIComponent(contentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
+                        const res = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(previewPath)}&type=${encodeURIComponent(webpContentType)}`, { headers: { 'Authorization': WORKER_AUTH_KEY } });
                         const { url } = await res.json();
-                        const uploadRes = await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: previewBlob, headers: { 'Content-Type': contentType } });
+                        const uploadRes = await fetch(url.trim().replace(/[<>]/g, ''), { method: 'PUT', body: previewBlob, headers: { 'Content-Type': webpContentType } });
                         if (!uploadRes.ok) throw new Error("Preview 업로드 실패");
                     })());
 
-                    // [Task 3] Original 업로드 (조사 모드 활성화 시에만 실행)
+                    // [Task 3] Original 업로드 (조사 모드 활성화 시에만 실행) - 원본 유지 (JPG 등 기존 포맷)
                     if (isSurvey) {
                         const origPath = `${r2FolderPath}/orig/${uuid}/${fileNameToUse}`;
                         uploadTasks.push((async () => {
@@ -1587,11 +1638,7 @@ export async function deleteProjectMemos() {
                 const urls = m.image_url.split(',').filter(u => u.trim());
                 for (const url of urls) {
                     if (url.includes('r2.dev')) {
-                        const filePath = url.replace(R2_BASE_URL + '/', '');
-                        await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
-                            method: 'DELETE',
-                            headers: { 'Authorization': WORKER_AUTH_KEY }
-                        }).catch(e => console.warn("R2 파일 삭제 실패:", filePath));
+                        await deleteR2PhotoVersions(url);
                     }
                 }
             }
@@ -1622,14 +1669,7 @@ export async function deleteMemo(id) {
                 if (!trimmedUrl) continue;
 
                 if (trimmedUrl.includes('r2.dev')) {
-                    // R2 파일 삭제
-                    const filePath = trimmedUrl.replace(R2_BASE_URL + '/', '');
-                    try {
-                        await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
-                            method: 'DELETE',
-                            headers: { 'Authorization': WORKER_AUTH_KEY }
-                        });
-                    } catch (err) { console.warn("R2 삭제 실패:", filePath); }
+                    await deleteR2PhotoVersions(trimmedUrl);
                 } else {
                     // 구글 드라이브 파일 삭제
                     const fileIdMatch = trimmedUrl.match(/(?:id=|\/d\/|d\/)([a-zA-Z0-9_-]{25,})/);
@@ -1661,7 +1701,7 @@ export function fileToBase64(file) {
 }
 
 // [수정] 이미지 리사이징 유틸리티 함수 (속도 개선: 1024px, JPEG 0.6)
-export function resizeImage(file, maxWidth = 1024, quality = 0.6) {
+export function resizeImage(file, maxWidth = 1024, quality = 0.6, format = 'image/jpeg') {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = e => {
@@ -1680,7 +1720,7 @@ export function resizeImage(file, maxWidth = 1024, quality = 0.6) {
                     // [최적화] 캔버스 메모리 해제
                     cvs.width = 0;
                     cvs.height = 0;
-                }, 'image/jpeg', quality);
+                }, format, quality);
             };
             img.onerror = () => reject(new Error("이미지 로드 실패"));
             img.src = e.target.result;
