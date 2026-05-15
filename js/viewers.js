@@ -788,12 +788,12 @@ export async function loadCadMap(projectId) {
         const pmtilesUrl = `pmtiles://${fileUrl}`;
         const p = new pmtiles.PMTiles(fileUrl);
         let bounds = [[124, 33], [132, 43]];
-        let maxDataZoom = 24;
+        let maxDataZoom = 28;
         const labelStyleKey = `${projectId}__LINE_LABEL_STYLE__`;
         const savedLabelStyle = state.userSettings?.layer_styles?.[labelStyleKey] || { size: 12, color: '#000000' };
         try {
             const header = await p.getHeader();
-            if (header) { bounds = [header.minLon, header.minLat, header.maxLon, header.maxLat]; maxDataZoom = header.maxZoom || 24; }
+            if (header) { bounds = [header.minLon, header.minLat, header.maxLon, header.maxLat]; maxDataZoom = header.maxZoom || 28; }
             const metadata = await p.getMetadata();
             if (metadata && metadata.vector_layers) {
                 // 소스 레이어 ID(line, point 등)를 직접 추가하지 않고 Discovery 기능을 통해 실제 속성 레이어명을 찾습니다.
@@ -804,7 +804,7 @@ export async function loadCadMap(projectId) {
 
         cadMap = new maplibregl.Map({
             container: 'cad-map', fadeDuration: 0, bounds: bounds, fitBoundsOptions: { padding: 40, animate: false },
-            renderWorldCopies: false, maxZoom: 24, localIdeographFontFamily: "'Noto Sans KR', sans-serif",
+            renderWorldCopies: false, maxZoom: 28, localIdeographFontFamily: "'Noto Sans KR', sans-serif",
             validateStyle: false, boxZoom: false, dragRotate: false, doubleClickZoom: false,
         transformRequest: (url, resourceType) => {
             // [추가] PMTiles(Range Request) 요청 시 브라우저 캐시 충돌 에러 방지
@@ -1055,6 +1055,11 @@ export function openLayerStyleModal() {
     document.getElementById('inputLineLabelSize').value = savedLabelStyle.size || 12;
     document.getElementById('inputLineLabelColor').value = savedLabelStyle.color || '#000000';
 
+    // 동적 텍스트 설정값 동기화
+    const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled === true;
+    const chkDynamic = document.getElementById('chkDynamicText');
+    if (chkDynamic) chkDynamic.checked = isDynamic;
+
      renderModalEditLists();
 }
 
@@ -1123,6 +1128,21 @@ export function switchStyleTab(tab) {
     if (tab === 'line') { btnLine.classList.add('active'); secLine.style.display = 'block'; }
     else if (tab === 'point') { btnPoint.classList.add('active'); secPoint.style.display = 'block'; }
     else { btnText.classList.add('active'); secText.style.display = 'block'; }
+}
+
+/** [추가] 텍스트 동적 위치 모드 토글 */
+export async function toggleDynamicText(enabled) {
+    if (!state.currentCadProjectId) return;
+    
+    const storageKey = `${state.currentCadProjectId}__DYNAMIC_TEXT__`;
+    if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
+    state.userSettings.layer_styles[storageKey] = { enabled: enabled };
+    
+    updateMapStyle();
+    saveUserStyles();
+    
+    const msg = enabled ? "텍스트 겹침 방지(동적 위치)가 활성화되었습니다." : "고정 텍스트(CAD 속성 유지)로 전환되었습니다.";
+    showAlert(msg, 'info');
 }
 
 /** [추가] 개별 속성 변경 통합 함수 */
@@ -1318,6 +1338,12 @@ export function reloadLayerStylesFromSettings() {
         if (savedLabelStyle.size) cadMap.setLayoutProperty('cad-line-labels', 'text-size', savedLabelStyle.size);
         if (savedLabelStyle.color) cadMap.setPaintProperty('cad-line-labels', 'text-color', savedLabelStyle.color);
     }
+
+    // 동적 텍스트 UI 동기화
+    const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled === true;
+    const chkDynamic = document.getElementById('chkDynamicText');
+    if (chkDynamic) chkDynamic.checked = isDynamic;
+
     if (updated) {
         updateMapStyle();
         updateMapFilter(); // 가시성 변경 반영
@@ -1442,8 +1468,27 @@ function updateMapStyle() {
         cadMap.setPaintProperty('cad-lines-dashed', 'line-width', lineWidthExpr);
     }
     if (cadMap.getLayer('cad-text')) {
+        const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled === true;
         cadMap.setPaintProperty('cad-text', 'text-color', textColorExpr);
+        
         cadMap.setLayoutProperty('cad-text', 'text-size', textSizeExpr);
+        
+        // [핵심] 동적 위치 설정 적용
+        // 텍스트 사각형의 4개 모서리에 마커가 위치하도록 4방향 앵커 설정 (Qgis 방식)
+        cadMap.setLayoutProperty('cad-text', 'text-variable-anchor', isDynamic ? ['bottom-left', 'bottom-right', 'top-left', 'top-right'] : undefined);
+        cadMap.setLayoutProperty('cad-text', 'text-radial-offset', isDynamic ? 0.5 : 0);
+        // 패딩을 1로 줄여 인접 마커 간 가독성 확보 및 텍스트 증발 방지
+        cadMap.setLayoutProperty('cad-text', 'text-padding', isDynamic ? 1 : 0);
+        cadMap.setLayoutProperty('cad-text', 'text-allow-overlap', isDynamic ? false : true);
+        cadMap.setLayoutProperty('cad-text', 'text-ignore-placement', isDynamic ? false : true);
+        cadMap.setLayoutProperty('cad-text', 'text-rotate', isDynamic ? 0 : ['get', 'rotation']);
+        cadMap.setLayoutProperty('cad-text', 'text-rotation-alignment', isDynamic ? 'viewport' : 'map');
+        // 앵커 위치에 따라 텍스트 정렬 방향을 자동(auto)으로 설정하여 마커가 텍스트의 끝단에 오도록 함
+        cadMap.setLayoutProperty('cad-text', 'text-justify', isDynamic ? 'auto' : 'left');
+        
+        if (!isDynamic) {
+            cadMap.setLayoutProperty('cad-text', 'text-anchor', 'bottom-left');
+        }
     }
     if (cadMap.getLayer('cad-polygons')) cadMap.setPaintProperty('cad-polygons', 'fill-color', lineColorExpr);
     if (cadMap.getLayer('cad-points')) {

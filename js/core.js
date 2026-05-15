@@ -30,7 +30,8 @@ export const state = {
     distanceMarkers: [],     // [추가] 거리 측정용 마커/팝업 관리 배열
     isSurveyMode: false,      // [추가] 조사 모드 활성화 여부
     memoFilterProjectId: null, // [추가] 메모 필터링용 프로젝트 ID
-    vworldFailed: false        // [추가] 브이월드 로드 실패 여부 (자동 Fallback용)
+    vworldFailed: false,       // [추가] 브이월드 로드 실패 여부 (자동 Fallback용)
+    isDynamicText: false       // [추가] 텍스트 동적 위치 활성화 여부
 };
 
 // 유틸리티 함수
