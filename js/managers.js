@@ -89,14 +89,16 @@ export function openPhotoManager(id, name) {
   pmInterface.style.display = 'block';
   document.getElementById('mainTabs').style.display = 'none';
   
-  // [추가] 백업 관리 버튼 동적 삽입 (기존 버튼 옆)
-  let btnArea = document.querySelector('.pm-actions'); // [수정] index.html의 클래스명과 일치시킴
+  // [수정] 백업 관리 버튼(☁️) 크기를 다른 헤더 버튼(16px, 5x10px)과 동일하게 맞추고 버튼 그룹 내부에 배치
+  let btnArea = document.querySelector('.pm-actions > div:last-child');
   if (btnArea && !document.getElementById('pmBackupOpenBtn')) {
       const backupBtn = document.createElement('button');
       backupBtn.id = 'pmBackupOpenBtn';
       backupBtn.className = 'btn btn-outline';
-      backupBtn.style.marginLeft = '5px';
+      backupBtn.style.padding = '5px 10px';
+      backupBtn.style.fontSize = '16px';
       backupBtn.innerHTML = '☁️';
+      backupBtn.title = '구글 드라이브 백업 관리';
       backupBtn.onclick = () => openBackupManager(id, name);
       btnArea.appendChild(backupBtn);
   }
@@ -226,8 +228,9 @@ export async function loadBackupFiles(projectId) {
             window.currentBackupPhotos = res.files.map(f => ({
                 fileName: f.name,
                 fileId: f.id,
-                url: null, // ID 기반 프리뷰(lh3) 강제 사용
-                backupDownloadUrl: f.downloadUrl, // 백업 전용 다운로드 경로 보관
+                url: null, 
+                backupDownloadUrl: f.downloadUrl, // 저장(다운로드)용
+                backupViewUrl: f.url, // [추가] 브라우저 열기(뷰어)용 URL 보관
                 isSurvey: true // 다운로드(저장) 버튼 활성화용
             }));
 
@@ -236,9 +239,10 @@ export async function loadBackupFiles(projectId) {
                 html += `<tr>
                     <td style="font-size:12px; word-break:break-all;">${f.name}</td>
                     <td style="text-align:right; font-size:11px; color:#666;">${sizeKB}KB</td>
-                    <td style="text-align:center;">
-                        <button class="btn btn-info" style="padding:2px 5px; font-size:11px;" onclick="window.openBackupLightbox(${i})">보기</button>
-                        <button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteBackupFile('${f.id}', '${projectId}')">삭제</button>
+                    <td style="text-align:center; white-space:nowrap;">
+                        <button class="btn btn-info" style="padding:2px 4px; font-size:11px;" onclick="window.openBackupLightbox(${i})">보기</button>
+                        <button class="btn btn-success" style="padding:2px 4px; font-size:11px;" onclick="window.downloadBackupFile('${f.downloadUrl}', '${f.name}')">저장</button>
+                        <button class="btn btn-danger" style="padding:2px 4px; font-size:11px;" onclick="window.deleteBackupFile('${f.id}', '${projectId}')">삭제</button>
                     </td>
                 </tr>`;
             });
@@ -251,6 +255,18 @@ export async function loadBackupFiles(projectId) {
         listEl.innerHTML = `<tr><td colspan="3" style="text-align:center; color:red;">로드 실패: ${e.message}</td></tr>`;
     }
 }
+
+/** [추가] 백업 파일 직접 다운로드 (구글 드라이브 원본) */
+window.downloadBackupFile = function(url, fileName) {
+    if (!url) return;
+    // 구글 드라이브 직접 다운로드 링크를 활용하여 기기로 저장 유도
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
 
 /** [추가] 백업 파일 개별 삭제 */
 window.deleteBackupFile = async function(fileId, projectId) {
@@ -609,23 +625,18 @@ function updateLightboxImage() {
         originalUrl = fullImageUrl.replace('/preview/', '/orig/').replace('.webp', '.jpg');
     }
 
-    // [추가] 구글 드라이브 백업 파일인 경우 전용 다운로드 URL로 교체
-    if (p.backupDownloadUrl) originalUrl = p.backupDownloadUrl;
+    // [수정] 백업 파일의 경우 다운로드 링크 대신 뷰어 링크(f.getUrl)를 사용하여 다운로드 방지
+    if (p.backupViewUrl) originalUrl = p.backupViewUrl;
 
     document.getElementById('lightboxImg').src = fullImageUrl; // 미리보기 화면은 속도를 위해 Preview 유지
     
-    // [수정] 라이트박스 하단의 다운로드 버튼도 조사 메모 원본일 때만 노출하도록 제어
     const downloadBtn = document.getElementById('lightboxDownloadBtn');
     if (downloadBtn) {
-        if (p.isSurvey) {
-            downloadBtn.style.display = 'inline-block';
-            downloadBtn.href = originalUrl;
-             // [추가] 라이트박스 다운로드 버튼에도 원본 확장자(.jpg) 명시
-            const dName = p.fileName.replace(/\.webp$/i, '.jpg');
-            downloadBtn.setAttribute('download', dName.toLowerCase().endsWith('.jpg') ? dName : dName + '.jpg');
-        } else {
-            downloadBtn.style.display = 'none';
-        }
+        // [수정] 모든 원본 가능 파일에 대해 '원본열기' 버튼 노출 및 기능 고정 (다운로드 방지)
+        downloadBtn.style.display = 'inline-block';
+        downloadBtn.href = originalUrl;
+        downloadBtn.removeAttribute('download');
+        downloadBtn.innerText = "원본열기";
     }
     
     // [추가] 하단 캡션 업데이트 (현재 번호 / 전체 개수 및 파일명 표시)
