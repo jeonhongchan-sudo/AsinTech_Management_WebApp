@@ -383,45 +383,6 @@ document.addEventListener('DOMContentLoaded', function() {
       if (input) input.value = savedUser;
   }
 
-  // [수정] 뒤로가기 버튼 처리 - 탭 기록 대신 종료 확인 및 모달 닫기만 수행
-  // 앱 시작 시 기록을 하나 추가하여 첫 뒤로가기가 앱 종료가 되지 않도록 방어
-  history.pushState({ root: true }, '');
-
-  window.onpopstate = function(e) {
-      const overlays = [
-          { id: 'layerStyleModal', close: window.closeLayerStyleModal },
-          { id: 'roomManagerOverlay', close: window.closeRoomManagerPage },
-          { id: 'adminOverlay', close: window.closeAdminPage },
-          { id: 'photo-manager-interface', close: window.closePhotoManager },
-          { id: 'memoModal', close: () => { document.getElementById('memoModal').style.display = 'none'; } },
-          { id: 'memoFilterModal', close: () => { document.getElementById('memoFilterModal').style.display = 'none'; } },
-          { id: 'cadProcessModal', close: () => { document.getElementById('cadProcessModal').style.display = 'none'; } },
-          { id: 'lightboxOverlay', close: window.closeLightbox }
-      ];
-
-      for (const o of overlays) {
-          const el = document.getElementById(o.id);
-          if (el && el.style.display !== 'none' && el.style.display !== '') {
-              if (o.close) o.close(true);
-              else el.style.display = 'none';
-              
-              // 팝업을 닫은 후 다시 방어 상태로 복구 (기록 누적 방지)
-              history.pushState({ root: true }, '');
-              return;
-          }
-      }
-
-      // 모든 팝업이 닫힌 상태에서 뒤로가기 시 종료 확인
-      if (confirm("앱을 종료하시겠습니까?")) {
-          // 사용자가 확인을 누르면 기록을 더 이상 추가하지 않고 브라우저가 뒤로 가게 둡니다.
-          // (보통 이전 사이트로 이동하거나 탭이 닫힘)
-          history.back();
-      } else {
-          // 취소를 누르면 다시 방어 상태 유지
-          history.pushState({ root: true }, '');
-      }
-  }
-
   initProj4Defs();
   initCadViewer(); // 초기 탭(Map Viewer) 초기화
 
@@ -470,14 +431,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (event.key === 'ArrowRight') navigateLightbox(1);
         if (event.key === 'Escape') closeLightbox();
     }
-  });
-
-  // [추가] 앱 종료 전 확인 (중요 데이터 손실 방지)
-  window.addEventListener('beforeunload', (e) => {
-      if (state.currentUser) {
-          e.preventDefault();
-          e.returnValue = '';
-      }
   });
 });
 

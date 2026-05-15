@@ -495,8 +495,7 @@ export async function deleteIndividualMemoPhoto(memoId, urlToDelete) {
 export function openLightbox(i) { state.currentLightboxIndex = i; document.getElementById('lightboxOverlay').style.display = 'flex'; updateLightboxImage(); }
 
 export function closeLightbox(e) {
-    // [수정] 배경(Overlay) 클릭 또는 뒤로가기(e === true) 시 닫기
-    if (e !== true && e && e.target !== e.currentTarget) return;
+    if (e && e.target !== e.currentTarget) return;
     
     document.getElementById('lightboxOverlay').style.display = 'none'; 
     document.getElementById('lightboxImg').src = ''; 
