@@ -1036,9 +1036,10 @@ async function processCadUpload(file, projectId) {
         // [수정] 사용자의 요청에 따라 경로를 cad_data/CAD_{id}.{ext} 형식으로 통일
         const fileName = `CAD_${projectId}.${ext}`;
         const r2Path = `cad_data/${fileName}`;
+        const contentType = 'application/dxf';
 
         // 2. Presigned URL 획득 및 업로드
-        const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}`, {
+        const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}&type=${encodeURIComponent(contentType)}`, {
             headers: { 'Authorization': WORKER_AUTH_KEY }
         });
         const { url: uploadUrl } = await presignRes.json();
@@ -1049,7 +1050,10 @@ async function processCadUpload(file, projectId) {
         await fetch(uploadUrl, { 
             method: 'PUT', 
             body: fileBuffer,
-            headers: { 'Cache-Control': 'public, max-age=31536000' } // 365일 캐시 설정
+            headers: { 
+                'Cache-Control': 'public, max-age=31536000',
+                'Content-Type': contentType 
+            } // 365일 캐시 및 타입 설정
         });
 
         // 3. Supabase cad_files 테이블에 DXF 정보 기록 (캐시 365일 고정)
