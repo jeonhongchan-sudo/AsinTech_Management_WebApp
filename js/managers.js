@@ -89,22 +89,14 @@ export function openPhotoManager(id, name) {
   pmInterface.style.display = 'block';
   document.getElementById('mainTabs').style.display = 'none';
   
-  // [수정] 백업 관리 버튼(☁️) 크기를 다른 헤더 버튼(16px, 5x10px)과 동일하게 맞추고 버튼 그룹 내부에 배치
-  let btnArea = document.querySelector('.pm-actions > div:last-child');
-  if (btnArea) {
-      let backupBtn = document.getElementById('pmBackupOpenBtn');
-      if (!backupBtn) {
-          backupBtn = document.createElement('button');
-          backupBtn.id = 'pmBackupOpenBtn';
-          backupBtn.className = 'btn btn-outline';
-          backupBtn.style.padding = '5px 10px';
-          backupBtn.style.fontSize = '16px';
-          backupBtn.innerHTML = '☁️';
-          backupBtn.title = '구글 드라이브 백업 관리';
-          btnArea.appendChild(backupBtn);
-      }
-      // [수정] 버튼이 이미 존재하더라도 현재 프로젝트 ID와 이름으로 클릭 핸들러를 매번 갱신합니다.
-      backupBtn.onclick = () => openBackupManager(id, name);
+  // [수정] 메뉴 내 백업 관리 버튼 클릭 핸들러 갱신
+  const backupMenuBtn = document.getElementById('pmBackupMenuBtn');
+  if (backupMenuBtn) {
+      backupMenuBtn.onclick = (e) => {
+          e.stopPropagation();
+          openBackupManager(id, name);
+          togglePhotoMenu();
+      };
   }
 
   loadPhotos(id);
@@ -484,6 +476,26 @@ export async function downloadAllPhotos() {
     btn.disabled = false;
     btn.innerText = "📥 전체 사진 다운로드";
     showAlert("조사메모 사진 다운로드가 완료되었습니다.");
+}
+
+/** [추가] 사진 관리 메뉴 토글 */
+export function togglePhotoMenu(event) {
+    if (event) event.stopPropagation();
+    const menu = document.getElementById('photoMenuDropdown');
+    if (!menu) return;
+
+    const isVisible = menu.style.display === 'block';
+    menu.style.display = isVisible ? 'none' : 'block';
+
+    if (!isVisible) {
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target) && e.target.id !== 'btnPhotoMenu') {
+                menu.style.display = 'none';
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+        document.addEventListener('click', closeMenu);
+    }
 }
 
 /** [추가] R2 사진의 모든 버전(원본, 프리뷰, 썸네일) 삭제 헬퍼 */
@@ -2312,6 +2324,7 @@ window.setMemoFilter = setMemoFilter;
 window.downloadPhotoFile = downloadPhotoFile;
 window.cleanupR2Orphans = cleanupR2Orphans;
 window.downloadAllPhotos = downloadAllPhotos;
+window.togglePhotoMenu = togglePhotoMenu; // [추가] 메뉴 토글 함수 바인딩
 window.saveMemo = saveMemo; // [추가]
 window.roomCreateProject = roomCreateProject; // [추가]
 window.roomDeleteProject = roomDeleteProject; // [추가]

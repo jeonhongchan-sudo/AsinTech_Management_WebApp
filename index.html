@@ -210,20 +210,28 @@
 
       <!-- 2. 사진 관리 상세 뷰 (기본 숨김 처리) -->
       <div id="photo-manager-interface" style="display:none;">
-        <div class="pm-header">
-          <div class="pm-title">
-            <button class="btn btn-secondary" onclick="closePhotoManager()">← 뒤로</button>
-            <h2 id="pmProjectName" style="margin-right: 10px;">프로젝트 이름</h2>
+        <div class="pm-header" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: nowrap; position: relative; z-index: 2001;">
+          <div class="pm-title" style="display: flex; align-items: center; flex: 1; min-width: 0; gap: 8px;">
+            <button class="btn btn-secondary" onclick="closePhotoManager()" style="flex-shrink: 0; white-space: nowrap; padding: 6px 10px;">← 뒤로</button>
+            <h2 id="pmProjectName" style="margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: clamp(14px, 4vw, 1.2rem);">프로젝트 이름</h2>
           </div>
-          <div class="pm-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-            <div class="view-toggle-group">
-                <button class="btn btn-outline active" id="btnViewGrid" onclick="toggleViewMode('grid')" title="썸네일 보기">▦</button>
-                <button class="btn btn-outline" id="btnViewList" onclick="toggleViewMode('list')" title="리스트 보기">☰</button>
-            </div>
-            <div style="display: flex; gap: 4px;">
-                <button id="pmSyncR2Btn" class="btn btn-warning" style="padding: 5px 10px; font-size: 16px;" onclick="window.cleanupR2Orphans()" title="전체 저장소 동기화">🔄</button>
-                <button id="pmDownloadAllBtn" class="btn btn-success" style="padding: 5px 10px; font-size: 16px;" onclick="window.downloadAllPhotos()" title="전체 사진 다운로드">📥</button>
-                <button id="pmDeleteAllBtn" class="btn btn-danger" style="padding: 5px 10px; font-size: 16px;" onclick="window.deleteAllPhotos()" title="전체 사진 삭제">🗑️</button>
+          <div class="pm-actions" style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
+            <div style="position: relative;">
+                <button id="btnPhotoMenu" class="btn btn-outline" onclick="window.togglePhotoMenu(event)" style="padding: 4px 10px; font-size: 13px; font-weight: bold;">☰ 메뉴</button>
+                <div id="photoMenuDropdown" class="map-menu-dropdown" style="display:none; width: 200px; right: 0; left: auto;">
+                    <div class="map-menu-item" onclick="window.cleanupR2Orphans(); window.togglePhotoMenu();" style="cursor:pointer;">
+                        <span>저장소 동기화</span><span style="font-size: 16px;">🔄</span>
+                    </div>
+                    <button class="map-menu-item" id="pmDownloadAllBtn" style="width: 100%; border: none; background: none; cursor: pointer; font-family: inherit; font-size: 13px;" onclick="window.downloadAllPhotos(); window.togglePhotoMenu();">
+                        <span>전체 사진 다운로드</span><span style="font-size: 16px;">📥</span>
+                    </button>
+                    <button class="map-menu-item" id="pmDeleteAllBtn" style="width: 100%; border: none; background: none; cursor: pointer; font-family: inherit; font-size: 13px;" onclick="window.deleteAllPhotos(); window.togglePhotoMenu();">
+                        <span>전체 사진 삭제</span><span style="font-size: 16px;">🗑️</span>
+                    </button>
+                    <div class="map-menu-item" id="pmBackupMenuBtn" style="cursor:pointer;">
+                        <span>백업 원본 관리</span><span style="font-size: 16px;">☁️</span>
+                    </div>
+                </div>
             </div>
           </div>
         </div>
