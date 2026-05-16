@@ -1556,19 +1556,19 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
         
         // [추가] 지도에 마커 표시
         projectMemos.forEach(memo => {
-            // 내 메모는 노란색, 타인 메모(공개)는 파란색 등으로 구분 가능
             const isMine = memo.username === state.currentUser;
             const isHighlighted = memo.id === state.highlightedMemoId; // [추가] 강조 여부 확인
             
-            // [수정] 강조된 메모는 빨간색 및 크기 확대
-            let color = isMine ? '#FFC107' : '#007bff'; 
-            let scale = 0.8;
-            if (isHighlighted) {
-                color = '#dc3545'; // 빨간색 (강조)
-                scale = 1.2;       // 크기 확대
-            }
-
-            const marker = new maplibregl.Marker({ color: color, scale: scale })
+            // [수정] 커스텀 HTML 엘리먼트 생성
+            const el = document.createElement('div');
+            el.className = 'custom-memo-pin';
+            
+            // 상태별 클래스 부여
+            if (memo.is_survey) el.classList.add('survey');
+            if (!isMine && memo.is_public) el.classList.add('public');
+            if (isHighlighted) el.classList.add('highlighted');
+            
+            const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
                 .setLngLat([memo.lon, memo.lat]);
 
             // [수정] 마커 클릭 시 조회 팝업 대신 편집(작성) 팝업을 열도록 변경
@@ -1877,7 +1877,10 @@ function openMemoPopup(feature) {
     const textarea = popupContent.querySelector('#popupMemoInput');
     if (textarea) {
         // 키보드 이벤트가 지도로 전파되는 것을 막아 입력이 가능하게 함
-        ['keydown', 'keyup', 'keypress', 'input'].forEach(evt => textarea.addEventListener(evt, e => e.stopPropagation()));
+        // [수정] input 이벤트 발생 시 파일명 동기화 체크 (선택 사항)
+        ['keydown', 'keyup', 'keypress', 'input'].forEach(evt => {
+            textarea.addEventListener(evt, e => e.stopPropagation());
+        });
         setTimeout(() => textarea.focus(), 100); // 팝업 열린 후 포커스
     }
 

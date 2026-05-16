@@ -632,7 +632,19 @@ function uploadToDrive(fileName, fileData, mimeType, projectId) {
 
     const decoded = Utilities.base64Decode(fileData);
     const blob = Utilities.newBlob(decoded, mimeType, fileName);
-    const file = folder.createFile(blob);
+
+    // [개선] 동일한 이름의 파일이 이미 있는지 확인 (중복 생성 방지)
+    const existingFiles = folder.getFilesByName(fileName);
+    let file;
+    if (existingFiles.hasNext()) {
+      // [수정] 이미 존재하면 내용을 덮어쓰지 않고(부패 방지) 기존 파일 정보를 유지
+      file = existingFiles.next();
+      Logger.log("기존 파일이 이미 존재하여 업로드를 건너뜁니다: " + fileName);
+    } else {
+      // 없다면 새로 생성
+      file = folder.createFile(blob);
+      Logger.log("새 파일 생성 완료: " + fileName);
+    }
     
     // [수정] 공유 권한 설정 시 발생할 수 있는 '액세스 거부' 에러 격리
     // 조직의 보안 정책에 따라 public 공유가 막혀 있어도 파일 자체는 생성되었으므로 URL을 반환하도록 함
