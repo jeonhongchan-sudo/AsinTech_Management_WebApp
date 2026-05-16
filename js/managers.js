@@ -1015,17 +1015,8 @@ function startProgressSimulation(targetPercent, durationMs) {
 
 /** [추가] 2단계: CAD 파일 업로드 및 분석 트리거 */
 async function processCadUpload(file, projectId) {
-    const statusModal = document.getElementById('cadProcessModal');
-    const statusText = document.getElementById('cadProcessStatusText');
-    const statusContent = document.getElementById('cadProcessStatus');
-    
-    statusModal.style.display = 'flex';
-    statusContent.style.display = 'block';
-    document.getElementById('cadProcessConfig').style.display = 'none';
-    
     try {
         // 0. 브라우저에서 즉시 레이어 분석 실행
-        statusText.innerText = "도면 레이어 분석 중...";
         const extractedLayers = await extractDxfLayers(file);
 
         // 1. R2 업로드 경로 설정
@@ -1033,7 +1024,6 @@ async function processCadUpload(file, projectId) {
         // [수정] 사용자의 요청에 따라 경로를 cad_data/CAD_{id}.{ext} 형식으로 통일
         const fileName = `CAD_${projectId}.${ext}`;
         const r2Path = `cad_data/${fileName}`;
-        statusText.innerText = "파일 업로드 중...";
 
         // 2. Presigned URL 획득 및 업로드
         const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}`, {
@@ -1042,32 +1032,51 @@ async function processCadUpload(file, projectId) {
         const { url: uploadUrl } = await presignRes.json();
         
         // [수정] 클라우드 스토리지(Google Drive 등) 파일의 동기화 오류 방지를 위해 데이터를 미리 읽음
-        statusText.innerText = "파일 데이터를 준비 중...";
         const fileBuffer = await file.arrayBuffer();
         
-        statusText.innerText = "파일 업로드 중...";
         await fetch(uploadUrl, { 
             method: 'PUT', 
             body: fileBuffer,
             headers: { 'Cache-Control': 'public, max-age=31536000' } // 365일 캐시 설정
         });
 
-        // 3. Supabase 상태 업데이트 (Action을 거치지 않고 바로 ANALYZED 상태로)
-        statusText.innerText = "분석 정보 저장 중...";
+        // 3. Supabase cad_files 테이블에 DXF 정보 기록 (캐시 365일 고정)
+        // [수정] DB 타입(timestamptz)과 일치하는 상세 날짜 형식 생성 함수
+        const formatPostgresTz = (date) => {
+            const pad = (n, l = 2) => String(n).padStart(l, '0');
+            const y = date.getUTCFullYear();
+            const m = pad(date.getUTCMonth() + 1);
+            const d = pad(date.getUTCDate());
+            const h = pad(date.getUTCHours());
+            const min = pad(date.getUTCMinutes());
+            const s = pad(date.getUTCSeconds());
+            const ms = pad(date.getUTCMilliseconds(), 3);
+            return `${y}-${m}-${d} ${h}:${min}:${s}.${ms}000+00`;
+        };
+
+        const expiryDate = formatPostgresTz(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000));
+        // [수정] on_conflict=file_path 파라미터를 추가하여 동일 경로 파일 업로드 시 정보를 갱신하도록 설정
+        await callSupabaseDirect('cad_files?on_conflict=file_path', 'POST', {
+            project_id: parseInt(projectId),
+            file_type: 'dxf',
+            file_path: r2Path,
+            file_size: file.size,
+            cache_expiry: expiryDate,
+            updated_at: formatPostgresTz(new Date())
+        }, { 'Prefer': 'resolution=merge-duplicates' });
+
+        // 4. Supabase 프로젝트 상태 업데이트 (Action을 거치지 않고 바로 ANALYZED 상태로)
         await callSupabaseDirect(`cad_projects?id=eq.${projectId}`, 'PATCH', {
             status: 'ANALYZED',
             available_layers: extractedLayers
         });
 
         // 4. 즉시 설정 UI 열기 (Action 대기 시간 0초)
-        updateProcessProgress(100, "분석 완료!");
-        setTimeout(() => {
-            showAlert("도면 분석이 완료되었습니다.", "success");
-            window.openCadConfigUI(projectId);
-        }, 500);
+        showAlert("도면 분석이 완료되었습니다.", "success");
+        window.openCadConfigUI(projectId);
 
     } catch (e) {
-        statusText.innerText = "오류 발생: " + e.message;
+        showAlert("업로드 및 분석 중 오류: " + e.message, "error");
         console.error(e);
     }
 }
@@ -1093,6 +1102,9 @@ export async function openCadConfigUI(projectId) {
         }
 
         // 2. UI 전환
+        const statusModal = document.getElementById('cadProcessModal');
+        if (statusModal) statusModal.style.display = 'flex';
+
         statusContent.style.display = 'none';
         configArea.style.display = 'block';
         
@@ -1198,9 +1210,11 @@ export async function executeCadConversion(projectId) {
             configArea.style.display = 'none';
             statusContent.style.display = 'block';
             
-            // 변환 시뮬레이션 시작 (180초 동안 95%까지)
-            startProgressSimulation(95, 180000);
-            statusText.innerHTML = "지도를 생성하고 있습니다...<br>약 3~5분 정도 소요될 수 있습니다.";
+            // [수정] 진행바 시뮬레이션 제거 및 문구 변경
+            if (processSimTimer) clearInterval(processSimTimer);
+            const pbContainer = document.getElementById('cadProgressBarContainer');
+            if (pbContainer) pbContainer.style.display = 'none';
+            statusText.innerHTML = "지도 생성 중!! 약 1분 정도 기다리시면 지도가 생성됩니다";
 
             // 상태 업데이트
             await callSupabaseDirect(`cad_projects?id=eq.${projectId}`, 'PATCH', { status: 'CONVERTING' });
