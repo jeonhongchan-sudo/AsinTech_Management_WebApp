@@ -1719,25 +1719,19 @@ function openMemoPopup(feature) {
     if (pointText && state.projectPhotos.length > 0) {
         const matched = state.projectPhotos.filter(p => {
             const fName = p.file_name || '';
-            // 확장자 제거한 파일명 베이스
-            const baseName = fName.includes('.') ? fName.substring(0, fName.lastIndexOf('.')) : fName;
-            
-            // 매칭 기준 (Python 스크립트 로직 이식 및 확장)
-            // [수정] 하이픈이 2개 이상인 경우 (예: 250601-01-1), 앞의 두 마디만 추출하여 비교 (예: 250601-01)
-            // 이는 '250601-01/제수변하단'과 같은 포인트명에 여러 장의 연관 사진을 매칭하기 위함입니다.
-            let searchName = baseName;
-            const parts = baseName.split('-');
-            if (parts.length >= 3) {
-                searchName = parts[0] + '-' + parts[1];
-            }
+            const fBaseName = fName.includes('.') ? fName.substring(0, fName.lastIndexOf('.')) : fName;
 
-            // 1. 완전 일치: point_name == file_name_base
-            // 2. 부분 포함: file_name_base in point_name (파일명이 포인트명에 포함됨)
-            // 3. 접두사: file_name_base.startswith(point_name + '-')
-            return (pointText === baseName) || 
-                   (pointText.includes(baseName)) || 
-                   (baseName.startsWith(pointText + '-')) ||
-                   (pointText.includes(searchName)); // [추가] 단축된 파일명이 포인트명에 포함되는지 확인
+            // [로직 개선] 사진 파일명에서 기준 식별자 추출
+            // 예: '260516-10-1' -> '260516-10', 'p101' -> 'p101'
+            const fParts = fBaseName.split('-');
+            const fId = (fParts.length >= 2) ? (fParts[0] + '-' + fParts[1]) : fBaseName;
+
+            // [대전제] 파일 식별자(fId)가 마커 텍스트(pointText)에 포함되어 있는지 확인
+            // 단, 10과 103을 구분하기 위해 fId 바로 뒤에 숫자가 붙어있는 경우는 제외함 (Negative Lookahead 사용)
+            const escapedId = fId.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'); // 특수문자 이스케이프
+            const regex = new RegExp(escapedId + "(?![0-9])"); 
+            
+            return regex.test(pointText);
         });
 
         if (matched.length > 0) {
