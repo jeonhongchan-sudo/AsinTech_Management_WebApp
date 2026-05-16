@@ -914,6 +914,58 @@ export function roomUploadCad(id) {
     document.getElementById('cadFileSelector').click();
 }
 
+/** [추가] 브라우저에서 DXF 레이어 목록 추출 (Worker CPU 제한 및 Action 대기 시간 우회) */
+async function extractDxfLayers(file) {
+    // 1. 인코딩 감지 (AutoCAD 2000 등 구버전 한글 인코딩 대응)
+    let encoding = 'utf-8';
+    try {
+        const headerBlob = file.slice(0, 15000); // 파일 앞부분 15KB 추출 (헤더 영역)
+        const headerBuffer = await headerBlob.arrayBuffer();
+        // 모든 바이트를 손실 없이 읽기 위해 iso-8859-1(Latin1)로 먼저 디코딩
+        const rawHeader = new TextDecoder('iso-8859-1').decode(headerBuffer);
+        
+        if (rawHeader.includes('$DWGCODEPAGE')) {
+            const lines = rawHeader.split(/\r?\n/);
+            const idx = lines.findIndex(line => line.trim() === '$DWGCODEPAGE');
+            if (idx !== -1 && lines[idx+2]) {
+                const codePage = lines[idx+2].trim();
+                // ANSI_949는 윈도우 한글(CP949)을 의미하며, 브라우저 표준 명칭은 euc-kr입니다.
+                if (codePage === 'ANSI_949') encoding = 'euc-kr';
+                else if (codePage === 'UTF8') encoding = 'utf-8';
+            }
+        } else {
+            // 헤더 정보가 없는데 한글이 깨진다면 한국 CAD 환경에서는 99% EUC-KR입니다.
+            encoding = 'euc-kr';
+        }
+    } catch (e) { console.warn("인코딩 감지 실패, EUC-KR로 시도합니다.", e); encoding = 'euc-kr'; }
+
+    const reader = file.stream().getReader();
+    const decoder = new TextDecoder(encoding);
+    let partialLine = '';
+    const layers = new Set();
+    let nextIsLayerName = false;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = (partialLine + chunk).split(/\r?\n/);
+        partialLine = lines.pop();
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (nextIsLayerName) {
+                if (trimmed) layers.add(trimmed);
+                nextIsLayerName = false;
+            } else if (trimmed === '8') { // DXF 코드 8: 객체의 레이어 이름
+                nextIsLayerName = true;
+            }
+        }
+    }
+    return Array.from(layers).sort();
+}
+
 // [복구] 파일 선택기 이벤트 리스너 등록 (CAD 업로드 및 분석 트리거)
 setTimeout(() => {
     const selector = document.getElementById('cadFileSelector');
@@ -972,6 +1024,10 @@ async function processCadUpload(file, projectId) {
     document.getElementById('cadProcessConfig').style.display = 'none';
     
     try {
+        // 0. 브라우저에서 즉시 레이어 분석 실행
+        statusText.innerText = "도면 레이어 분석 중...";
+        const extractedLayers = await extractDxfLayers(file);
+
         // 1. R2 업로드 경로 설정
         const ext = file.name.split('.').pop().toLowerCase();
         // [수정] 사용자의 요청에 따라 경로를 cad_data/CAD_{id}.{ext} 형식으로 통일
@@ -996,60 +1052,20 @@ async function processCadUpload(file, projectId) {
             headers: { 'Cache-Control': 'public, max-age=31536000' } // 365일 캐시 설정
         });
 
-        // 3. Supabase 상태 업데이트 (ANALYZING)
-        // [수정] raw_file_path를 기록하지 않음 (payload로만 전달)
-        statusText.innerText = "도면 분석 요청 중...";
+        // 3. Supabase 상태 업데이트 (Action을 거치지 않고 바로 ANALYZED 상태로)
+        statusText.innerText = "분석 정보 저장 중...";
         await callSupabaseDirect(`cad_projects?id=eq.${projectId}`, 'PATCH', {
-            status: 'ANALYZING'
+            status: 'ANALYZED',
+            available_layers: extractedLayers
         });
 
-        // 4. GitHub Action 트리거 (분석용)
-        const dispatchRes = await fetch(`${WORKER_URL}/dispatch`, {
-            method: 'POST',
-            headers: { 
-                'Authorization': WORKER_AUTH_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              event_type: "analyze_cad",
-              client_payload: { project_id: projectId, file_path: r2Path, file_name: fileName }
-            })
-        });
+        // 4. 즉시 설정 UI 열기 (Action 대기 시간 0초)
+        updateProcessProgress(100, "분석 완료!");
+        setTimeout(() => {
+            showAlert("도면 분석이 완료되었습니다.", "success");
+            window.openCadConfigUI(projectId);
+        }, 500);
 
-        const dispatchResult = await dispatchRes.json();
-        if (dispatchResult.success) {
-            showAlert("도면 업로드 및 분석 요청이 성공했습니다.", "success");
-            statusText.innerHTML = "도면 분석을 진행 중입니다.<br>잠시만 기다려 주세요.";
-            
-            // 시뮬레이션 시작 (90초 동안 90%까지 서서히 상승)
-            startProgressSimulation(90, 90000);
-
-            // [추가] 분석 상태 자동 체크 (5초 간격)
-            const pollTimer = setInterval(async () => {
-                try {
-                    const [p] = await callSupabaseDirect(`cad_projects?id=eq.${projectId}&select=status`);
-                    if (p && p.status === 'ANALYZED') {
-                        clearInterval(pollTimer);
-                        if (processSimTimer) clearInterval(processSimTimer);
-                        updateProcessProgress(100, "분석 완료!"); // 즉시 100%
-                        
-                        setTimeout(() => {
-                            showAlert("도면 분석이 성공적으로 완료되었습니다.", "success");
-                            window.openCadConfigUI(projectId); 
-                        }, 600);
-                    } else if (p && p.status === 'ERROR') {
-                        clearInterval(pollTimer);
-                        if (processSimTimer) clearInterval(processSimTimer);
-                        statusText.innerHTML = "❌ 분석 중 오류가 발생했습니다.<br>도면 형식을 확인해주세요.";
-                    }
-                } catch (e) { console.warn("Status check failed", e); }
-            }, 5000);
-
-            // 15분 후 자동 종료
-            setTimeout(() => clearInterval(pollTimer), 900000);
-        } else {
-            throw new Error("분석 트리거 실패");
-        }
     } catch (e) {
         statusText.innerText = "오류 발생: " + e.message;
         console.error(e);
