@@ -91,16 +91,20 @@ export function openPhotoManager(id, name) {
   
   // [수정] 백업 관리 버튼(☁️) 크기를 다른 헤더 버튼(16px, 5x10px)과 동일하게 맞추고 버튼 그룹 내부에 배치
   let btnArea = document.querySelector('.pm-actions > div:last-child');
-  if (btnArea && !document.getElementById('pmBackupOpenBtn')) {
-      const backupBtn = document.createElement('button');
-      backupBtn.id = 'pmBackupOpenBtn';
-      backupBtn.className = 'btn btn-outline';
-      backupBtn.style.padding = '5px 10px';
-      backupBtn.style.fontSize = '16px';
-      backupBtn.innerHTML = '☁️';
-      backupBtn.title = '구글 드라이브 백업 관리';
+  if (btnArea) {
+      let backupBtn = document.getElementById('pmBackupOpenBtn');
+      if (!backupBtn) {
+          backupBtn = document.createElement('button');
+          backupBtn.id = 'pmBackupOpenBtn';
+          backupBtn.className = 'btn btn-outline';
+          backupBtn.style.padding = '5px 10px';
+          backupBtn.style.fontSize = '16px';
+          backupBtn.innerHTML = '☁️';
+          backupBtn.title = '구글 드라이브 백업 관리';
+          btnArea.appendChild(backupBtn);
+      }
+      // [수정] 버튼이 이미 존재하더라도 현재 프로젝트 ID와 이름으로 클릭 핸들러를 매번 갱신합니다.
       backupBtn.onclick = () => openBackupManager(id, name);
-      btnArea.appendChild(backupBtn);
   }
 
   loadPhotos(id);
