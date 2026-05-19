@@ -312,7 +312,8 @@ export async function performLogin(username, isAuto = false) {
         await fetchUserSettings(username);
     }
     updateHeaderWithUser(username);
-    loadProjects(); // [추가] 로그인 성공 직후 유저 권한에 맞는 프로젝트 목록 로드
+    // [수정] 탭별 지연 로딩을 위해 초기 도면 목록만 갱신 (사진/메모는 해당 탭 진입 시 로드)
+    switchTab('cadViewer');
     startConversionObserver(); // [추가] 로그인 시 변환 중인 작업이 있는지 확인 시작
     return true;
 }
@@ -387,7 +388,8 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   initProj4Defs();
-  initCadViewer(); // 초기 탭(Map Viewer) 초기화
+  // [수정] 설정 로드 전 성급한 초기화 제거 (네트워크 병목 방지)
+  // initCadViewer(); 
 
   // [수정] GAS 대신 Cloudflare Worker에서 설정 정보를 가져옵니다.
   fetch(`${WORKER_URL}/config`, {
@@ -419,12 +421,18 @@ document.addEventListener('DOMContentLoaded', function() {
               }
               
               updateHeaderWithUser(state.currentUser);
+              
+              // [추가] 설정과 유저 확인이 끝난 후 현재 활성화된 탭의 데이터만 로드
+              const activeTab = document.querySelector('.nav-tab.active');
+              if (activeTab) {
+                  const tabName = activeTab.getAttribute('onclick').match(/'([^']+)'/)[1];
+                  switchTab(tabName);
+              }
           }
       }
-      loadProjects();
   }).catch(e => { 
       console.warn("Config fetch failed", e); 
-      loadProjects(); 
+      // loadProjects(); 
   });
 
   

@@ -801,10 +801,9 @@ export async function initCadViewer() {
     const select = document.getElementById('cadProjectSelect');
     if (select) select.innerHTML = '<option value="">서버 설정 로드 중...</option>';
     try {
-        if (!state.supabaseConfig) {
-            const sbRes = await callApi('getSupabaseConfig');
-            if (sbRes.success) state.supabaseConfig = { url: sbRes.url, key: sbRes.key };
-        }
+        // [수정] 중복 API 호출 제거: 설정을 main.js에서 중앙 관리하므로 여기서 별도 호출할 필요 없음
+        if (!state.supabaseConfig) return;
+
         if (R2_BASE_URL) {
             state.r2Config = { publicUrl: R2_BASE_URL };
         } else {
