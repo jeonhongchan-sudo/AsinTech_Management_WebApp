@@ -1062,20 +1062,47 @@ export async function searchPoints() {
 
     if (!cadMap) return showAlert("지도를 먼저 로드해주세요.", "error");
 
-    // [개선] 검색어 전처리: 공백 제거 및 소문자화 (유연한 검색)
-    const term = searchTerm.trim().toLowerCase().replace(/\s+/g, '');
+    // [개선] 검색어 및 데이터 전처리 유틸리티: 공백, CAD 특수코드(%%c 등), 구분자(/, -, _, .) 제거
+    const sanitize = (str) => {
+        if (str === null || str === undefined) return '';
+        return str.toString().toLowerCase()
+            .replace(/\s+/g, '')             // 모든 공백 제거
+            .replace(/%%[cdp]/gi, '')        // CAD 제어코드 제거 (%%c:Φ, %%d:°, %%p:±)
+            .replace(/[/\\-_.]/g, '');       // 일반 구분 기호(/, \, -, _, .) 제거
+    };
+
+    // [수정] 검색어 파싱 고도화: '포함&조건 공백조건 !제외1 !제외2' 형태 대응
+    const parts = searchTerm.split('!');
+    const includePart = parts[0];
+    // 여러 개의 제외 단어를 배열로 수집
+    const excludeTerms = parts.slice(1).map(t => sanitize(t)).filter(t => t !== "");
+
+    // '&'를 기준으로 OR 그룹 분리 (이것 또는 저것)
+    const orGroups = includePart.split('&').filter(g => g.trim() !== "");
+
+    if (orGroups.length === 0) return; // 포함할 단어가 없으면 중단
     
     // 1. 전체 소스 데이터(포인트 레이어)를 가져옴
     const features = cadMap.querySourceFeatures('cad_source', { sourceLayer: 'point' });
 
-    // [개선] 검색 로직: 모든 속성값 중 검색어가 포함된 항목을 모두 찾음
+    // [개선] 검색 로직: OR(&), AND(공백), NOT(!)을 모두 지원하는 정밀 필터링
     const matches = features.filter(f => {
-        return Object.values(f.properties).some(val => {
-            if (val === null || val === undefined) return false;
-            // 속성값과 검색어 모두 공백을 제거하고 비교하여 유연성 극대화
-            const strVal = val.toString().toLowerCase().replace(/\s+/g, '');
-            return strVal.includes(term);
+        const combinedValues = Object.values(f.properties).map(v => sanitize(v)).join(' ');
+        
+        // 1. 포함 조건 확인 (OR 그룹 중 하나라도 만족해야 함)
+        const hasAnyInclude = orGroups.some(group => {
+            // 그룹 내의 단어들은 모두 포함되어야 함 (공백 기준 AND 조건)
+            const andTerms = group.trim().split(/\s+/).map(t => sanitize(t)).filter(t => t !== "");
+            if (andTerms.length === 0) return false;
+            return andTerms.every(term => combinedValues.includes(term));
         });
+
+        if (!hasAnyInclude) return false;
+
+        // 2. 제외 조건 확인 (제외 단어 중 하나라도 들어있으면 탈락)
+        const hasAnyExclude = excludeTerms.some(term => combinedValues.includes(term));
+        
+        return !hasAnyExclude;
     });
 
     if (matches.length === 0) {
@@ -1098,13 +1125,14 @@ export async function searchPoints() {
     // 1. 유효한 좌표 수집 및 정밀 중복 제거
     matches.forEach(f => {
         const props = f.properties;
-        const tmX = parseFloat(props.tm_x);
-        const tmY = parseFloat(props.tm_y);
-        const label = (props.text || props.layer || '').toString();
+        // [추가] 속성 키의 대소문자 불일치(tm_x vs TM_X)나 'x', 'y' 등 다양한 명칭에 대응하여 추출 성공률 극대화
+        const tmX = parseFloat(props.tm_x || props.TM_X || props.x || props.X);
+        const tmY = parseFloat(props.tm_y || props.TM_Y || props.y || props.Y);
+        const label = (props.text || props.TEXT || props.label || props.layer || '').toString();
 
         if (!isNaN(tmX) && !isNaN(tmY) && tmX !== 0 && tmY !== 0) {
-            // 좌표(소수점 2자리 정밀도)와 라벨을 조합한 키로 중복 제거
-            const key = `${tmX.toFixed(2)}|${tmY.toFixed(2)}|${label}`;
+            // [수정] 중복 제거 정밀도를 소수점 6자리(약 0.1mm)로 상향하여 인접한 서로 다른 포인트가 하나로 뭉쳐 누락되는 현상 방지
+            const key = `${tmX.toFixed(6)}|${tmY.toFixed(6)}|${label}|${props.layer}`;
             if (!seenKeys.has(key)) {
                 uniqueMatches.push({ tmX, tmY, text: label, layer: props.layer });
                 seenKeys.add(key);
