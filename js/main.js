@@ -368,7 +368,7 @@ function updateHeaderWithUser(username) {
             // 오른쪽 영역: 유저 정보 컨테이너 생성
             userInfo = document.createElement('div');
             userInfo.id = 'userInfoDisplay';
-            userInfo.style.cssText = 'color: white; font-size: 13px; display: flex; align-items: center; gap: 4px; white-space: nowrap; flex-shrink: 0;';
+            userInfo.style.cssText = 'color: white; font-size: 13px; display: flex; align-items: center; gap: 8px; white-space: nowrap; flex-shrink: 0;';
             header.appendChild(userInfo);
         }
     }
