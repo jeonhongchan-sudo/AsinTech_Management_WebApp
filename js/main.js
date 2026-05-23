@@ -1,5 +1,5 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
-import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
+import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY, R2_BASE_URL } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider, openLayerStyleModal, closeLayerStyleModal, switchStyleTab, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, updateIndividualStyle, loadCadProjects, toggleDynamicText, showProjectInfo, switchProjectInfoTab } from './viewers.js';
 import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, deleteProjectMemos, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, deleteAllPhotos, cleanupR2Orphans, saveMemo, roomCreateProject, roomDeleteProject, roomUploadCad, openCadConfigUI, executeCadConversion, togglePhotoMenu } from './managers.js';
 
@@ -348,6 +348,14 @@ function updateHeaderWithUser(username) {
             headerLogoDiv.style.flexWrap = 'wrap'; // 모바일 등 좁은 화면 대응
             headerLogoDiv.style.justifyContent = 'center'; // 모바일에서 중앙 정렬 유지
 
+            // [수정] (주)아신테크 텍스트 제거 및 로고 이미지 삽입 (프로그램 다운로드 연동)
+            headerLogoDiv.innerHTML = '';
+            const logoImg = document.createElement('img');
+            logoImg.src = 'icon.ico';
+            logoImg.style.cssText = 'height: 32px; cursor: pointer; margin-right: 5px; border-radius: 4px;';
+            logoImg.onclick = () => window.showProgramDownloadModal();
+            headerLogoDiv.appendChild(logoImg);
+
             userInfo = document.createElement('span');
             userInfo.id = 'userInfoDisplay';
             userInfo.style.cssText = 'color: white; font-size: 14px; display: inline-flex; align-items: center;';
@@ -375,6 +383,74 @@ function updateHeaderWithUser(username) {
         userInfo.innerHTML = html;
     }
 }
+
+// [추가] 윈도우 프로그램 및 설정 파일 일괄 다운로드 기능
+// [수정] 윈도우 프로그램 및 설정 파일(총 4종)을 하나의 ZIP 파일로 실시간 압축하여 다운로드
+window.showProgramDownloadModal = async function() {
+    // 브라우저 기본 confirm 모달을 활용하여 [예/아니오] 선택 구현
+    if (confirm("윈도우 프로그램을 다운로드 하시겠습니까?")) {
+        showAlert("압축 파일을 준비 중입니다. 잠시만 기다려주세요...", "info");
+
+        try {
+            // 1. 클라이언트 측 압축을 위한 JSZip 라이브러리 동적 로드
+            if (typeof JSZip === 'undefined') {
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+                    script.onload = resolve;
+                    script.onerror = () => reject(new Error("JSZip 라이브러리 로드 실패"));
+                    document.head.appendChild(script);
+                });
+            }
+
+            // 2. 최신 버전 정보 확인 (deploy.py가 생성하는 app_update.json 활용)
+            let latestVersion = "1.1.8"; // 통신 실패 시 사용할 기본값
+            try {
+                // 캐시 방지를 위해 타임스탬프 쿼리 추가
+                const verRes = await fetch(`${R2_BASE_URL}/app_update.json?t=${Date.now()}`);
+                if (verRes.ok) {
+                    const verData = await verRes.json();
+                    if (verData.version) latestVersion = verData.version;
+                }
+            } catch (e) {
+                console.warn("버전 정보 확인 실패, 기본 버전으로 진행합니다.");
+            }
+
+            const zip = new JSZip();
+            const files = [
+                `AsinTech_Management_Tool_${latestVersion}.exe`, // 최신 버전에 맞춰 파일명 동적 구성
+                'Asin_Management_Tool연계(ODB, LDB, CJ, CJB).lsp',
+                'cache_config.json',
+                'db_config.json'
+            ];
+
+            // 3. R2에서 각 파일을 병렬로 가져와 ZIP 객체에 추가
+            await Promise.all(files.map(async (file) => {
+                const url = `${R2_BASE_URL}/deploy/${encodeURIComponent(file)}`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`파일 가져오기 실패: ${file}`);
+                const blob = await response.blob();
+                zip.file(file, blob); // ZIP 내부에 파일 추가
+            }));
+
+            // 4. ZIP 데이터 생성 및 브라우저 다운로드 실행
+            const content = await zip.generateAsync({ type: "blob" });
+            const zipUrl = URL.createObjectURL(content);
+            const a = document.createElement('a');
+            a.href = zipUrl;
+            a.download = "AsinTech_Management_Tool_Package.zip"; // 요청하신 대로 고정된 파일명 사용
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(zipUrl);
+
+            showAlert("패키지 다운로드가 완료되었습니다.", "success");
+        } catch (e) {
+            console.error("ZIP 다운로드 오류:", e);
+            showAlert("압축 파일 생성 중 오류가 발생했습니다. 관리자에게 문의하세요.", "error");
+        }
+    }
+};
 
 // 초기화
 document.addEventListener('DOMContentLoaded', function() {
