@@ -158,8 +158,37 @@ export async function loadPhotos(id) {
       }
     });
 
-    // 4. 합치고 최신순 정렬
-    const combined = [...r2Photos, ...memoPhotos].sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
+    // 4. 합치고 사용자 정의 규칙에 따라 정렬
+    const combined = [...r2Photos, ...memoPhotos].sort((a, b) => {
+      const nameA = (a.fileName || "").replace(/^\[메모\]\s*/, '').split('.')[0];
+      const nameB = (b.fileName || "").replace(/^\[메모\]\s*/, '').split('.')[0];
+
+      // 패턴 정의 (날짜: 6자리-숫자, 일련번호: 문자+숫자 또는 숫자전체)
+      const datePattern = /^\d{6}-\d+/; 
+      const seqPattern = /^[a-zA-Z]*\d+$/;
+
+      const getPriority = (name) => {
+        if (seqPattern.test(name)) return 0;  // 숫자 나열 (P001 등) -> 우선순위 0
+        if (datePattern.test(name)) return 1; // 날짜 나열 (260516-01 등) -> 우선순위 1
+        return 2;                            // 기타 문자 -> 우선순위 2
+      };
+
+      const pA = getPriority(nameA);
+      const pB = getPriority(nameB);
+
+      if (pA !== pB) return pA - pB;
+
+      if (pA === 0) {
+        // 숫자 나열: 1번부터 (오름차순)
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      } else if (pA === 1) {
+        // 날짜 나열: 최근 날짜부터 (내림차순)
+        return nameB.localeCompare(nameA);
+      } else {
+        // 기타: 영어 -> 한글 순 정렬
+        return nameA.localeCompare(nameB);
+      }
+    });
     renderPhotos({ success: true, photos: combined });
 
   } catch (err) {
