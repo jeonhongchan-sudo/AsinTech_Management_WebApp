@@ -1,6 +1,6 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY, R2_BASE_URL } from './core.js';
-import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider, openLayerStyleModal, closeLayerStyleModal, switchStyleTab, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, updateIndividualStyle, loadCadProjects, toggleDynamicText, showProjectInfo, switchProjectInfoTab } from './viewers.js';
+import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider, openLayerStyleModal, closeLayerStyleModal, switchStyleTab, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, updateIndividualStyle, loadCadProjects, toggleDynamicText, showProjectInfo, switchProjectInfoTab, searchPoints, clearSearchMarkers, resetSearchUI } from './viewers.js';
 import { loadProjects, openPhotoManager, closePhotoManager, deletePhoto, deleteIndividualMemoPhoto, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, deleteProjectMemos, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, deleteAllPhotos, cleanupR2Orphans, saveMemo, roomCreateProject, roomDeleteProject, roomUploadCad, openCadConfigUI, executeCadConversion, togglePhotoMenu } from './managers.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
@@ -72,6 +72,9 @@ window.updateIndividualStyle = updateIndividualStyle; // [추가]
 window.toggleDynamicText = toggleDynamicText; // [추가]
 window.showProjectInfo = showProjectInfo; // [추가]
 window.switchProjectInfoTab = switchProjectInfoTab; // [추가]
+window.searchPoints = searchPoints; // [추가] 포인트 검색
+window.clearSearchMarkers = clearSearchMarkers; // [추가]
+window.resetSearchUI = resetSearchUI; // [추가]
 
 // [추가] 지도 팝업 내 사진 탐색(Lightbox) 연동 브릿지 함수
 window.openMatchedLightbox = function(index) {
@@ -473,7 +476,6 @@ document.addEventListener('DOMContentLoaded', function() {
       if (input) input.value = savedUser;
   }
 
-  initProj4Defs();
   // [수정] 설정 로드 전 성급한 초기화 제거 (네트워크 병목 방지)
   // initCadViewer(); 
 
@@ -530,10 +532,3 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
 });
-
-function initProj4Defs() {
-    if (typeof proj4 === 'undefined') return;
-    proj4.defs("EPSG:5179", "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 +x_0=1000000 +y_0=2000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
-    proj4.defs("EPSG:5186", "+proj=tmerc +lat_0=38 +lon_0=127 +k=1 +x_0=200000 +y_0=500000 +ellps=GRS80 +units=m +no_defs");
-    proj4.defs("EPSG:5187", "+proj=tmerc +lat_0=38 +lon_0=129 +k=1 +x_0=200000 +y_0=500000 +ellps=GRS80 +units=m +no_defs");
-}

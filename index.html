@@ -18,7 +18,6 @@
   <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/pmtiles@2.11.0/dist/index.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
 
   <style>
     /* 반응형 탭 / 모바일 최적화 */
@@ -173,6 +172,7 @@
         z-index: 1000;
         animation: marker-pulse 1.5s infinite;
     }
+
     @keyframes marker-pulse {
         0% { box-shadow: 0 0 0 0 rgba(250, 82, 82, 0.7); }
         70% { box-shadow: 0 0 0 12px rgba(250, 82, 82, 0); }
@@ -278,12 +278,18 @@
                       <span>조사메모 활성화</span>
                       <label class="switch"><input type="checkbox" id="chkSurveyMode" onchange="window.toggleSurveyMode()"><span class="slider blue"></span></label>
                   </div>
+                  <div class="map-menu-item" onclick="window.searchPoints(); window.toggleMapMenu();" style="cursor:pointer;">
+                      <span>포인트 검색</span>
+                      <span style="font-size: 16px;">🔍</span>
+                  </div>
               </div>
             </div>
         </div>
         <div style="position: relative;">
             <div id="cad-map"></div>
             <button id="cadLayerToggleBtn" class="map-overlay-btn" onclick="toggleLayerPanel()">☰ 레이어 목록</button>
+            <!-- [추가] 검색 결과 초기화 빗자루 버튼 (레이어 목록 옆에 배치) -->
+            <button id="btnResetSearch" class="map-overlay-btn" onclick="window.resetSearchUI()" style="left: 115px; display: none; padding: 8px 10px;" title="검색 결과 초기화">🧹</button>
             <div id="cadLayerPanel" class="layer-panel">
                 <!-- [수정] 헤더 정리 및 편집 버튼 추가 -->
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:5px;">

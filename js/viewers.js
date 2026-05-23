@@ -908,16 +908,19 @@ export async function loadCadMap(projectId) {
     if (!projectId) return;
     state.currentCadProjectId = projectId; // [수정] 전역 상태에 프로젝트 ID 저장
     if (cadMap) { cadMap.remove(); cadMap = null; }
+    clearSearchMarkers(); // [추가] 새 지도 로드 시 이전 검색 결과 초기화
     cadLayers.clear(); cadLayerColors = {}; cadHiddenLayers.clear();
     document.getElementById('cadLayerList').innerHTML = '';
     document.getElementById('cadLayerPanel').style.display = 'none';
 
     try {
-        const files = await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.pmtiles&select=*,source_crs&limit=1`);
+        // [수정] 프로젝트 로드 시 DB(cad_files)에서 설정된 실제 좌표계(source_crs)를 정확히 가져옴
+        const files = await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.pmtiles&select=file_path,source_crs,updated_at&limit=1`);
         if (!files || files.length === 0) { showAlert('이 프로젝트에는 변환된 지도 데이터(PMTiles)가 없습니다.', 'error'); return; }
         
         const fileData = files[0];
-        state.currentProjectSourceCrs = fileData.source_crs || 'EPSG:5179';
+        // [수정] DB에 저장된 좌표계를 전역 상태에 저장 (검색 기능에서 이 값을 사용)
+        state.currentProjectSourceCrs = fileData.source_crs;
         const filePath = fileData.file_path;
         // [수정] 캐시 무시를 위한 버전 쿼리 스트링 추가 (updated_at 시간값 사용)
         const version = fileData.updated_at ? new Date(fileData.updated_at).getTime() : Date.now();
@@ -932,7 +935,11 @@ export async function loadCadMap(projectId) {
         const savedLabelStyle = state.userSettings?.layer_styles?.[labelStyleKey] || { size: 12, color: '#000000' };
         try {
             const header = await p.getHeader();
-            if (header) { bounds = [header.minLon, header.minLat, header.maxLon, header.maxLat]; maxDataZoom = header.maxZoom || 28; }
+            if (header) { 
+                bounds = [[header.minLon, header.minLat], [header.maxLon, header.maxLat]]; 
+                state.currentProjectBounds = bounds; // [추가] 프로젝트 전체 영역 저장
+                maxDataZoom = header.maxZoom || 28; 
+            }
             const metadata = await p.getMetadata();
             if (metadata && metadata.vector_layers) {
                 // 소스 레이어 ID(line, point 등)를 직접 추가하지 않고 Discovery 기능을 통해 실제 속성 레이어명을 찾습니다.
@@ -1047,6 +1054,143 @@ export function toggleBackgroundMap(isVisible) {
     }
     updateCadStyle();
 }
+
+// 포인트 명칭 검색 기능 (검색 범위 확장 및 수량 파악 기능)
+export async function searchPoints() {
+    const searchTerm = prompt("검색할 포인트 명칭(예: 210501-01 또는 제수변)을 입력하세요:");
+    if (!searchTerm || !searchTerm.trim()) return;
+
+    if (!cadMap) return showAlert("지도를 먼저 로드해주세요.", "error");
+
+    // [개선] 검색어 전처리: 공백 제거 및 소문자화 (유연한 검색)
+    const term = searchTerm.trim().toLowerCase().replace(/\s+/g, '');
+    
+    // 1. 전체 소스 데이터(포인트 레이어)를 가져옴
+    const features = cadMap.querySourceFeatures('cad_source', { sourceLayer: 'point' });
+
+    // [개선] 검색 로직: 모든 속성값 중 검색어가 포함된 항목을 모두 찾음
+    const matches = features.filter(f => {
+        return Object.values(f.properties).some(val => {
+            if (val === null || val === undefined) return false;
+            // 속성값과 검색어 모두 공백을 제거하고 비교하여 유연성 극대화
+            const strVal = val.toString().toLowerCase().replace(/\s+/g, '');
+            return strVal.includes(term);
+        });
+    });
+
+    if (matches.length === 0) {
+        showAlert(`'${searchTerm}'와 일치하는 포인트를 찾을 수 없습니다.\n(지도를 조금 이동하거나 줌 아웃 후 다시 시도해보세요)`, 'info');
+        return;
+    }
+
+    // 기존 검색 마커 제거
+    clearSearchMarkers();
+
+    // 중복 제거 (벡터 타일 특성상 경계선에서 중복 검색될 수 있음)
+    const uniqueMatches = [];
+    const seenKeys = new Set();
+
+    const currentCrs = state.currentProjectSourceCrs;
+    if (!currentCrs) {
+        return showAlert("이 프로젝트의 좌표계 정보(CRS)가 없어 검색을 수행할 수 없습니다.", "error");
+    }
+
+    // 1. 유효한 좌표 수집 및 정밀 중복 제거
+    matches.forEach(f => {
+        const props = f.properties;
+        const tmX = parseFloat(props.tm_x);
+        const tmY = parseFloat(props.tm_y);
+        const label = (props.text || props.layer || '').toString();
+
+        if (!isNaN(tmX) && !isNaN(tmY) && tmX !== 0 && tmY !== 0) {
+            // 좌표(소수점 2자리 정밀도)와 라벨을 조합한 키로 중복 제거
+            const key = `${tmX.toFixed(2)}|${tmY.toFixed(2)}|${label}`;
+            if (!seenKeys.has(key)) {
+                uniqueMatches.push({ tmX, tmY, text: label, layer: props.layer });
+                seenKeys.add(key);
+            }
+        }
+    });
+
+    if (uniqueMatches.length === 0) {
+        showAlert(`'${searchTerm}' 좌표 정보가 있는 포인트를 찾을 수 없습니다.`, "info");
+        return;
+    }
+
+    showAlert(`${uniqueMatches.length}개의 좌표를 DB에서 변환 중...`, "info");
+
+    // 2. [핵심] Supabase PostGIS RPC를 호출하여 정밀 변환 수행
+    try {
+        const convertedCoords = await callSupabaseDirect('rpc/transform_tm_to_wgs84_batch', 'POST', {
+            // [교정] CAD 데이터의 속성 그대로 tm_x(가로), tm_y(세로)를 전달
+            points: uniqueMatches.map(m => ({ tm_x: m.tmX, tm_y: m.tmY })),
+            source_crs: currentCrs
+        });
+        
+        if (!convertedCoords || convertedCoords.length === 0) {
+            return showAlert("좌표 변환 결과가 없습니다.", "error");
+        }
+
+        // 3. 변환된 좌표를 매칭 결과에 병합 및 유효성 검사
+        const finalResults = uniqueMatches.map((m, i) => ({
+            ...m,
+            lon: convertedCoords[i].lon,
+            lat: convertedCoords[i].lat
+        })).filter(r => r.lon && r.lat && !isNaN(r.lon) && r.lon !== 0);
+
+        if (finalResults.length === 0) return showAlert("유효한 좌표를 찾을 수 없습니다.", "info");
+
+        // 기존 검색 마커 제거
+        clearSearchMarkers();
+
+        // 4. 기본 북마크(Marker) 지도에 표시
+        const bounds = new maplibregl.LngLatBounds();
+        finalResults.forEach(m => {
+            const marker = new maplibregl.Marker() // 기본 스타일 마커 사용
+                .setLngLat([m.lon, m.lat])
+                .addTo(cadMap);
+                
+            // [수정] 마커가 클릭을 방해하지 않도록 설정 (지도의 기존 클릭 이벤트로 메모창이 열림)
+            marker.getElement().style.pointerEvents = 'none';
+
+            state.searchMarkers.push(marker);
+            bounds.extend([m.lon, m.lat]);
+        });
+
+        // 5. 위치 이동 (여러 개인 경우 전체를 조망)
+        if (finalResults.length === 1) {
+            cadMap.flyTo({ center: [finalResults[0].lon, finalResults[0].lat], zoom: 20, speed: 1.2, essential: true });
+        } else {
+            cadMap.fitBounds(bounds, { padding: 80, maxZoom: 20 });
+        }
+        showAlert(`총 ${finalResults.length}개의 포인트를 찾았습니다.`, 'success');
+        
+        // [추가] 검색 성공 시 초기화(빗자루) 버튼 노출
+        document.getElementById('btnResetSearch').style.display = 'block';
+
+    } catch (e) {
+        console.error("좌표 검색 중 오류 발생:", e);
+        showAlert("좌표 변환 중 서버 오류가 발생했습니다.", "error");
+    }
+}
+
+// [추가] 검색 결과 초기화 및 지도를 프로젝트 전체 영역으로 원복
+export function resetSearchUI() {
+    clearSearchMarkers();
+    if (cadMap && state.currentProjectBounds) {
+        cadMap.fitBounds(state.currentProjectBounds, { padding: 40, duration: 1200, essential: true });
+    }
+    document.getElementById('btnResetSearch').style.display = 'none';
+}
+
+// [추가] 검색 마커 초기화
+export function clearSearchMarkers() {
+    if (state.searchMarkers && state.searchMarkers.length > 0) {
+        state.searchMarkers.forEach(m => m.remove());
+    }
+    state.searchMarkers = [];
+}
+
 
 // [추가] 지도 제공자 전환 기능 (OSM <-> VWorld)
 export function switchMapProvider(useVWorld) {
@@ -1650,8 +1794,10 @@ export function cleanupCadViewer() {
     state.currentCadProjectId = null; // [추가] 초기화
     state.vworldFailed = false; // [추가] 실패 플래그 초기화
     state.highlightedMemoId = null; // [추가] 강조 메모 초기화
+    clearSearchMarkers(); // [추가] 초기화
     document.getElementById('cadLayerPanel').style.display = 'none';
     document.getElementById('cadLayerToggleBtn').style.display = 'none';
+    document.getElementById('btnResetSearch').style.display = 'none'; // [추가] 초기화
     state.projectPhotos = []; // [추가] 사진 목록 초기화
     // [추가] 메모 마커 초기화
     memoMarkers.forEach(m => m.remove());
