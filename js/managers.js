@@ -656,7 +656,31 @@ export async function deleteIndividualMemoPhoto(memoId, urlToDelete) {
 }
 
 // --- Lightbox ---
-export function openLightbox(i) { state.currentLightboxIndex = i; document.getElementById('lightboxOverlay').style.display = 'flex'; updateLightboxImage(); }
+export function openLightbox(i) { 
+    state.currentLightboxIndex = i; 
+    const overlay = document.getElementById('lightboxOverlay');
+    overlay.style.display = 'flex'; 
+    updateLightboxImage(); 
+
+    // [추가] 모바일 터치 스와이프 이벤트 리스너
+    if (!overlay.dataset.swipeBound) {
+        let touchstartX = 0;
+        let touchendX = 0;
+
+        overlay.addEventListener('touchstart', e => {
+            touchstartX = e.changedTouches[0].screenX;
+        }, { passive: true });
+
+        overlay.addEventListener('touchend', e => {
+            touchendX = e.changedTouches[0].screenX;
+            const diff = touchstartX - touchendX;
+            if (Math.abs(diff) > 50) { // 50px 이상 움직였을 때만 작동
+                navigateLightbox(diff > 0 ? 1 : -1);
+            }
+        }, { passive: true });
+        overlay.dataset.swipeBound = "true";
+    }
+}
 
 export function closeLightbox(e) {
     if (e && e.target !== e.currentTarget) return;
