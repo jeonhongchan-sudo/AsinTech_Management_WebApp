@@ -216,11 +216,7 @@ function renderPhotos(res) {
            ? `<button class="btn btn-info" style="padding:2px 5px; font-size:11px; margin-right:5px;" onclick="window.downloadPhotoFile('${p.url}', '${p.fileName}', ${p.isSurvey})">저장</button>`
            : '';
 
-       const deleteBtn = p.isMemoPhoto 
-           ? `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deleteIndividualMemoPhoto('${p.memoId}', '${p.url}')">삭제</button>`
-           : `<button class="btn btn-danger" style="padding:2px 5px; font-size:11px;" onclick="window.deletePhoto('${p.fileId}')">삭제</button>`;
-
-       const actionHtml = `<div style="display:flex; justify-content: flex-end;">${downloadBtn}${deleteBtn}</div>`;
+       const actionHtml = `<div style="display:flex; justify-content: flex-end;">${downloadBtn}</div>`;
        html += `<div class="photo-card"><div class="photo-thumb" onclick="window.openLightbox(${i})"><img src="${thumbnailUrl}" loading="lazy" alt="${p.fileName}"></div><div class="photo-details"><div class="photo-name">${p.fileName}</div><div class="photo-actions">${actionHtml}</div></div></div>`;
    });
    container.innerHTML = html;
@@ -559,100 +555,6 @@ async function deleteR2PhotoVersions(url) {
             headers: { 'Authorization': WORKER_AUTH_KEY }
         }).catch(e => console.warn(`R2 삭제 실패 (${path}):`, e))
     ));
-}
-
-// [추가] 현재 프로젝트의 모든 사진 일괄 삭제
-export async function deleteAllPhotos() {
-    if (!state.currentPhotosData || state.currentPhotosData.length === 0) return;
-    if (!confirm(`현재 프로젝트의 사진 ${state.currentPhotosData.length}장을 모두 삭제하시겠습니까?\n이 작업은 되돌릴 수 없으며 원본 파일도 스토리지에서 삭제됩니다.`)) return;
-
-    const btn = document.getElementById('pmDeleteAllBtn');
-    const originalText = btn.innerText;
-    btn.disabled = true;
-
-    const photosToDelete = [...state.currentPhotosData];
-    let deletedCount = 0;
-
-    for (let i = 0; i < photosToDelete.length; i++) {
-        const p = photosToDelete[i];
-        btn.innerText = `⏳ 삭제 중... (${i + 1}/${photosToDelete.length})`;
-
-        try {
-            if (p.isMemoPhoto) {
-                // 1. 메모 DB 레코드의 image_url 업데이트
-                const data = await callSupabaseDirect(`memos?id=eq.${p.memoId}&select=image_url`);
-                if (data && data.length > 0) {
-                    const currentUrls = data[0].image_url ? data[0].image_url.split(',') : [];
-                    const updatedUrls = currentUrls.map(u => u.trim()).filter(u => u !== p.url && u !== "");
-                    await callSupabaseDirect(`memos?id=eq.${p.memoId}`, 'PATCH', {
-                        image_url: updatedUrls.join(','),
-                        updated_at: new Date().toISOString()
-                    });
-                }
-            } else {
-                // 2. 일반 사진 DB 레코드 삭제 (Supabase photos 테이블)
-                await callSupabaseDirect(`photos?file_id=eq.${p.fileId}`, 'DELETE');
-            }
-
-            // 3. R2 실제 파일 삭제 (원본/프리뷰/썸네일 일괄 삭제)
-            if (p.url && p.url.includes('r2.dev')) {
-                await deleteR2PhotoVersions(p.url);
-            }
-            deletedCount++;
-        } catch (e) {
-            console.warn(`사진 삭제 실패 (${p.fileName}):`, e);
-        }
-    }
-
-    btn.disabled = false;
-    btn.innerText = originalText;
-    showAlert(`${deletedCount}개의 사진이 완전히 삭제되었습니다.`);
-    loadPhotos(state.currentProjectId);
-}
-
-export async function deletePhoto(id) { 
-    if(!confirm("사진을 삭제하시겠습니까?")) return;
-    
-    // [추가] R2 파일인지 확인 (id가 URL 형태인 경우 대응)
-    const photo = state.currentPhotosData.find(p => p.fileId === id);
-    if (photo && photo.url && photo.url.includes('r2.dev')) {
-        await deleteR2PhotoVersions(photo.url);
-    }
-
-    callApi('deletePhoto', { fileId: id }).then(() => loadPhotos(state.currentProjectId)); 
-}
-
-// [추가] 메모 사진 개별 삭제 기능
-export async function deleteIndividualMemoPhoto(memoId, urlToDelete) {
-    if(!confirm("이 메모 사진을 삭제하시겠습니까?")) return;
-    try {
-        // 1. 현재 메모 데이터 조회
-        const data = await callSupabaseDirect(`memos?id=eq.${memoId}&select=image_url`);
-        if (!data || data.length === 0) throw new Error("메모를 찾을 수 없습니다.");
-        
-        const currentUrls = data[0].image_url ? data[0].image_url.split(',') : [];
-        const updatedUrls = currentUrls.map(u => u.trim()).filter(u => u !== urlToDelete && u !== "");
-        
-        // 2. DB 업데이트 (사진 URL 목록에서 제외)
-        await callSupabaseDirect(`memos?id=eq.${memoId}`, 'PATCH', {
-            image_url: updatedUrls.join(','),
-            updated_at: new Date().toISOString()
-        });
-
-        // 3. 구글 드라이브 파일 삭제 시도 (선택 사항)
-        const fileIdMatch = urlToDelete.match(/(?:id=|\/d\/|d\/)([a-zA-Z0-9_-]{25,})/);
-        if (fileIdMatch) {
-            await callApi('deletePhoto', { fileId: fileIdMatch[1] });
-        } else if (urlToDelete.includes('r2.dev')) {
-            // [추가] R2 파일 삭제 처리 (원본/프리뷰/썸네일 일괄 삭제)
-            await deleteR2PhotoVersions(urlToDelete);
-        }
-
-        showAlert("사진이 삭제되었습니다.");
-        loadPhotos(state.currentProjectId); // 목록 갱신
-    } catch (e) {
-        alert("삭제 실패: " + e.message);
-    }
 }
 
 // --- Lightbox ---
