@@ -338,28 +338,38 @@ export function logout() {
 function updateHeaderWithUser(username) {
     let userInfo = document.getElementById('userInfoDisplay');
     if (!userInfo) {
-        // [수정] 타겟 변경: 헤더의 첫 번째 div (로고 영역)
-        const headerLogoDiv = document.querySelector('.header > div:first-child');
-        if (headerLogoDiv) {
-            // 로고와 사용자 정보를 가로로 배치하기 위해 스타일 조정
-            headerLogoDiv.style.display = 'flex';
-            headerLogoDiv.style.alignItems = 'center';
-            headerLogoDiv.style.gap = '15px';
-            headerLogoDiv.style.flexWrap = 'wrap'; // 모바일 등 좁은 화면 대응
-            headerLogoDiv.style.justifyContent = 'center'; // 모바일에서 중앙 정렬 유지
+        const header = document.querySelector('.header');
+        if (header) {
+            // 헤더 프레임 스타일: 높이 축소(54px) 및 수직 중앙 정렬, 양끝 배치
+            header.style.display = 'flex';
+            header.style.justifyContent = 'space-between';
+            header.style.alignItems = 'center';
+            header.style.padding = '0 20px';
+            header.style.height = '54px'; 
+            header.style.minHeight = 'auto';
+            header.style.boxSizing = 'border-box';
 
-            // [수정] (주)아신테크 텍스트 제거 및 로고 이미지 삽입 (프로그램 다운로드 연동)
-            headerLogoDiv.innerHTML = '';
+            // 기존 내부 div 구조 초기화 및 재구성
+            header.innerHTML = '';
+
+            // 왼쪽 영역: 로고 배치
+            const leftDiv = document.createElement('div');
+            leftDiv.style.display = 'flex';
+            leftDiv.style.alignItems = 'center';
+            leftDiv.style.flexShrink = '0'; // 로고가 작아지지 않게 고정
+            
             const logoImg = document.createElement('img');
             logoImg.src = 'icon.ico';
-            logoImg.style.cssText = 'height: 32px; cursor: pointer; margin-right: 5px; border-radius: 4px;';
+            logoImg.style.cssText = 'height: 32px; cursor: pointer; border-radius: 4px; display: block;';
             logoImg.onclick = () => window.showProgramDownloadModal();
-            headerLogoDiv.appendChild(logoImg);
+            leftDiv.appendChild(logoImg);
+            header.appendChild(leftDiv);
 
-            userInfo = document.createElement('span');
+            // 오른쪽 영역: 유저 정보 컨테이너 생성
+            userInfo = document.createElement('div');
             userInfo.id = 'userInfoDisplay';
-            userInfo.style.cssText = 'color: white; font-size: 14px; display: inline-flex; align-items: center;';
-            headerLogoDiv.appendChild(userInfo);
+            userInfo.style.cssText = 'color: white; font-size: 13px; display: flex; align-items: center; gap: 4px; white-space: nowrap; flex-shrink: 0;';
+            header.appendChild(userInfo);
         }
     }
     if (userInfo) {
@@ -378,8 +388,8 @@ function updateHeaderWithUser(username) {
         }
 
         // [수정] 배지(badgeHtml)가 유저명 앞에 오도록 배치
-        let html = `<div style="display:inline-flex; align-items:center;">${badgeHtml}<span style="font-weight:bold; margin-right:10px;">${username}</span></div>`;
-        html += `<button onclick="window.logout()" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.4); border-radius:10px; color:#fff; cursor:pointer; padding:2px 8px; font-size:11px;">로그아웃</button>`;
+        let html = `<div style="display:flex; align-items:center; flex-shrink:0;">${badgeHtml}<span style="font-weight:bold; margin-right:6px;">${username}</span></div>`;
+        html += `<button onclick="window.logout()" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.4); border-radius:10px; color:#fff; cursor:pointer; padding:2px 6px; font-size:11px; flex-shrink:0;">로그아웃</button>`;
         userInfo.innerHTML = html;
     }
 }

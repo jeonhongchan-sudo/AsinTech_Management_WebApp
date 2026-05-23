@@ -102,7 +102,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 @media (max-width: 768px) {
   body { padding: 0; }
   .container { border-radius: 0; min-height: 100vh; box-shadow: none; }
-  .header { flex-direction: column; gap: 10px; text-align: center; padding: 15px; }
+  .header { padding: 0 10px !important; } /* 패딩만 소폭 줄여 공간 확보 */
   .nav-tab { font-size: 14px; padding: 12px 10px; }
   .content { padding: 15px; }
   
