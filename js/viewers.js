@@ -1057,7 +1057,9 @@ export function toggleBackgroundMap(isVisible) {
 
 // 포인트 명칭 검색 기능 (검색 범위 확장 및 수량 파악 기능)
 export async function searchPoints() {
-    const searchTerm = prompt("검색할 포인트 명칭(예: 210501-01 또는 제수변)을 입력하세요:");
+    const searchTerm = prompt(
+        "포인트 검색 문법 안내:\n• & : 또는 (예: 제수변&이토변)\n• 공백 : 그리고 (예: 제수변 50)\n• ! : 제외 (예: 제수변!하단)\n\n검색어를 입력하세요:"
+    );
     if (!searchTerm || !searchTerm.trim()) return;
 
     if (!cadMap) return showAlert("지도를 먼저 로드해주세요.", "error");
