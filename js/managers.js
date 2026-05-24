@@ -1170,7 +1170,7 @@ export async function executeCadConversion(projectId) {
                 reverse_chainage: false,
                 cache_control: "public, max-age=31536000", // 365일 캐시
                 input_type: "dxf",
-                output_formats: ["pmtiles"] // [수정] JSON 결과 파일은 생성/업로드하지 않음
+                output_formats: ["pmtiles", "geojson"] // [수정] GeoJSON 결과 파일도 생성 및 업로드 요청
               }
             })
         });
