@@ -33,7 +33,8 @@ export const state = {
     vworldFailed: false,       // [추가] 브이월드 로드 실패 여부 (자동 Fallback용)
     isDynamicText: true,       // [수정] 텍스트 동적 위치 기본 활성화
     searchMarkers: [],         // [추가] 검색 결과 마커 관리용
-    currentProjectBounds: null // [추가] 현재 프로젝트의 전체 영역 저장용
+    currentProjectBounds: null, // [추가] 현재 프로젝트의 전체 영역 저장용
+    currentProjectGeoJSON: null // [추가] 전역 검색용 데이터 (handle ID 매칭용)
 };
 
 // 유틸리티 함수
