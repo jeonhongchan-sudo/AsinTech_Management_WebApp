@@ -121,6 +121,12 @@ export async function handleAiSearch(query, cadLayersSet) {
         lastAiRequestTime = Date.now();
         updateAiButtonState(true); // 버튼 비활성화 및 로딩 표시
 
+        // [추가] 모달이 열려있는 상태에서 추가 질문 시, 기존 내용을 비우고 로딩 표시 (혼란 방지)
+        const contentEl = document.getElementById('aiAnswerContent');
+        if (contentEl && document.getElementById('aiResponseModal').style.display === 'flex') {
+            contentEl.innerHTML = '<div style="text-align:center; padding:30px; color:#666;"><span class="spinner"></span> AI가 도면과 지침을 분석하여 답변을 생성하고 있습니다...</div>';
+        }
+
         // 추가 질문을 위해 현재 사용된 레이어 셋을 상태에 보관
         state.lastCadLayersSet = cadLayersSet;
 
@@ -248,12 +254,18 @@ export function showAiResponseModal(query, answer, source) {
     
     // [수정] 텍스트 포맷터 적용 및 HTML 렌더링
     content.innerHTML = formatResponseText(answer);
+
+    // [추가] 새로운 답변 로드 시 스크롤을 최상단으로 이동 (이전 DB 검색 결과 등으로 인한 가독성 문제 해결)
+    const scrollArea = modal.querySelector('.modal-content');
+    if (scrollArea) scrollArea.scrollTop = 0;
+
     modal.style.display = 'flex';
 }
 
 /** AI 답변 지식 저장 (학습용) */
 export async function saveAiKnowledge() {
     const now = Date.now();
+    const saveBtn = document.getElementById('btnAiSave');
     
     if (isAiProcessing || (now < lastAiRequestTime)) {
         showAlert("AI가 아직 처리 중이거나 휴식 중입니다. 잠시 후 저장하세요.", "info");
@@ -267,6 +279,10 @@ export async function saveAiKnowledge() {
     
     try {
         isAiProcessing = true;
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="spinner"></span> 저장 중...';
+        }
         showAlert("지식을 학습 데이터로 저장 중...", "info");
 
         // [추가] 저장 전 실시간 임베딩 생성 요청 (의미 검색 즉시 반영을 위함)
@@ -288,18 +304,40 @@ export async function saveAiKnowledge() {
             embedding: vector // 실시간으로 생성된 벡터 저장 (없으면 null 유지 후 깃허브 액션이 처리)
         };
 
-        await callSupabaseDirect('pdf_knowledge', 'POST', payload);
+        // [수정] PostgREST POST 요청 시 단일 객체보다 배열([])로 감싸서 전송하는 것이 스키마 매핑 에러 방지에 유리함
+        await callSupabaseDirect('pdf_knowledge', 'POST', [payload]);
+
+        // [개선] 스마트폰 환경에서 메시지를 확실히 인지하도록 버튼 상태 직접 변경 및 지연 닫기
+        if (saveBtn) {
+            saveBtn.innerHTML = '✅ 저장 완료!';
+            saveBtn.style.backgroundColor = '#4CAF50';
+            saveBtn.style.color = 'white';
+        }
+        showAlert("지식 저장 완료!", "success");
         
-        showAlert("지식 저장 완료! 다음 검색 시 우선 활용됩니다.", "success");
-        document.getElementById('aiResponseModal').style.display = 'none';
+        // 사용자가 성공 상태를 확인할 수 있도록 1.2초 후 모달 닫기
+        setTimeout(() => {
+            document.getElementById('aiResponseModal').style.display = 'none';
+            if (saveBtn) {
+                saveBtn.style.backgroundColor = '';
+                saveBtn.style.color = '';
+            }
+        }, 1200);
     } catch (e) {
+        console.error("AI 지식 저장 실패 상세 원인:", e);
+        if (saveBtn) saveBtn.innerHTML = '❌ 저장 실패';
+
         if (e.message && (e.message.includes("429") || e.message.includes("limit"))) {
             lastAiRequestTime = Date.now() + 60000;
             startAiCooldownUI(60);
         }
-        showAlert("저장 실패: " + e.message, "error");
+        showAlert(`저장 실패: ${e.message || '데이터 형식 오류'}`, "error");
     } finally {
         isAiProcessing = false;
+        if (saveBtn && !saveBtn.innerHTML.includes('완료')) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '💾 답변 저장';
+        }
     }
 }
 

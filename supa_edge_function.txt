@@ -6,7 +6,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); // 서비스 롤 키 사용 권장
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const API_URL = `${API_BASE}/models/gemini-2.5-flash:generateContent`;
+const API_URL = `${API_BASE}/models/gemini-2.5-flash-lite:generateContent`;
 // 사용자님의 모델 리스트 35번 항목(gemini-embedding-001)으로 모델 변경
 const EMBED_URL = `${API_BASE}/models/gemini-embedding-001:embedContent`;
 
