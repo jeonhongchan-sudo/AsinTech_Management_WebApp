@@ -1,6 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\viewers.js
 import { state, callApi, callSupabaseDirect, showAlert, R2_BASE_URL } from './core.js';
 import { UIS_DATA, ROAD_LEDGER_ITEMS, PDF_TOC_DATA, NETWORK_RTK_DATA, NON_CONFORMITY_CASES_DATA, NUMERIC_MAP_DATA, GNSS_NOTICE_DATA, PUBLIC_SURVEY_FAQ_DATA, REGULATION_REVISION_DATA, MATERIAL_ABBREVIATION_DATA, PUBLIC_SURVEY_REGULATIONS_DATA } from './data.js';
+import { handleAiSearch, handleDatabaseSearch } from './ai.js';
 
 export function selectGuideline(type) {
     document.querySelectorAll('.guide-menu-item').forEach(b => b.classList.remove('active'));
@@ -1080,7 +1081,24 @@ export async function searchPoints() {
     );
     if (!searchTerm || !searchTerm.trim()) return;
 
-    if (!cadMap) return showAlert("지도를 먼저 로드해주세요.", "error");
+    // [수정] 프로젝트 미선택(지도 미로드) 상태인 경우
+    if (!cadMap) {
+        // 1순위(도면 검색)는 불가능하므로 건너뛰고, 2순위(지침서 DB 검색) 수행
+        const foundInDb = await handleDatabaseSearch(searchTerm);
+        
+        if (!foundInDb) {
+            // DB에도 결과가 없으면 3순위(AI 추론) 제안
+            const followUpBtn = document.getElementById('btnAiFollowUp');
+            const isCoolingDown = followUpBtn && followUpBtn.innerText.includes('대기');
+
+            if (isCoolingDown) {
+                showAlert("관련 지침이 DB에 없으며, 현재 AI는 할당량 초과 상태입니다.", "info");
+            } else if (confirm(`'${searchTerm}' 관련 지침이 DB에 없습니다.\n최후 수단으로 AI 분석을 요청하시겠습니까?`)) {
+                handleAiSearch(searchTerm, null);
+            }
+        }
+        return;
+    }
 
     // [개선] 검색어 및 데이터 전처리 유틸리티: 공백, CAD 특수코드(%%c 등), 구분자(/, -, _, .) 제거
     const sanitize = (str) => {
@@ -1131,8 +1149,22 @@ export async function searchPoints() {
     });
 
     if (matches.length === 0) {
-        const msg = state.currentProjectGeoJSON ? `'${searchTerm}'를 찾을 수 없습니다.` : `'${searchTerm}'를 찾을 수 없습니다.\n(데이터 로드 중일 수 있으니 잠시 후 다시 시도하세요)`;
-        return showAlert(msg, 'info');
+        // [수정] 우선순위 로직 적용
+        // 1. 데이터베이스 키워드 검색 시도 (AI 없음)
+        const foundInDb = await handleDatabaseSearch(searchTerm);
+        
+        if (!foundInDb) {
+            // 2. DB에도 없을 때만 AI 추론 제안 (최후 순위)
+            const followUpBtn = document.getElementById('btnAiFollowUp');
+            const isCoolingDown = followUpBtn && followUpBtn.innerText.includes('대기');
+
+            if (isCoolingDown) {
+                showAlert("관련 지침이 DB에 없으며, 현재 AI는 할당량 초과 상태입니다.", "info");
+            } else if (confirm(`'${searchTerm}' 검색 결과가 없습니다.\n최후 수단으로 AI 분석을 요청하시겠습니까?`)) {
+                handleAiSearch(searchTerm, cadLayers);
+            }
+        }
+        return;
     }
 
     clearSearchMarkers();

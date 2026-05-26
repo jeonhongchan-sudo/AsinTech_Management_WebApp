@@ -7,6 +7,10 @@ export const R2_BASE_URL = "https://pub-64820218d8b845c7860fb4ea3b6d7ec3.r2.dev"
 export const WORKER_URL = "https://asin-r2-worker.jeonhongchan.workers.dev"; // 본인의 Worker 주소로 변경하세요
 export const WORKER_AUTH_KEY = "asin_tech_secret_2024"; // Worker 환경변수에 설정한 값과 동일하게 입력하세요
 
+// [수정] 아래 주소의 [YOUR_PROJECT_ID]를 실제 Supabase 프로젝트 ID(예: abcdefghijklmnopqrst)로 반드시 변경해야 합니다.
+const PROJECT_ID = "oukpobmfdubzsftvdxgp"; 
+export const SUPABASE_FUNCTIONS_URL = `https://${PROJECT_ID}.supabase.co/functions/v1`;
+
 // 전역 상태 관리
 export const state = {
     allProjects: [],
@@ -94,4 +98,30 @@ export async function callSupabaseDirect(endpoint, method = 'GET', body = null, 
     if (response.status === 204) return null;
     const text = await response.text();
     return text ? JSON.parse(text) : null;
+}
+
+// [추가] Supabase Edge Function (AI) 호출 함수
+export async function callAiEdge(prompt, context = "", type = "general") {
+    try {
+        // [추가] 브라우저 측 타임아웃 설정 (45초)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+        // [수정] 실제 배포된 Function 이름인 'AI'로 호출합니다.
+        const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/AI`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.supabaseConfig.key}`
+            },
+            signal: controller.signal,
+            body: JSON.stringify({ prompt, context, type })
+        });
+
+        clearTimeout(timeoutId);
+        return await response.json();
+    } catch (error) {
+        if (error.name === 'AbortError') return { success: false, error: "요청 시간 초과 (45초)" };
+        return { success: false, error: error.toString() };
+    }
 }

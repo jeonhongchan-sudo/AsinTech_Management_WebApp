@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>(주)아신테크</title>
+  <title>Gis Tool</title>
   <link rel="stylesheet" href="style.css">
   <!-- [추가] 캐시 방지 메타 태그 (개발 테스트 시 이전 프로젝트 캐싱 방지) -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -42,7 +42,7 @@
         .nav-tab { padding: 6px 5px; font-size: 13px; }
     }
 
-    /* 캐드 뷰어 스타일 */
+    /* MapViewer 스타일 */
     #cad-map { width: 100%; height: calc(100vh - 165px); border-radius: 8px; border: 1px solid #ddd; margin-top: 5px; }
     .cad-controls { display: flex; gap: 10px; margin-bottom: 5px; align-items: center; flex-wrap: wrap; }
     .cad-controls select { padding: 5px 8px; border-radius: 4px; border: 1px solid #ccc; min-width: 150px; max-width: 220px; font-size: 13px; }
@@ -184,7 +184,7 @@
   <div class="container">
     <div class="header">
       <div>
-        <h1>(주)아신테크</h1>
+        <h1>Gis Tool</h1>
       </div>
       <div>
       </div>
@@ -663,6 +663,27 @@
         </div>
         <div style="display:flex; gap:10px;">
             <button class="btn btn-danger" style="flex:1; padding:10px; font-weight:bold;" onclick="window.deleteAllBackupFiles()">폴더 내 전체삭제 (정리)</button>
+        </div>
+    </div>
+  </div>
+
+  <!-- [추가] AI 답변 및 학습 모달 -->
+  <div id="aiResponseModal" class="lightbox-overlay" style="display: none; z-index: 3300;">
+    <div class="container" style="max-width: 550px; width: 95%; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; padding: 25px; background: white; border-radius: 12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;">
+            <h3 style="margin:0; color:#667eea;">✨ AI 분석 답변</h3>
+            <div style="display:flex; gap:5px;">
+                <button id="btnAiFollowUp" class="btn btn-info" style="padding:4px 10px; font-size:13px;" onclick="window.askFollowUp()">🔍 추가질문</button>
+                <button class="btn btn-secondary" style="padding:4px 10px; font-size:13px;" onclick="document.getElementById('aiResponseModal').style.display='none'">닫기</button>
+            </div>
+        </div>
+        <div class="ai-response-container" style="flex: 1; overflow-y: auto; padding-right: 5px;">
+            <div id="aiAnswerSource" class="ai-source-hint"></div>
+            <div id="aiAnswerContent" class="ai-answer-box"></div>
+            <div class="ai-btn-group">
+                <span style="font-size:12px; color:#666; margin-right:auto; align-self:center;">답변이 정확한가요?</span>
+                <button id="btnAiSave" class="btn btn-outline" style="border-color:#40c057; color:#40c057; padding:5px 15px;" onclick="window.saveAiKnowledge()">💾 저장</button>
+            </div>
         </div>
     </div>
   </div>
