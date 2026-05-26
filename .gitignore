@@ -18,7 +18,7 @@ __pycache__/
 Export_Json(ODB, LDB).lsp
 projects_cache.json
 index.txt
-embed.txt
+Colab_embed.txt
 
 # GitHub Actions 관련 파일 (별도 레포지토리에서 관리)
 convert_r2.py

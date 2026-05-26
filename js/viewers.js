@@ -1086,26 +1086,29 @@ export async function searchPoints() {
     );
     if (!searchTerm || !searchTerm.trim()) return;
 
-    // [수정] 프로젝트 미선택(지도 미로드) 상태인 경우
+    // [수정] 1단계: DB에서 먼저 지침서 키워드/내용 검색 (지도 로드 여부와 관계없이 수행)
     if (!cadMap) {
         // 1순위(도면 검색)는 불가능하므로 건너뛰고, 2순위(지침서 DB 검색) 수행
         const foundInDb = await handleDatabaseSearch(searchTerm);
-        
-        if (!foundInDb) {
-            // DB에도 결과가 없으면 3순위(AI 추론) 제안
-            const followUpBtn = document.getElementById('btnAiFollowUp');
-            const isCoolingDown = followUpBtn && followUpBtn.innerText.includes('대기');
-
-            if (isCoolingDown) {
-                showAlert("관련 지침이 DB에 없으며, 현재 AI는 할당량 초과 상태입니다.", "info");
-            } else if (confirm(`'${searchTerm}' 관련 지침이 DB에 없습니다.\n최후 수단으로 AI 분석을 요청하시겠습니까?`)) {
-                handleAiSearch(searchTerm, null);
-            }
-        }
+        // DB에 없으면 AI 검색 제안 (confirm 창)
+        if (!foundInDb) suggestAiSearch(searchTerm, null, true);
         return;
     }
 
-    // [개선] 검색어 및 데이터 전처리 유틸리티: 공백, CAD 특수코드(%%c 등), 구분자(/, -, _, .) 제거
+    // 지도가 로드된 경우 -> 2단계: 도면 포인트 검색
+    // (도면 검색에서 결과가 없으면 자동으로 DB 검색 -> AI 검색 순으로 제안하게 됨)
+
+    /** 도면 결과 없을 시 AI/DB 제안 헬퍼 */
+    async function suggestAiSearch(query, layers, alreadyCheckedDb = false) {
+        const foundInDb = alreadyCheckedDb ? false : await handleDatabaseSearch(query);
+        if (!foundInDb) {
+            if (confirm(`'${query}'에 대한 관련 지침을 DB에서 찾을 수 없습니다.\nAI에게 실시간 분석을 요청하시겠습니까?`)) {
+                handleAiSearch(query, layers);
+            }
+        }
+    }
+
+    // [개선] 검색어 및 데이터 전처리 유틸리티
     const sanitize = (str) => {
         if (str === null || str === undefined) return '';
         return str.toString().toLowerCase()
@@ -1154,21 +1157,8 @@ export async function searchPoints() {
     });
 
     if (matches.length === 0) {
-        // [수정] 우선순위 로직 적용
-        // 1. 데이터베이스 키워드 검색 시도 (AI 없음)
-        const foundInDb = await handleDatabaseSearch(searchTerm);
-        
-        if (!foundInDb) {
-            // 2. DB에도 없을 때만 AI 추론 제안 (최후 순위)
-            const followUpBtn = document.getElementById('btnAiFollowUp');
-            const isCoolingDown = followUpBtn && followUpBtn.innerText.includes('대기');
-
-            if (isCoolingDown) {
-                showAlert("관련 지침이 DB에 없으며, 현재 AI는 할당량 초과 상태입니다.", "info");
-            } else if (confirm(`'${searchTerm}' 검색 결과가 없습니다.\n최후 수단으로 AI 분석을 요청하시겠습니까?`)) {
-                handleAiSearch(searchTerm, cadLayers);
-            }
-        }
+        // 도면 결과 없으면 DB/AI 검색으로 유도
+        await suggestAiSearch(searchTerm, cadLayers);
         return;
     }
 

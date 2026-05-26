@@ -5,6 +5,38 @@ let isAiProcessing = false; // [추가] 중복 요청 방지 변수
 let lastAiRequestTime = 0;   // [추가] 물리적 쿨타임 체크용
 let aiCooldownTimer = null;  // [추가] 쿨타임 타이머 변수 선언 누락 수정
 
+/** [추가] 텍스트 가독성 개선 필터 (5가지 요청사항 반영) */
+function formatResponseText(text) {
+    if (!text) return "";
+    
+    // 0. 마크다운 표(|---|)를 감지하여 HTML 테이블로 변환
+    if (text.includes('|')) {
+        const lines = text.trim().split('\n');
+        let htmlTable = '<div style="overflow-x:auto; margin:10px 0;"><table style="width:100%; border-collapse:collapse; font-size:12px; border:1px solid #ddd;">';
+        lines.forEach((line, idx) => {
+            if (!line.includes('|')) { htmlTable += `</table></div><p>${line}</p><div style="overflow-x:auto;"><table>`; return; }
+            if (line.includes('---')) return;
+            const cells = line.split('|').filter(c => c.trim() !== "");
+            const tag = (line.includes('###') || idx === 0) ? 'th' : 'td';
+            htmlTable += '<tr>' + cells.map(c => `<${tag} style="border:1px solid #ddd; padding:8px; ${tag==='th'?'background:#f8f9fa;':''}">${c.trim()}</${tag}>`).join('') + '</tr>';
+        });
+        text = htmlTable + '</table></div>';
+    }
+
+    let formatted = text
+        .replace(/([\.?!])(?=\S)/g, "$1 ") // 2. 마침표 뒤 한 칸 띄우기
+        .replace(/,(?=\S)/g, ", ")         // 1. 쉼표 뒤 한 칸 띄우기
+        .replace(/\n/g, "<br>")            // 4. 줄바꿈을 HTML로 변환하여 단락 유지
+        .trim();
+
+    // 5. 주요 단어 강조 및 밑줄 (마크다운 -> HTML 변환)
+    formatted = formatted
+        .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#2196F3;">$1</strong>')
+        .replace(/<u>(.*?)<\/u>/g, '<u>$1</u>');
+
+    return formatted;
+}
+
 /** [1순위 후순위] AI 없이 DB에서 지침서 키워드 검색 */
 export async function handleDatabaseSearch(query) {
     try {
@@ -12,11 +44,38 @@ export async function handleDatabaseSearch(query) {
         const cleanQuery = query.replace(/\s+/g, ' ').trim();
         if (!cleanQuery) return false;
 
-        showAlert(`DB에서 '${cleanQuery}' 관련 지침을 검색 중입니다...`, "info");
+        // [수정] project_id는 text 타입이며, 기본값은 코랩 데이터와 동일하게 'GENERAL' 사용
+        const pid = state.currentCadProjectId ? String(state.currentCadProjectId) : 'GENERAL';
+        const pidLabel = (pid === 'GENERAL') ? '전체 지침' : '해당 프로젝트 및 지침';
         
-        // Supabase RPC (search_pdf_text_fallback) 호출
+        showAlert(`${pidLabel} DB에서 '${cleanQuery}' 검색 중...`, "info");
+
+        // 1. [추가] AI가 이전에 저장했던 "똑똑한 지식(pdf_knowledge)"에서 먼저 검색
+        // [수정] 현재 프로젝트 ID 혹은 공통 지식('GENERAL')인 데이터를 모두 검색 대상에 포함
+        let filter = `content=ilike.*${encodeURIComponent(cleanQuery)}*`;
+        if (pid !== 'GENERAL') {
+            filter += `&or=(project_id.eq.${pid},project_id.eq.GENERAL)`;
+        } else {
+            filter += `&project_id=eq.GENERAL`;
+        }
+
+        const knowledgeResults = await callSupabaseDirect(`pdf_knowledge?${filter}&select=*&limit=1`);
+        
+        if (knowledgeResults && knowledgeResults.length > 0) {
+            const bestMatch = knowledgeResults[0];
+            // "질문: ... \n답변: ..." 형태에서 답변 부분만 추출 시도
+            const parts = bestMatch.content.split('답변:');
+            const savedAnswer = parts.length > 1 ? parts[1].trim() : bestMatch.content;
+            
+            showAiResponseModal(query, `💡 이전에 학습된 지식입니다:\n\n${savedAnswer}`, "DB 지식 검색 (AI 저장됨)");
+            return true;
+        }
+        
+        // 2. [기존] AI 저장 지식이 없으면 지침서 원문(PDF 텍스트)에서 검색 (RPC)
         const results = await callSupabaseDirect('rpc/search_pdf_text_fallback', 'POST', {
-            search_query: cleanQuery
+            search_query: cleanQuery,
+            // 필요한 경우 프로젝트 ID 필터링 추가 가능
+            // p_project_id: pid === 'GENERAL' ? null : pid 
         });
 
         if (results && results.length > 0) {
@@ -186,7 +245,9 @@ export function showAiResponseModal(query, answer, source) {
     state.lastAiAnswer = answer;
     
     sourceEl.innerHTML = `<span class="ai-badge">${source}</span> 질문: ${query}`;
-    content.innerText = answer;
+    
+    // [수정] 텍스트 포맷터 적용 및 HTML 렌더링
+    content.innerHTML = formatResponseText(answer);
     modal.style.display = 'flex';
 }
 
@@ -215,20 +276,23 @@ export async function saveAiKnowledge() {
             vector = embedRes.embedding;
         }
 
+        // [수정] project_id는 text 타입이므로 문자열로 강제 변환 (없으면 'GENERAL')
+        const pid = state.currentCadProjectId ? String(state.currentCadProjectId) : 'GENERAL';
+
         // [수정] ai_knowledge 대신 통합 테이블인 pdf_knowledge 사용
-        await callSupabaseDirect('pdf_knowledge', 'POST', {
-            project_id: state.currentCadProjectId || 'GENERAL',
+        const payload = {
+            project_id: pid, // String 타입 전송
             file_name: 'AI_Confirmed_Knowledge', // AI 답변임을 알 수 있도록 고정 파일명 부여
             content: `질문: ${state.lastAiQuery}\n답변: ${state.lastAiAnswer}`,
             metadata: { type: 'ai_save', user: state.currentUser || 'anonymous', original_query: state.lastAiQuery },
             embedding: vector // 실시간으로 생성된 벡터 저장 (없으면 null 유지 후 깃허브 액션이 처리)
-        });
+        };
+
+        await callSupabaseDirect('pdf_knowledge', 'POST', payload);
         
         showAlert("지식 저장 완료! 다음 검색 시 우선 활용됩니다.", "success");
         document.getElementById('aiResponseModal').style.display = 'none';
     } catch (e) {
-        console.error("saveAiKnowledge Error:", e);
-        // 429 에러 발생 시 공통 쿨타임 적용
         if (e.message && (e.message.includes("429") || e.message.includes("limit"))) {
             lastAiRequestTime = Date.now() + 60000;
             startAiCooldownUI(60);
