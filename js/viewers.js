@@ -126,7 +126,7 @@ function renderProjectInfoModal(data) {
     const mans = data.manholes_info || {};
 
     modal.innerHTML = `
-        <div class="modal-content" style="width: 95%; max-width: 800px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column; background:white; border-radius:12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+        <div class="modal-content" style="width: 90vw; max-width: 900px; max-height: 75vh; overflow: hidden; display: flex; flex-direction: column; background:white; border-radius:12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
             <div class="modal-header" style="padding: 15px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #f8f9fa;">
                 <h2 style="margin:0; font-size:18px; color:#333;">📋 프로젝트 상세 정보</h2>
                 <button class="close-btn" style="border:none; background:none; font-size:28px; cursor:pointer; color:#999;" onclick="document.getElementById('projectInfoModal').style.display='none'">&times;</button>
@@ -143,10 +143,10 @@ function renderProjectInfoModal(data) {
                     onclick="window.switchProjectInfoTab('manhole')">맨홀정보</button>
             </div>
 
-            <div id="infoTabContainer" style="flex: 1; overflow-y: auto; padding: 20px;">
+            <div id="infoTabContainer" style="flex: 1; overflow-y: auto; padding: 15px;">
                 <!-- 기본정보 탭 -->
                 <div id="info-tab-basic" class="info-tab-pane active">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin-bottom: 15px;">
                         <div class="info-field"><strong>준공일:</strong> <span>${data.completion_period || '-'}</span></div>
                         <div class="info-field"><strong>작업위치:</strong> <span>${data.work_location || '-'}</span></div>
                         <div class="info-field"><strong>원수행사:</strong> <span>${data.original_contractor || '-'}</span></div>

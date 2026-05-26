@@ -169,6 +169,14 @@ export function showAiResponseModal(query, answer, source) {
         return;
     }
 
+    // 모달 크기 최적화 스타일 강제 적용
+    const innerContent = modal.querySelector('.modal-content');
+    if (innerContent) {
+        innerContent.style.width = '90vw'; // 화면 너비의 90%
+        innerContent.style.maxWidth = '900px'; // 최대 900px
+        innerContent.style.maxHeight = '75vh'; // 화면 높이의 75%
+    }
+
     // [수정] '실시간 AI 분석' 결과인 경우에만 저장 버튼 노출 (학습 데이터 축적 용도)
     // DB 키워드 검색 결과는 지침서 원문이므로 별도 저장이 필요 없음
     saveBtn.style.display = (source === "실시간 AI 분석") ? "inline-flex" : "none";

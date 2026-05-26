@@ -104,9 +104,11 @@ serve(async (req) => {
                 match_count: 5 // 더 풍부한 맥락을 위해 검색 결과 수를 늘림
             })
         });
-        const matchedKnowledge = await searchRes.json();
 
-        if (searchRes.status !== 200) {
+        let matchedKnowledge = [];
+        if (searchRes.ok) {
+            matchedKnowledge = await searchRes.json();
+        } else {
             const errorText = await searchRes.text();
             console.error("Supabase RPC Error:", errorText);
             // DB 검색 실패 시 AI가 일반 지식으로라도 답변할 수 있게 vectorContext를 비우고 계속 진행
