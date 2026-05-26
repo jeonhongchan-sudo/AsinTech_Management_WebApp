@@ -7,7 +7,8 @@ const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); // 서비스 롤
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const API_URL = `${API_BASE}/models/gemini-2.5-flash:generateContent`;
-const EMBED_URL = `${API_BASE}/models/text-embedding-004:embedContent`;
+// 사용자님의 모델 리스트 35번 항목(gemini-embedding-001)으로 모델 변경
+const EMBED_URL = `${API_BASE}/models/gemini-embedding-001:embedContent`;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,6 +24,28 @@ serve(async (req) => {
 
   try {
     const { prompt, context, type } = await req.json();
+
+    // [수정] 실시간 임베딩 생성 기능 복구
+    if (type === 'get_embedding') {
+      const embedRes = await fetch(`${EMBED_URL}?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          content: { parts: [{ text: prompt }] }, 
+          task_type: "RETRIEVAL_DOCUMENT"
+        })
+      });
+      const embedData = await embedRes.json();
+      
+      if (embedData.error) {
+        throw new Error(`[Embedding API] ${embedData.error.message}`);
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, embedding: embedData.embedding?.values || null }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      );
+    }
 
     // [추가] 사용 가능한 모델 리스트 조회 기능
     if (type === 'list_models') {
@@ -51,18 +74,23 @@ serve(async (req) => {
 
     // [추가] 지침서 기반 답변을 위한 벡터 검색 로직
     if (type === 'point_search') {
-        // 1. 질문의 임베딩 생성
+        // 1. [복구] 질문의 임베딩 생성
         const embedRes = await fetch(`${EMBED_URL}?key=${GEMINI_API_KEY}`, {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 content: { parts: [{ text: prompt }] }, 
-                task_type: "retrieval_query"
+                task_type: "RETRIEVAL_QUERY"
             })
         });
         const embedData = await embedRes.json();
-        const queryEmbedding = embedData.embedding.values;
 
-        // 2. Supabase RPC 호출하여 유사 지식 검색
+        if (embedData.error) {
+            throw new Error(`[Embedding API] ${embedData.error.message}`);
+        }
+        const queryEmbedding = embedData.embedding?.values;
+
+        // 2. Supabase RPC 호출하여 유사 지식 검색 (지침서 DB 탐색)
         const searchRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_pdf_knowledge`, {
             method: 'POST',
             headers: {
@@ -73,10 +101,16 @@ serve(async (req) => {
             body: JSON.stringify({
                 query_embedding: queryEmbedding,
                 match_threshold: 0.5,
-                match_count: 3
+                match_count: 5 // 더 풍부한 맥락을 위해 검색 결과 수를 늘림
             })
         });
         const matchedKnowledge = await searchRes.json();
+
+        if (searchRes.status !== 200) {
+            const errorText = await searchRes.text();
+            console.error("Supabase RPC Error:", errorText);
+            // DB 검색 실패 시 AI가 일반 지식으로라도 답변할 수 있게 vectorContext를 비우고 계속 진행
+        }
 
         if (matchedKnowledge && matchedKnowledge.length > 0) {
             vectorContext = "\n\n[학습된 지침서 내용]\n" + matchedKnowledge.map(k => k.content).join("\n---\n");
@@ -123,12 +157,14 @@ serve(async (req) => {
       );
     }
 
-    const aiAnswer = data.candidates[0].content.parts[0].text;
+    // 응답 데이터 구조 안전하게 접근
+    const aiAnswer = data.candidates?.[0]?.content?.parts?.[0]?.text || "답변을 생성할 수 없습니다.";
+    
     return new Response(
       JSON.stringify({ 
         success: true, 
         answer: aiAnswer,
-        model: "gemini-2.5-flash"
+        model: data.model_version || "gemini-2.5-flash"
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -137,14 +173,17 @@ serve(async (req) => {
     );
 
   } catch (error) {
+    console.error("Edge Function Runtime Error:", error);
+    const isTimeout = error.name === 'AbortError';
+    
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: error.message 
+        error: isTimeout ? "AI 응답 시간이 초과되었습니다. (30초)" : error.message 
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400 
+        status: isTimeout ? 504 : 400 
       }
     );
   }

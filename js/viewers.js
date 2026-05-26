@@ -824,6 +824,11 @@ export async function initCadViewer() {
 }
 
 window.loadCadProjects = loadCadProjects; // [추가] 외부 호출을 위해 전역 연결
+window.searchPoints = searchPoints;
+window.resetSearchUI = resetSearchUI;
+window.selectGuideline = selectGuideline;
+window.showProjectInfo = showProjectInfo;
+window.switchProjectInfoTab = switchProjectInfoTab;
 
 export async function loadCadProjects() {
     const select = document.getElementById('cadProjectSelect');

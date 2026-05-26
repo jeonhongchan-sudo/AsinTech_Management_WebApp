@@ -88,8 +88,13 @@ export async function handleAiSearch(query, cadLayersSet) {
                 startAiCooldownUI(3600);
                 return;
             }
+            // [추가] 임베딩 API 사용 불가 에러 처리
+            if (res.error && res.error.includes("Embedding API is not available")) {
+                showAlert("⚠️ 현재 환경에서는 AI의 '의미 검색' 기능이 제한됩니다. (임베딩 API 사용 불가)", "error");
+                return;
+            }
 
-            if (res.error && (res.error.includes("quota") || res.error.includes("429") || res.error.includes("limit") || res.error.includes("Requests"))) {
+            if (res.error && (res.error.includes("quota") || res.error.includes("429") || res.error.includes("limit") || res.error.includes("Requests") || res.error.includes("demand"))) {
                 const retryMatch = res.error.match(/retry in ([\d.]+)s/);
                 const waitSeconds = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) + 5 : 60; // 징벌적 차단 방지를 위해 더 넉넉히 대기
                 
@@ -247,3 +252,8 @@ export async function checkAvailableModels() {
         console.error("checkAvailableModels Error:", error);
     }
 }
+
+// 브라우저 콘솔 및 HTML에서 직접 호출할 수 있도록 전역 객체에 등록
+window.checkAvailableModels = checkAvailableModels;
+window.saveAiKnowledge = saveAiKnowledge;
+window.askFollowUp = askFollowUp;
