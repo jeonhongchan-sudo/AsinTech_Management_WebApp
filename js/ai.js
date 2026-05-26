@@ -179,26 +179,50 @@ export function showAiResponseModal(query, answer, source) {
 
 /** AI 답변 지식 저장 (학습용) */
 export async function saveAiKnowledge() {
+    const now = Date.now();
+    
+    if (isAiProcessing || (now < lastAiRequestTime)) {
+        showAlert("AI가 아직 처리 중이거나 휴식 중입니다. 잠시 후 저장하세요.", "info");
+        return;
+    }
+
     if (!state.lastAiQuery || !state.lastAiAnswer) {
         showAlert("저장할 AI 답변이 없습니다.", "error");
         return;
     }
     
     try {
+        isAiProcessing = true;
         showAlert("지식을 학습 데이터로 저장 중...", "info");
+
+        // [추가] 저장 전 실시간 임베딩 생성 요청 (의미 검색 즉시 반영을 위함)
+        let vector = null;
+        const embedRes = await callAiEdge(state.lastAiAnswer, `Query: ${state.lastAiQuery}`, 'get_embedding');
+        if (embedRes.success && embedRes.embedding) {
+            vector = embedRes.embedding;
+        }
+
         // [수정] ai_knowledge 대신 통합 테이블인 pdf_knowledge 사용
         await callSupabaseDirect('pdf_knowledge', 'POST', {
             project_id: state.currentCadProjectId || 'GENERAL',
             file_name: 'AI_Confirmed_Knowledge', // AI 답변임을 알 수 있도록 고정 파일명 부여
             content: `질문: ${state.lastAiQuery}\n답변: ${state.lastAiAnswer}`,
-            metadata: { type: 'ai_save', user: state.currentUser || 'anonymous' }
+            metadata: { type: 'ai_save', user: state.currentUser || 'anonymous', original_query: state.lastAiQuery },
+            embedding: vector // 실시간으로 생성된 벡터 저장 (없으면 null 유지 후 깃허브 액션이 처리)
         });
         
         showAlert("지식 저장 완료! 다음 검색 시 우선 활용됩니다.", "success");
         document.getElementById('aiResponseModal').style.display = 'none';
     } catch (e) {
         console.error("saveAiKnowledge Error:", e);
+        // 429 에러 발생 시 공통 쿨타임 적용
+        if (e.message && (e.message.includes("429") || e.message.includes("limit"))) {
+            lastAiRequestTime = Date.now() + 60000;
+            startAiCooldownUI(60);
+        }
         showAlert("저장 실패: " + e.message, "error");
+    } finally {
+        isAiProcessing = false;
     }
 }
 
@@ -213,7 +237,7 @@ export async function checkAvailableModels() {
                 displayName: m.displayName,
                 supportedMethods: m.supportedGenerationMethods ? m.supportedGenerationMethods.join(', ') : 'N/A'
             })));
-            console.log("💡 추천 모델: 'gemini-2.0-flash'를 사용하세요.");
+            console.log("💡 추천 모델: 'gemini-2.5-flash'를 사용하세요.");
             showAlert("콘솔창(F12)에서 사용 가능한 모델 리스트를 확인하세요.", "success");
         } else {
             console.error("모델 리스트 조회 실패:", res.error);
