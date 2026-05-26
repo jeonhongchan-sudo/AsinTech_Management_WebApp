@@ -19,13 +19,11 @@ Export_Json(ODB, LDB).lsp
 projects_cache.json
 index.txt
 embed.txt
-supa_edge_function.txt
 
 # GitHub Actions 관련 파일 (별도 레포지토리에서 관리)
 convert_r2.py
 requirements.txt
 cad_schema.json
-analyze_cad.py
 backup_to_drive.py
 backup_to_drive.yml
 .github/workflows/convert_pmtiles.yml
