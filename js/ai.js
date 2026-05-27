@@ -52,7 +52,7 @@ export async function handleDatabaseSearch(query) {
         const pid = state.currentCadProjectId ? String(state.currentCadProjectId) : 'GENERAL';
         const pidLabel = (pid === 'GENERAL') ? '전체 지침' : '해당 프로젝트 및 지침';
         
-        showAlert(`DB에서 '${cleanQuery}' 키워드 검색 중...`, "info");
+        console.log(`[Search] DB에서 '${cleanQuery}' 검색 중...`);
 
         // 1. [수정] project_id와 embedding 없이 content 키워드로만 검색 (가장 확실한 방법)
         let filter = `content=ilike.*${encodeURIComponent(cleanQuery)}*`;
@@ -65,7 +65,7 @@ export async function handleDatabaseSearch(query) {
             const parts = bestMatch.content.split('답변:');
             const savedAnswer = parts.length > 1 ? parts[1].trim() : bestMatch.content;
             
-            showAiResponseModal(query, `💡 이전에 학습된 지식입니다:\n\n${savedAnswer}`, "DB 지식 검색 (AI 저장됨)");
+            showAiResponseModal(query, `💡 이전에 학습된 지식입니다:\n\n${savedAnswer}`, "📚 DB 지식 검색 (기학습)");
             return true;
         }
         
@@ -81,7 +81,7 @@ export async function handleDatabaseSearch(query) {
                            results.map((k, idx) => {
                                return `----------------------------------------\n[검색결과 ${idx + 1}] 출처: ${k.file_name} (p.${k.metadata?.page || '?'})\n\n${k.content.trim()}`;
                            }).join("\n\n");
-            showAiResponseModal(query, dbAnswer, "DB 키워드 검색");
+            showAiResponseModal(query, dbAnswer, "📖 DB 지침서 원문 검색");
             return true; // 검색 성공
         }
         return false; // 검색 결과 없음
@@ -212,12 +212,14 @@ export async function askFollowUp() {
 function updateAiButtonState(isLoading) {
     const followUpBtn = document.getElementById('btnAiFollowUp');
     const saveBtn = document.getElementById('btnAiSave');
+    const reRequestBtn = document.getElementById('btnAiReRequest');
     
     if (followUpBtn) {
         followUpBtn.disabled = isLoading;
         followUpBtn.innerText = isLoading ? "⏳ 분석중" : "🔍 추가질문";
     }
     if (saveBtn) saveBtn.disabled = isLoading;
+    if (reRequestBtn) reRequestBtn.disabled = isLoading;
 }
 
 /** AI 답변 모달 출력 */
@@ -226,6 +228,7 @@ export function showAiResponseModal(query, answer, source) {
     const content = document.getElementById('aiAnswerContent');
     const sourceEl = document.getElementById('aiAnswerSource');
     const saveBtn = document.getElementById('btnAiSave');
+    const reRequestBtn = document.getElementById('btnAiReRequest');
     
     if (!modal || !content || !sourceEl || !saveBtn) {
         console.error("AI Response Modal elements not found in DOM");
@@ -240,9 +243,19 @@ export function showAiResponseModal(query, answer, source) {
         innerContent.style.maxHeight = '75vh'; // 화면 높이의 75%
     }
 
-    // [수정] '실시간 AI 분석' 결과인 경우에만 저장 버튼 노출 (학습 데이터 축적 용도)
-    // DB 키워드 검색 결과는 지침서 원문이므로 별도 저장이 필요 없음
-    saveBtn.style.display = (source === "실시간 AI 분석") ? "inline-flex" : "none";
+    // [수정] 답변 출처에 따른 버튼 토글 로직
+    const isAi = source.includes("실시간 AI 분석");
+    const isDb = source.includes("DB");
+
+    // AI 답변일 때만 [저장] 노출
+    saveBtn.style.display = isAi ? "inline-flex" : "none";
+    
+    // DB 답변일 때만 [AI 재요청] 노출
+    if (reRequestBtn) {
+        reRequestBtn.style.display = isDb ? "inline-flex" : "none";
+        reRequestBtn.onclick = () => handleAiSearch(query, state.lastCadLayersSet);
+    }
+
     saveBtn.disabled = false; // 쿨타임 등으로 비활성화된 상태 초기화
 
     state.lastAiQuery = query;
