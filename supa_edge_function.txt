@@ -46,12 +46,52 @@ serve(async (req) => {
       );
     }
 
+    // [추가] AI가 사용할 수 있는 도구(함수) 정의
+    const tools = [
+      {
+        function_declarations: [
+          {
+            name: "query_table_data",
+            description: "프로젝트 정보(상세, 메모, 사진, 도면파일)를 조회합니다. 명칭이나 장소로 질문 시 반드시 'cad_projects' 테이블에서 'name' 컬럼으로 ID를 먼저 검색하세요.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                table: { type: "STRING", enum: ["cad_projects", "project_detail", "memos", "photos", "cad_files"], description: "조회할 테이블명" },
+                project_id: { type: "STRING", description: "숫자로 된 프로젝트 고유 ID" },
+                search_keyword: { type: "STRING", description: "프로젝트 한글 이름 검색 키워드 (cad_projects 테이블 조회 시 사용)" }
+              },
+              required: ["table"]
+            }
+          },
+          {
+            name: "execute_web_command",
+            description: "웹 화면을 조작하거나 특정 기능을 실행합니다 (지도 이동, 탭 전환 등).",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                action: { type: "STRING", enum: ["open_map", "switch_tab", "search_point"], description: "실행할 액션" },
+                target_id: { type: "STRING", description: "대상 프로젝트 ID 또는 탭 이름" }
+              },
+              required: ["action"]
+            }
+          }
+        ]
+      }
+    ];
+
     // 시스템 프롬프트 설정 (학습형 AI의 정체성 부여)
-    let systemInstruction = "당신은 '아신테크 GIS 관리 도구'의 전문 어시스턴트입니다. [1000자 이내 완결]과 [가독성 최적화]를 절대 원칙으로 합니다. \n\n[답변 원칙]\n1. 반드시 (~니다, ~요) 체로 답변하고 1000자 이내에서 문장을 완벽히 종결하세요.\n2. 지침서 원문의 텍스트가 표 형식임에도 엉켜있다면, 지능적으로 판단하여 마크다운 표(|---|)로 재구성하여 답변하세요.\n3. 한국어 맞춤법을 엄격히 준수하며 마침표(.)와 쉼표(,) 뒤에는 반드시 한 칸을 띄우세요.\n4. 핵심 용어는 **굵게** 표시하고 중요한 문장은 <u>밑줄</u>을 사용하세요.\n5. 페이지 번호 등 텍스트 노이즈는 제거하고 가급적 불렛 포인트(•)를 활용하세요.";
+    let systemInstruction = `당신은 '아신테크 GIS 관리 도구'의 전문 에이전트입니다.
+[데이터 접근 규칙]
+1. 사용자 질문에 포함된 지명이나 현장 이름은 'cad_projects' 테이블의 'name' 컬럼에 해당합니다. 
+2. 반드시 'cad_projects'에서 ID를 먼저 찾은 후, 그 ID를 사용하여 'project_detail', 'memos' 등에서 상세 정보를 조회하세요.
+3. 'project_detail'의 'work_location'은 검색 기준으로 사용하지 마세요.
+4. 보안 경고: 'project_shares', 'user_settings' 테이블은 절대 접근 금지입니다.
+5. 필요한 정보(ID 등)를 얻었다면 멈추지 말고 다음 단계(메모 조회 등)의 도구를 계속 호출하여 최종 결론을 내세요.
+6. 데이터가 없는 경우 절대 지어내지 말고 "데이터를 찾을 수 없다"고 답변하세요.`;
     let vectorContext = "";
 
     // [복구] 지침서 기반 답변을 위한 벡터 검색 로직
-    if (type === 'point_search') {
+    if (type === 'point_search' && !prompt.includes("프로젝트")) { // 단순 검색일 때만 벡터 검색 수행
         // 1. 질문의 임베딩 생성 (검색용 - gemini-embedding-001 사용)
         const embedRes = await fetch(`${EMBED_URL}?key=${GEMINI_API_KEY}`, {
             method: 'POST',
@@ -97,45 +137,85 @@ serve(async (req) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-    const response = await fetch(`${API_URL}?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: `${systemInstruction}\n\n[도면 레이어 맥락]\n${context || ""}${vectorContext}\n\n[User Query]\n${prompt}`
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048, // 1000자 이상의 충분한 토큰을 확보하여 한국어 답변 끊김 방지
+    // [핵심] 에이전틱 루프 구현: AI가 도구를 다 쓸 때까지 최대 5회 반복
+    let contents = [{
+      role: "user",
+      parts: [{ text: `${systemInstruction}\n\n[도면 레이어 맥락]\n${context || ""}${vectorContext}\n\n[User Query]\n${prompt}` }]
+    }];
+    let finalAnswer = "";
+    let lastRawData = [];
+    let loopCount = 0;
+    let data = null; // data 변수를 loop 외부에서 접근 가능하도록 상단에 선언
+
+    while (loopCount < 5) {
+      const response = await fetch(`${API_URL}?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: contents,
+          tools: tools,
+          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
+        }),
+      });
+
+      data = await response.json(); // const를 제거하여 외부 변수 data를 업데이트
+      if (data.error) throw new Error(data.error.message);
+
+      const candidate = data.candidates?.[0];
+      const part = candidate?.content?.parts?.[0];
+
+      // 1. 함수 호출 요청이 있는 경우
+      if (part?.functionCall) {
+        const call = part.functionCall;
+        let result = [];
+
+        if (call.name === "query_table_data") {
+          const { table, project_id, search_keyword } = call.args;
+          let url = `${SUPABASE_URL}/rest/v1/${table}?select=*`;
+          if (project_id) {
+            const idField = (table === 'photos') ? 'cad_project_id' : (table === 'cad_projects' ? 'id' : 'project_id');
+            url += `&${idField}=eq.${project_id}`;
+          }
+          if (search_keyword) {
+            let nameField = (table === 'cad_projects') ? 'name' : (table === 'memos' ? 'content' : 'file_name');
+            url += `&${nameField}=ilike.*${encodeURIComponent(search_keyword)}*`;
+          }
+          const dbRes = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
+          result = await dbRes.json();
+          lastRawData = result; // 마지막 조회 데이터를 저장
         }
-      }),
-    });
+        
+        if (call.name === "execute_web_command") {
+          return new Response(JSON.stringify({ success: true, answer: "명령 실행", command: call.args }), { headers: corsHeaders });
+        }
+
+        // 대화 기록에 추가하고 루프 계속
+        contents.push(candidate.content); // 모델의 function_call 추가
+        contents.push({
+          role: "function",
+          parts: [{ functionResponse: { name: call.name, response: { content: result } } }]
+        });
+        loopCount++;
+      } 
+      // 2. 최종 텍스트 답변이 온 경우
+      else if (part?.text) {
+        finalAnswer = part.text;
+        break;
+      } 
+      else {
+        break;
+      }
+    }
 
     clearTimeout(timeoutId);
 
-    const data = await response.json();
-    
-    if (data.error) {
-      return new Response(
-        JSON.stringify({ success: false, error: data.error.message }),
-        { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: response.status // Google API의 실제 상태 코드(429 등)를 그대로 전달
-        }
-      );
-    }
-
-    // 응답 데이터 구조 안전하게 접근
-    const aiAnswer = data.candidates?.[0]?.content?.parts?.[0]?.text || "답변을 생성할 수 없습니다.";
-    
     return new Response(
       JSON.stringify({ 
         success: true, 
-        answer: aiAnswer,
-        model: data.model_version || "gemini-2.5-flash"
+        answer: finalAnswer || "답변을 생성할 수 없습니다.",
+        rawData: JSON.stringify(lastRawData),
+        model: data.model_version || "gemini-2.5-flash-lite"
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

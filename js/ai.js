@@ -169,7 +169,30 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         const res = await callAiEdge(apiQuery, combinedContext, requestType);
         
         if (res.success) {
-            showAiResponseModal(query, res.answer, "실시간 AI 분석");
+            // [추가] AI가 보낸 명령어(UI 제어 등)가 있다면 실행
+            if (res.command) {
+                handleAiCommand(res.command);
+            }
+            
+            // [개선] DB 조회 결과(rawData)가 포함된 경우 답변 가독성 보강
+            let displayAnswer = res.answer;
+            if (res.rawData) {
+                try {
+                    const data = JSON.parse(res.rawData);
+                    const dataCount = Array.isArray(data) ? data.length : (data ? 1 : 0);
+                    if (dataCount > 0) {
+                        // AI 답변 내에 이미 숫자가 포함되어 있을 것이므로, 헤더에만 참조 건수 표시
+                        displayAnswer = `✅ **실시간 DB 데이터 분석 결과 (최종 ${dataCount}건 확인)**\n\n${res.answer}`;
+                    } else if (displayAnswer.includes("찾을 수 없") || displayAnswer.includes("없습니다")) {
+                        displayAnswer = `🔍 **조회 결과 알림**\n\n${res.answer}\n\n> 프로젝트 명칭(한글)이 정확한지 확인해 주세요.`;
+                    }
+                } catch (e) {
+                    console.warn("RawData Parsing 실패", e);
+                }
+            }
+
+            showAiResponseModal(query, displayAnswer, "실시간 AI 분석");
+            
             lastAiRequestTime = Date.now();
         } else {
             console.error("AI Edge Function Error:", res.error);
@@ -209,6 +232,33 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         if (Date.now() >= lastAiRequestTime) updateAiButtonState(false); 
     }
 }
+
+/** [추가] AI 에이전트가 요청한 실제 웹 기능(명령어) 실행 */
+function handleAiCommand(command) {
+    const { action, target_id } = command;
+    console.log(`[AI Agent Action] 실행: ${action} (대상: ${target_id})`);
+
+    switch (action) {
+        case 'open_map':
+            // 지도 탭으로 이동하고 해당 프로젝트 지도 로드
+            if (target_id && typeof window.loadCadMap === 'function') {
+                window.loadCadMap(target_id);
+                if (typeof window.switchTab === 'function') window.switchTab('cadViewer');
+                showAlert(`AI 명령: ${target_id}번 프로젝트 지도로 이동합니다.`, "success");
+            }
+            break;
+        case 'switch_tab':
+            // 특정 UI 탭으로 전환
+            if (target_id && typeof window.switchTab === 'function') {
+                window.switchTab(target_id);
+            }
+            break;
+        default:
+            console.log("알 수 없는 AI 명령어입니다:", action);
+            break;
+    }
+}
+
 
 /** [추가] UI에 쿨타임 카운트다운 표시 */
 function startAiCooldownUI(seconds) {
@@ -393,7 +443,7 @@ export async function checkAvailableModels() {
                 displayName: m.displayName,
                 supportedMethods: m.supportedGenerationMethods ? m.supportedGenerationMethods.join(', ') : 'N/A'
             })));
-            console.log("💡 추천 모델: 'gemini-2.5-flash'를 사용하세요.");
+            console.log("💡 추천 모델: 'gemini-2.5-flash-lite'를 사용하세요.");
             showAlert("콘솔창(F12)에서 사용 가능한 모델 리스트를 확인하세요.", "success");
         } else {
             console.error("모델 리스트 조회 실패:", res.error);
