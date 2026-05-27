@@ -9,18 +9,22 @@ let aiCooldownTimer = null;  // [추가] 쿨타임 타이머 변수 선언 누�
 function formatResponseText(text) {
     if (!text) return "";
     
-    // 0. 마크다운 표(|---|)를 감지하여 HTML 테이블로 변환
+    // 0. 마크다운 표(|---|)를 감지하여 HTML 테이블로 변환 (정규식 기반 개선)
     if (text.includes('|')) {
-        const lines = text.trim().split('\n');
-        let htmlTable = '<div style="overflow-x:auto; margin:10px 0;"><table style="width:100%; border-collapse:collapse; font-size:12px; border:1px solid #ddd;">';
-        lines.forEach((line, idx) => {
-            if (!line.includes('|')) { htmlTable += `</table></div><p>${line}</p><div style="overflow-x:auto;"><table>`; return; }
-            if (line.includes('---')) return;
-            const cells = line.split('|').filter(c => c.trim() !== "");
-            const tag = (line.includes('###') || idx === 0) ? 'th' : 'td';
-            htmlTable += '<tr>' + cells.map(c => `<${tag} style="border:1px solid #ddd; padding:8px; ${tag==='th'?'background:#f8f9fa;':''}">${c.trim()}</${tag}>`).join('') + '</tr>';
-        });
-        text = htmlTable + '</table></div>';
+        const parts = text.split(/(\|[^\n]+\|\n\|[\s-:|]+\|\n(?:\|[^\n]+\|\n?)+)/g);
+        text = parts.map(part => {
+            if (part.trim().startsWith('|')) {
+                const lines = part.trim().split('\n').filter(l => !l.includes('---'));
+                let html = '<div class="table-responsive"><table class="ai-rendered-table">';
+                lines.forEach((line, idx) => {
+                    const cells = line.split('|').filter(c => c.trim() !== "" || line.indexOf(c) > 0 && line.indexOf(c) < line.length - 1);
+                    const tag = idx === 0 ? 'th' : 'td';
+                    html += '<tr>' + cells.map(c => `<${tag}>${c.trim()}</${tag}>`).join('') + '</tr>';
+                });
+                return html + '</table></div>';
+            }
+            return part;
+        }).join('');
     }
 
     let formatted = text
@@ -48,16 +52,10 @@ export async function handleDatabaseSearch(query) {
         const pid = state.currentCadProjectId ? String(state.currentCadProjectId) : 'GENERAL';
         const pidLabel = (pid === 'GENERAL') ? '전체 지침' : '해당 프로젝트 및 지침';
         
-        showAlert(`${pidLabel} DB에서 '${cleanQuery}' 검색 중...`, "info");
+        showAlert(`DB에서 '${cleanQuery}' 키워드 검색 중...`, "info");
 
-        // 1. [추가] AI가 이전에 저장했던 "똑똑한 지식(pdf_knowledge)"에서 먼저 검색
-        // [수정] 현재 프로젝트 ID 혹은 공통 지식('GENERAL')인 데이터를 모두 검색 대상에 포함
+        // 1. [수정] project_id와 embedding 없이 content 키워드로만 검색 (가장 확실한 방법)
         let filter = `content=ilike.*${encodeURIComponent(cleanQuery)}*`;
-        if (pid !== 'GENERAL') {
-            filter += `&or=(project_id.eq.${pid},project_id.eq.GENERAL)`;
-        } else {
-            filter += `&project_id=eq.GENERAL`;
-        }
 
         const knowledgeResults = await callSupabaseDirect(`pdf_knowledge?${filter}&select=*&limit=1`);
         
@@ -285,23 +283,11 @@ export async function saveAiKnowledge() {
         }
         showAlert("지식을 학습 데이터로 저장 중...", "info");
 
-        // [추가] 저장 전 실시간 임베딩 생성 요청 (의미 검색 즉시 반영을 위함)
-        let vector = null;
-        const embedRes = await callAiEdge(state.lastAiAnswer, `Query: ${state.lastAiQuery}`, 'get_embedding');
-        if (embedRes.success && embedRes.embedding) {
-            vector = embedRes.embedding;
-        }
-
-        // [수정] project_id는 text 타입이므로 문자열로 강제 변환 (없으면 'GENERAL')
-        const pid = state.currentCadProjectId ? String(state.currentCadProjectId) : 'GENERAL';
-
-        // [수정] ai_knowledge 대신 통합 테이블인 pdf_knowledge 사용
+        // [수정] 에러 유발 가능성이 있는 project_id와 embedding 컬럼 제외
         const payload = {
-            project_id: pid, // String 타입 전송
             file_name: 'AI_Confirmed_Knowledge', // AI 답변임을 알 수 있도록 고정 파일명 부여
             content: `질문: ${state.lastAiQuery}\n답변: ${state.lastAiAnswer}`,
-            metadata: { type: 'ai_save', user: state.currentUser || 'anonymous', original_query: state.lastAiQuery },
-            embedding: vector // 실시간으로 생성된 벡터 저장 (없으면 null 유지 후 깃허브 액션이 처리)
+            metadata: { type: 'ai_save', user: state.currentUser || 'anonymous', original_query: state.lastAiQuery }
         };
 
         // [수정] PostgREST POST 요청 시 단일 객체보다 배열([])로 감싸서 전송하는 것이 스키마 매핑 에러 방지에 유리함

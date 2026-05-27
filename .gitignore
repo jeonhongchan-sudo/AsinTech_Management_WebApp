@@ -3,7 +3,6 @@ db_config.json
 user_info.json
 secrets.json
 *.key
-*.py
 
 # Google Apps Script (GAS에서 관리하므로 제외)
 Code.gs
