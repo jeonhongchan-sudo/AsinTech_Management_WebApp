@@ -27,6 +27,8 @@ export const state = {
     adminUser: null,        // [추가] 관리자 ID (API로 수신)
     currentCadProjectId: null, // [추가] 현재 Map Viewer의 프로젝트 ID
     memos: [],              // [추가] 현재 프로젝트의 메모 목록
+    originalAiQuery: null,     // [추가] 대화의 시작이 된 첫 질문
+    aiCorrectionHistory: [],   // [추가] 사용자의 교정/추가 질문 목록
     highlightedMemoId: null,   // [추가] 지도에서 강조할 메모 ID
     projectPhotos: [],      // [추가] 현재 프로젝트의 전체 사진 목록 (자동 매칭용)
     isDistanceMode: false,  // [추가] 거리 측정 모드 활성화 여부

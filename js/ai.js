@@ -54,26 +54,23 @@ export async function handleDatabaseSearch(query) {
         
         console.log(`[Search] DB에서 '${cleanQuery}' 검색 중...`);
 
-        // 1. [수정] project_id와 embedding 없이 content 키워드로만 검색 (가장 확실한 방법)
-        let filter = `content=ilike.*${encodeURIComponent(cleanQuery)}*`;
-
-        const knowledgeResults = await callSupabaseDirect(`pdf_knowledge?${filter}&select=*&limit=1`);
+        // 1. [최우선] AI가 이전에 답변하고 저장했던 지식 검색
+        const aiSavedFilter = `file_name=eq.AI_Confirmed_Knowledge&content=ilike.*${encodeURIComponent(cleanQuery)}*`;
+        const aiSavedResults = await callSupabaseDirect(`pdf_knowledge?${aiSavedFilter}&select=*&limit=1`);
         
-        if (knowledgeResults && knowledgeResults.length > 0) {
-            const bestMatch = knowledgeResults[0];
-            // "질문: ... \n답변: ..." 형태에서 답변 부분만 추출 시도
-            const parts = bestMatch.content.split('답변:');
-            const savedAnswer = parts.length > 1 ? parts[1].trim() : bestMatch.content;
+        if (aiSavedResults && aiSavedResults.length > 0) {
+            const bestMatch = aiSavedResults[0];
+            // "질문: ... \n답변: ..." 형태에서 '답변:' 이후 내용만 추출
+            const answerStartIndex = bestMatch.content.indexOf('답변:');
+            const savedAnswer = answerStartIndex !== -1 ? bestMatch.content.substring(answerStartIndex + '답변:'.length).trim() : bestMatch.content;
             
             showAiResponseModal(query, `💡 이전에 학습된 지식입니다:\n\n${savedAnswer}`, "📚 DB 지식 검색 (기학습)");
             return true;
         }
         
-        // 2. [기존] AI 저장 지식이 없으면 지침서 원문(PDF 텍스트)에서 검색 (RPC)
+        // 2. [후순위] 저장된 지식이 없으면 지침서 원문(PDF)에서 키워드 검색
         const results = await callSupabaseDirect('rpc/search_pdf_text_fallback', 'POST', {
             search_query: cleanQuery,
-            // 필요한 경우 프로젝트 ID 필터링 추가 가능
-            // p_project_id: pid === 'GENERAL' ? null : pid 
         });
 
         if (results && results.length > 0) {
@@ -92,7 +89,7 @@ export async function handleDatabaseSearch(query) {
 }
 
 /** AI 포인트 분석 및 답변 처리 */
-export async function handleAiSearch(query, cadLayersSet) {
+export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, isFollowUp = false) {
     const now = Date.now();
 
     // 1. 이미 요청 중인 경우
@@ -119,23 +116,57 @@ export async function handleAiSearch(query, cadLayersSet) {
         lastAiRequestTime = Date.now();
         updateAiButtonState(true); // 버튼 비활성화 및 로딩 표시
 
+        // [수정] 요약(재요청)인 경우와 일반 검색인 경우의 안내 문구 및 타입 분기
+        const isSummary = !!rawDbContext;
+        const requestType = isSummary ? 'pdf_summary' : 'point_search';
+        const loadingMsg = isSummary ? "AI가 지침서 내용을 읽기 쉽게 정리하고 있습니다..." : "AI가 도면과 지침을 분석하여 답변을 생성하고 있습니다...";
+
         // [추가] 모달이 열려있는 상태에서 추가 질문 시, 기존 내용을 비우고 로딩 표시 (혼란 방지)
         const contentEl = document.getElementById('aiAnswerContent');
         if (contentEl && document.getElementById('aiResponseModal').style.display === 'flex') {
-            contentEl.innerHTML = '<div style="text-align:center; padding:30px; color:#666;"><span class="spinner"></span> AI가 도면과 지침을 분석하여 답변을 생성하고 있습니다...</div>';
+            contentEl.innerHTML = `<div style="text-align:center; padding:30px; color:#666;"><span class="spinner"></span> ${loadingMsg}</div>`;
         }
 
         // 추가 질문을 위해 현재 사용된 레이어 셋을 상태에 보관
         state.lastCadLayersSet = cadLayersSet;
 
-        // [수정] 레이어 정보가 없는 경우 알림 문구 변경
         const isGeneral = !cadLayersSet || cadLayersSet.size === 0;
-        showAlert(isGeneral ? "AI가 답변을 준비 중입니다..." : "AI가 도면 레이어와 지침을 분석 중입니다...", "info");
+        if (!isSummary) {
+            showAlert(isGeneral ? "AI가 답변을 준비 중입니다..." : "AI가 도면 레이어와 지침을 분석 중입니다...", "info");
+        }
         
         // 현재 도면의 레이어 목록을 컨텍스트로 제공
         const layerContext = !isGeneral ? Array.from(cadLayersSet).join(', ') : "정보 없음 (일반 질문)";
+
+        // [핵심] 대화 맥락 유지 및 질문 히스토리 관리
+        let combinedContext = "";
+        let finalQuery = query;
+
+        if (isFollowUp) {
+            // 추가 질문(교정)인 경우: 이전 답변을 컨텍스트에 포함하여 AI가 자기 오류를 수정하게 함
+            state.aiCorrectionHistory.push(query);
+            combinedContext = `[이전 AI 답변 내용]\n${state.lastAiAnswer}\n\n[도면 맥락]\n${layerContext}\n\n위 답변에 대해 사용자가 다음과 같은 교정/추가 요청을 했습니다. 이를 반영하여 최종 답변을 다시 작성하세요.`;
+            finalQuery = query;
+        } else if (isSummary) {
+            // DB 재요청(요약)인 경우: 새로운 대화로 간주
+            state.originalAiQuery = query;
+            state.aiCorrectionHistory = [];
+            combinedContext = `[정리 대상 DB 원문]\n${rawDbContext}\n\n[도면 맥락]\n${layerContext}`;
+        } else {
+            // 완전히 새로운 질문인 경우
+            state.originalAiQuery = query;
+            state.aiCorrectionHistory = [];
+            combinedContext = `현재 도면 레이어: ${layerContext}`;
+        }
+
+        // 프롬프트 의도 보강
+        const apiQuery = isSummary 
+            ? `'${query}'에 대해 검색된 위 DB 지침 내용을 사용자가 보기 편하게 항목별로 재구성해서 설명해줘.` 
+            : isFollowUp 
+            ? `사용자 요청: ${query}` 
+            : query;
         
-        const res = await callAiEdge(query, `현재 도면 레이어: ${layerContext}`, 'point_search');
+        const res = await callAiEdge(apiQuery, combinedContext, requestType);
         
         if (res.success) {
             showAiResponseModal(query, res.answer, "실시간 AI 분석");
@@ -205,7 +236,8 @@ export async function askFollowUp() {
     const nextQuery = prompt("AI에게 궁금한 내용을 더 입력하세요:");
     if (!nextQuery || !nextQuery.trim()) return;
     
-    handleAiSearch(nextQuery, state.lastCadLayersSet);
+    // [수정] 4번째 인자 isFollowUp을 true로 전달하여 맥락 유지
+    handleAiSearch(nextQuery, state.lastCadLayersSet, null, true);
 }
 
 /** AI 관련 버튼 상태 업데이트 */
@@ -230,7 +262,7 @@ export function showAiResponseModal(query, answer, source) {
     const saveBtn = document.getElementById('btnAiSave');
     const reRequestBtn = document.getElementById('btnAiReRequest');
     
-    if (!modal || !content || !sourceEl || !saveBtn) {
+    if (!modal || !content || !sourceEl) {
         console.error("AI Response Modal elements not found in DOM");
         return;
     }
@@ -243,20 +275,25 @@ export function showAiResponseModal(query, answer, source) {
         innerContent.style.maxHeight = '75vh'; // 화면 높이의 75%
     }
 
-    // [수정] 답변 출처에 따른 버튼 토글 로직
-    const isAi = source.includes("실시간 AI 분석");
-    const isDb = source.includes("DB");
+    // [핵심] 답변 출처에 따른 버튼 활성화 제어
+    // source 문자열에 'AI 분석'이 포함되면 실시간 답변임
+    const isRealTimeAi = source.includes("실시간 AI 분석");
+    const isFromDatabase = source.includes("DB");
 
-    // AI 답변일 때만 [저장] 노출
-    saveBtn.style.display = isAi ? "inline-flex" : "none";
-    
-    // DB 답변일 때만 [AI 재요청] 노출
-    if (reRequestBtn) {
-        reRequestBtn.style.display = isDb ? "inline-flex" : "none";
-        reRequestBtn.onclick = () => handleAiSearch(query, state.lastCadLayersSet);
+    // 1. [저장] 버튼: 실시간 AI 답변일 때만 표시 (학습용)
+    if (saveBtn) {
+        saveBtn.style.display = isRealTimeAi ? "inline-flex" : "none";
+        saveBtn.disabled = false;
     }
-
-    saveBtn.disabled = false; // 쿨타임 등으로 비활성화된 상태 초기화
+    
+    // 2. [AI 재요청] 버튼: DB 검색 결과일 때만 표시
+    if (reRequestBtn) {
+        reRequestBtn.style.display = isFromDatabase ? "inline-flex" : "none";
+        reRequestBtn.onclick = () => {
+            // [수정] 현재 모달에 표시된 'answer'(DB 원문)를 AI에게 전달하여 재정리 요청
+            handleAiSearch(query, state.lastCadLayersSet, answer);
+        };
+    }
 
     state.lastAiQuery = query;
     state.lastAiAnswer = answer;
@@ -296,10 +333,15 @@ export async function saveAiKnowledge() {
         }
         showAlert("지식을 학습 데이터로 저장 중...", "info");
 
-        // [수정] 에러 유발 가능성이 있는 project_id와 embedding 컬럼 제외
+        // [개선] 전체 대화 맥락을 포함한 질문 생성
+        let fullStoredQuery = state.originalAiQuery;
+        if (state.aiCorrectionHistory && state.aiCorrectionHistory.length > 0) {
+            fullStoredQuery += ` (검토/교정: ${state.aiCorrectionHistory.join(' -> ')})`;
+        }
+
         const payload = {
             file_name: 'AI_Confirmed_Knowledge', // AI 답변임을 알 수 있도록 고정 파일명 부여
-            content: `질문: ${state.lastAiQuery}\n답변: ${state.lastAiAnswer}`,
+            content: `질문: ${fullStoredQuery}\n답변: ${state.lastAiAnswer}`,
             metadata: { type: 'ai_save', user: state.currentUser || 'anonymous', original_query: state.lastAiQuery }
         };
 
