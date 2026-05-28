@@ -1081,29 +1081,33 @@ export function toggleBackgroundMap(isVisible) {
 
 // 포인트 명칭 검색 기능 (검색 범위 확장 및 수량 파악 기능)
 export async function searchPoints() {
-    let searchTerm;
-    if (cadMap) {
-        searchTerm = prompt(
-            "포인트 검색 문법 안내:\n• & : 또는 (예: 제수변&이토변)\n• 공백 : 그리고 (예: 제수변 50)\n• ! : 제외 (예: 제수변!하단)\n\n검색어를 입력하세요:"
-        );
-    } else {
-        searchTerm = prompt("검색어를 입력하세요 (지침 및 지식 DB 검색):");
-    }
+    const isProjectSelected = !!state.currentCadProjectId;
+
+    let searchTerm = prompt(
+        isProjectSelected
+            ? "포인트 검색 문법 안내:\n• & : 또는 (예: 제수변&이토변)\n• 공백 : 그리고 (예: 제수변 50)\n• ! : 제외 (예: 제수변!하단)\n\n검색어를 입력하세요:"
+            : "검색어를 입력하세요 (지침 및 지식 DB 검색):"
+    );
 
     if (!searchTerm || !searchTerm.trim()) return;
 
-    // AI 재요청을 대비해 현재 레이어 정보를 상태에 미리 저장
-    state.lastCadLayersSet = cadLayers;
-
-    // [수정] 1단계: DB에서 먼저 지침서 키워드/내용 검색 (지도 로드 여부와 관계없이 수행)
-    if (!cadMap) {
-        const foundInDb = await handleDatabaseSearch(searchTerm);
-        if (!foundInDb) handleAiSearch(searchTerm, null);
+    // 1. 프로젝트 미선택: DB 검색 -> 실패 시 AI 순차 수행
+    if (!isProjectSelected) {
+        const foundInDb = await handleDatabaseSearch(searchTerm.trim());
+        
+        if (!foundInDb) {
+            // [수정] '추론' 키워드가 포함된 경우에만 AI 일반 질문 허용
+            if (searchTerm.includes("추론")) {
+                handleAiSearch(searchTerm, null);
+            } else {
+                showAlert("DB에서 검색 결과를 찾을 수 없습니다.", "info");
+            }
+        }
         return;
     }
 
-    // 지도가 로드된 경우 -> 2단계: 도면 포인트 검색
-    // (도면 검색에서 결과가 없으면 자동으로 DB 검색 -> AI 검색 순으로 제안하게 됨)
+    // 2. 프로젝트 선택: 구현된 문법 기반 도면 검색만 수행
+    if (!cadMap) return showAlert("지도가 로드되지 않았습니다.", "info");
 
     // [개선] 검색어 및 데이터 전처리 유틸리티
     const sanitize = (str) => {
@@ -1154,10 +1158,7 @@ export async function searchPoints() {
     });
 
     if (matches.length === 0) {
-        // 도면 결과 없으면 DB/AI 검색으로 유도
-        const foundInDb = await handleDatabaseSearch(searchTerm);
-        if (!foundInDb) handleAiSearch(searchTerm, cadLayers);
-        return;
+        return showAlert("도면 내에 일치하는 포인트가 없습니다.", "info");
     }
 
     clearSearchMarkers();

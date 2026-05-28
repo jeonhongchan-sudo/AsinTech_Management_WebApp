@@ -1,9 +1,12 @@
 // e:\Program\SelfProgram\아신테크\js\ai.js
-import { state, callSupabaseDirect, showAlert, callAiEdge } from './core.js';
+import { state, callSupabaseDirect, showAlert, callAiEdge, WORKER_URL, WORKER_AUTH_KEY, R2_BASE_URL } from './core.js';
+import { UIS_DATA, NETWORK_RTK_DATA, NON_CONFORMITY_CASES_DATA, NUMERIC_MAP_DATA, GNSS_NOTICE_DATA, PUBLIC_SURVEY_FAQ_DATA, REGULATION_REVISION_DATA, MATERIAL_ABBREVIATION_DATA, PUBLIC_SURVEY_REGULATIONS_DATA } from './data.js';
 
 let isAiProcessing = false; // [추가] 중복 요청 방지 변수
 let lastAiRequestTime = 0;   // [추가] 물리적 쿨타임 체크용
 let aiCooldownTimer = null;  // [추가] 쿨타임 타이머 변수 선언 누락 수정
+
+const knowledgeContentCache = new Map(); // [추가] R2 본문 내용 캐싱 (성능 최적화)
 
 /** [추가] 텍스트 가독성 개선 필터 (5가지 요청사항 반영) */
 function formatResponseText(text) {
@@ -44,49 +47,149 @@ function formatResponseText(text) {
 /** [1순위 후순위] AI 없이 DB에서 지침서 키워드 검색 */
 export async function handleDatabaseSearch(query) {
     try {
-        // 검색어 전처리: 연속된 공백 하나로 축소 및 트림
-        const cleanQuery = query.replace(/\s+/g, ' ').trim();
-        if (!cleanQuery) return false;
+        const originalCleanQuery = query.replace(/\s+/g, ' ').trim();
+        if (!originalCleanQuery) return false;
 
-        // [수정] project_id는 text 타입이며, 기본값은 코랩 데이터와 동일하게 'GENERAL' 사용
-        const pid = state.currentCadProjectId ? String(state.currentCadProjectId) : 'GENERAL';
-        const pidLabel = (pid === 'GENERAL') ? '전체 지침' : '해당 프로젝트 및 지침';
-        
-        console.log(`[Search] DB에서 '${cleanQuery}' 검색 중...`);
+        const queryNoSpace = originalCleanQuery.replace(/\s+/g, '').toLowerCase();
+        const searchWords = originalCleanQuery.split(/\s+/)
+            .map(w => w.replace(/(에서|으로|의|은|는|이|가|을|를|도|에|기준|안내|방법)$/, '')) 
+            .filter(w => w.length >= 2);
+        if (searchWords.length === 0) searchWords.push(originalCleanQuery);
 
-        // 1. [최우선] AI가 이전에 답변하고 저장했던 지식 검색
-        const aiSavedFilter = `file_name=eq.AI_Confirmed_Knowledge&content=ilike.*${encodeURIComponent(cleanQuery)}*`;
-        const aiSavedResults = await callSupabaseDirect(`pdf_knowledge?${aiSavedFilter}&select=*&limit=1`);
-        
-        if (aiSavedResults && aiSavedResults.length > 0) {
-            const bestMatch = aiSavedResults[0];
-            // "질문: ... \n답변: ..." 형태에서 '답변:' 이후 내용만 추출
-            const answerStartIndex = bestMatch.content.indexOf('답변:');
-            const savedAnswer = answerStartIndex !== -1 ? bestMatch.content.substring(answerStartIndex + '답변:'.length).trim() : bestMatch.content;
-            
-            showAiResponseModal(query, `💡 이전에 학습된 지식입니다:\n\n${savedAnswer}`, "📚 DB 지식 검색 (기학습)");
+        // 1. DB 목록 및 본문 검색 헬퍼
+        const allKnowledge = await callSupabaseDirect(`pdf_knowledge?select=file_name,content_url,metadata`);
+        if (!allKnowledge || allKnowledge.length === 0) return false;
+
+        const searchInList = async (list) => {
+            const promises = list.map(async (item) => {
+                try {
+                    let content = knowledgeContentCache.get(item.content_url);
+                    if (!content && item.content_url) {
+                        const res = await fetch(item.content_url);
+                        const data = await res.json();
+                        content = data.content || "";
+                        knowledgeContentCache.set(item.content_url, content);
+                    }
+                    if (!content) return null;
+                    const cleanContent = content.toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
+                    const isFullMatch = cleanContent.includes(queryNoSpace);
+                    let matchCount = 0;
+                    searchWords.forEach(w => { if (cleanContent.includes(w.toLowerCase())) matchCount++; });
+                    const matchRatio = matchCount / searchWords.length;
+
+                    if (isFullMatch || matchRatio >= 0.5) {
+                        let displayContent = content;
+                        if (content.length > 1500) {
+                            const idx = cleanContent.indexOf(queryNoSpace);
+                            if (idx !== -1) {
+                                const start = Math.max(0, idx - 300);
+                                const end = Math.min(content.length, idx + 1500);
+                                displayContent = `... (앞부분 중략) ...\n\n${content.substring(start, end)}\n\n... (뒷부분 중략) ...`;
+                            }
+                        }
+                        return { ...item, content: displayContent, score: (isFullMatch ? 2.0 : 0) + matchRatio, matchRatio };
+                    }
+                } catch (e) { console.warn(`로드 실패: ${item.file_name}`, e); }
+                return null;
+            });
+            return (await Promise.all(promises)).filter(r => r !== null).sort((a, b) => b.score - a.score);
+        };
+
+        // [Step 1] 검증된 AI 지식 DB 검색
+        console.log("🔍 [Step 1] 검증된 지식 탐색 중...");
+        const confirmedList = allKnowledge.filter(k => k.file_name === 'AI_Confirmed_Knowledge');
+        const confirmedMatches = await searchInList(confirmedList);
+        if (confirmedMatches.length > 0) {
+            displayCombinedResults(confirmedMatches, originalCleanQuery, "💡 검증된 AI 지식 (DB)");
             return true;
         }
-        
-        // 2. [후순위] 저장된 지식이 없으면 지침서 원문(PDF)에서 키워드 검색
-        const results = await callSupabaseDirect('rpc/search_pdf_text_fallback', 'POST', {
-            search_query: cleanQuery,
-        });
 
-        if (results && results.length > 0) {
-            const dbAnswer = "✅ 지침서 DB에서 관련 문구를 찾았습니다.\n내용이 복잡할 경우 하단의 [추가질문]을 눌러 AI 요약을 요청하세요.\n\n" + 
-                           results.map((k, idx) => {
-                               return `----------------------------------------\n[검색결과 ${idx + 1}] 출처: ${k.file_name} (p.${k.metadata?.page || '?'})\n\n${k.content.trim()}`;
-                           }).join("\n\n");
-            showAiResponseModal(query, dbAnswer, "📖 DB 지침서 원문 검색");
-            return true; // 검색 성공
+        // [Step 2] 로컬 지침 데이터(data.js) 검색
+        console.log("🔍 [Step 2] 로컬 지침 데이터 탐색 중...");
+        const localMatches = [];
+        const localSources = [
+            { name: "공공측량 작업규정 본문", data: PUBLIC_SURVEY_REGULATIONS_DATA },
+            { name: "공공측량제도 FAQ", data: PUBLIC_SURVEY_FAQ_DATA },
+            { name: "지하시설물 측량 코드표", data: UIS_DATA },
+            { name: "지하시설물 재질약어표", data: MATERIAL_ABBREVIATION_DATA },
+            { name: "공공측량 성과심사 부적합 사례", data: NON_CONFORMITY_CASES_DATA },
+            { name: "공공측량 작업규정 개정 안내", data: REGULATION_REVISION_DATA },
+            { name: "네트워크RTK 서비스 안내", data: NETWORK_RTK_DATA },
+            { name: "수치지도 도엽번호 안내", data: NUMERIC_MAP_DATA },
+            { name: "GNSS 관측 방식 주의사항", data: GNSS_NOTICE_DATA }
+        ];
+
+        for (const source of localSources) {
+            const stringified = JSON.stringify(source.data);
+            if (stringified.replace(/\s+/g, '').toLowerCase().includes(queryNoSpace)) {
+                let foundText = "";
+                if (source.name === "공공측량 작업규정 본문") {
+                    const articles = PUBLIC_SURVEY_REGULATIONS_DATA.parts.flatMap(p => p.articles);
+                    const match = articles.find(a => JSON.stringify(a).replace(/\s+/g, '').includes(queryNoSpace));
+                    if (match) {
+                        const title = `${match.articleId} ${match.title || ''}`;
+                        const content = Array.isArray(match.paragraphs || match.content || match.definitions) 
+                            ? JSON.stringify(match.paragraphs || match.content || match.definitions, null, 2).replace(/[\[\]"{}]/g, '').replace(/\\n/g, '\n')
+                            : (match.paragraphs || match.content || match.definitions);
+                        foundText = `[${title}]\n\n${content}`;
+                    }
+                } else if (source.name === "공공측량제도 FAQ") {
+                    const questions = PUBLIC_SURVEY_FAQ_DATA.chapters.flatMap(c => c.questions);
+                    const match = questions.find(q => JSON.stringify(q).replace(/\s+/g, '').toLowerCase().includes(queryNoSpace));
+                    if (match) foundText = `[FAQ: ${match.question}]\n\n답변: ${match.answer || '상세 내용 참조'}`;
+                } else if (source.name === "지하시설물 측량 코드표") {
+                    const items = UIS_DATA.flatMap(g => g.items);
+                    const match = items.find(i => i.name.replace(/\s+/g, '').toLowerCase().includes(queryNoSpace));
+                    if (match) foundText = `[코드표 매칭]\n- 명칭: ${match.name}\n- 코드: ${match.code}\n- 형태: ${match.type}`;
+                } else if (source.name === "지하시설물 재질약어표") {
+                    const rows = MATERIAL_ABBREVIATION_DATA.tables.flatMap(t => t.data);
+                    const match = rows.find(r => JSON.stringify(r).replace(/\s+/g, '').toLowerCase().includes(queryNoSpace));
+                    if (match) foundText = `[재질약어 정보]\n- 약어: ${match.abbreviation || '-'}\n- 원어: ${match.originalTerm || '-'}\n- 설명: ${match.description || '-'}`;
+                } else if (source.name === "공공측량 성과심사 부적합 사례") {
+                    const chapters = NON_CONFORMITY_CASES_DATA.contents;
+                    const match = chapters.find(c => JSON.stringify(c).replace(/\s+/g, '').toLowerCase().includes(queryNoSpace));
+                    if (match) foundText = `[부적합 사례 분석]\n\n${JSON.stringify(match, (k, v) => (k === 'chapter' || k === 'title') ? undefined : v, 2).replace(/[\[\]"{}]/g, '').replace(/\\n/g, '\n').trim()}`;
+                }
+                if (foundText) localMatches.push({ file_name: source.name, content: foundText, score: 3.0, metadata: {} });
+            }
         }
-        return false; // 검색 결과 없음
-    } catch (e) {
-        console.error("DB 검색 오류:", e);
+        if (localMatches.length > 0) {
+            displayCombinedResults(localMatches, originalCleanQuery, "📚 로컬 지침 DB 검색");
+            return true;
+        }
+
+        // [Step 3] 전체 지침서 본문 정밀 탐색 (R2 Deep Search)
+        console.log("🔍 [Step 3] 본문 정밀 탐색 시작...");
+        showAlert("지침서 본문 내용을 정밀 검색 중입니다. 잠시만 기다려주세요...", "info");
+        const otherList = allKnowledge.filter(k => k.file_name !== 'AI_Confirmed_Knowledge');
+        const deepMatches = await searchInList(otherList);
+        if (deepMatches.length > 0) {
+            displayCombinedResults(deepMatches, originalCleanQuery, "📚 통합 DB 본문 검색");
+            return true;
+        }
+
+        console.log("ℹ️ [Search] 일치하는 결과 없음");
         return false;
-    }
+    } catch (e) { console.error("DB 검색 오류:", e); return false; }
 }
+
+/** [추가] 통합 검색 결과를 모달로 표시하는 헬퍼 */
+function displayCombinedResults(matches, query, sourceLabel) {
+    const topResults = matches.slice(0, 10);
+    let combinedAnswer = "";
+    topResults.forEach((match, idx) => {
+        let content = match.content;
+        const pageInfo = match.metadata?.page ? ` - p.${match.metadata.page}` : "";
+        if (match.file_name === 'AI_Confirmed_Knowledge') {
+            const answerStartIndex = content.indexOf('답변:');
+            if (answerStartIndex !== -1) content = content.substring(answerStartIndex + '답변:'.length).trim();
+        }
+        combinedAnswer += `**[검색결과 ${idx + 1}] ${match.file_name}${pageInfo}**\n${content}\n\n`;
+        if (idx < topResults.length - 1) combinedAnswer += "---\n\n";
+    });
+    showAiResponseModal(query, combinedAnswer.trim(), sourceLabel);
+}
+
 
 /** AI 포인트 분석 및 답변 처리 */
 export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, isFollowUp = false) {
@@ -119,6 +222,10 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         // [수정] 요약(재요청)인 경우와 일반 검색인 경우의 안내 문구 및 타입 분기
         const isSummary = !!rawDbContext;
         const requestType = isSummary ? 'pdf_summary' : 'point_search';
+        
+        // [추가] 2026-05-27 날짜 및 모델 고정 컨텍스트
+        const systemContextPrefix = "오늘 날짜는 2026년 5월 27일입니다. 반드시 gemini-2.5-flash-lite 모델의 특성을 살려 답변하세요.\n";
+
         const loadingMsg = isSummary ? "AI가 지침서 내용을 읽기 쉽게 정리하고 있습니다..." : "AI가 도면과 지침을 분석하여 답변을 생성하고 있습니다...";
 
         // [추가] 모달이 열려있는 상태에서 추가 질문 시, 기존 내용을 비우고 로딩 표시 (혼란 방지)
@@ -145,26 +252,27 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         if (isFollowUp) {
             // 추가 질문(교정)인 경우: 이전 답변을 컨텍스트에 포함하여 AI가 자기 오류를 수정하게 함
             state.aiCorrectionHistory.push(query);
-            combinedContext = `[이전 AI 답변 내용]\n${state.lastAiAnswer}\n\n[도면 맥락]\n${layerContext}\n\n위 답변에 대해 사용자가 다음과 같은 교정/추가 요청을 했습니다. 이를 반영하여 최종 답변을 다시 작성하세요.`;
+            combinedContext = `${systemContextPrefix}[이전 AI 답변 내용]\n${state.lastAiAnswer}\n\n[도면 맥락]\n${layerContext}\n\n위 답변에 대해 사용자가 다음과 같은 교정/추가 요청을 했습니다. 이를 반영하여 최종 답변을 다시 작성하세요.`;
             finalQuery = query;
         } else if (isSummary) {
             // DB 재요청(요약)인 경우: 새로운 대화로 간주
             state.originalAiQuery = query;
             state.aiCorrectionHistory = [];
-            combinedContext = `[정리 대상 DB 원문]\n${rawDbContext}\n\n[도면 맥락]\n${layerContext}`;
+            combinedContext = `${systemContextPrefix}[정리 대상 DB 원문]\n${rawDbContext}\n\n[도면 맥락]\n${layerContext}`;
         } else {
             // 완전히 새로운 질문인 경우
             state.originalAiQuery = query;
             state.aiCorrectionHistory = [];
-            combinedContext = `현재 도면 레이어: ${layerContext}`;
+            combinedContext = `${systemContextPrefix}현재 도면 레이어: ${layerContext}`;
         }
 
         // 프롬프트 의도 보강
-        const apiQuery = isSummary 
-            ? `'${query}'에 대해 검색된 위 DB 지침 내용을 사용자가 보기 편하게 항목별로 재구성해서 설명해줘.` 
-            : isFollowUp 
-            ? `사용자 요청: ${query}` 
-            : query;
+        let apiQuery = query;
+        if (isSummary) {
+            apiQuery = `'${query}'에 대해 검색된 위 DB 지침 내용을 항목별로 가독성 좋게 재구성해서 아주 이쁘게 정리해줘. 외부 지식을 이용한 추론은 하지 말고 오직 주어진 내용으로만 작성해.`;
+        } else if (isFollowUp) {
+            apiQuery = `사용자 요청: ${query}`;
+        }
         
         const res = await callAiEdge(apiQuery, combinedContext, requestType);
         
@@ -195,8 +303,18 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
             
             lastAiRequestTime = Date.now();
         } else {
-            console.error("AI Edge Function Error:", res.error);
+            // [개선] 에러 객체 전체를 파악할 수 있도록 보강
+            console.error("AI Edge Function Error Detail:", res);
             
+            // [추가] 분석 실패 시 모달의 내용을 에러 안내로 변경하여 사용자 혼란 방지
+            const contentEl = document.getElementById('aiAnswerContent');
+            if (contentEl) {
+                const errorMsg = res.error || "응답 형식이 올바르지 않습니다.";
+                contentEl.innerHTML = `<div style="color:#e03131; padding:20px; background:#fff5f5; border-radius:8px; border:1px solid #ffa8a8;">
+                    <strong>⚠️ AI 분석 중 오류가 발생했습니다.</strong><br><small>${errorMsg}</small>
+                </div>`;
+            }
+
             // [추가] limit: 0 에러에 대한 특수 처리
             if (res.error && res.error.includes("limit: 0")) {
                 showAlert("⚠️ [심각] 구글 API 일일 할당량이 소진되었거나 계정이 일시 차단되었습니다. 대시보드를 확인하세요.", "error");
@@ -280,6 +398,40 @@ function startAiCooldownUI(seconds) {
     }, 1000);
 }
 
+/** [추가] 모달 내 텍스트(DB 원문 등) 클립보드 복사 */
+export function copyRawContent() {
+    // HTML 태그가 제거된 순수 텍스트만 복사
+    const content = state.lastAiAnswer || "";
+    if (!content) return;
+
+    navigator.clipboard.writeText(content).then(() => {
+        showAlert("내용이 클립보드에 복사되었습니다. 외부 AI에 붙여넣어 정리하세요!", "success");
+    }).catch(err => {
+        console.error("복사 실패:", err);
+        showAlert("복사 실패. 브라우저 설정을 확인하세요.", "error");
+    });
+}
+
+/** [추가] 수동 입력 모드 토글 */
+export function toggleManualInput() {
+    const contentBox = document.getElementById('aiAnswerContent');
+    const manualArea = document.getElementById('aiManualInputArea');
+    const manualBtn = document.getElementById('btnAiManualMode');
+    const isManual = manualArea.style.display === 'block';
+    
+    if (isManual) {
+        manualArea.style.display = 'none';
+        contentBox.style.display = 'block';
+        manualBtn.innerHTML = "✍️";
+        manualBtn.title = "직접입력";
+    } else {
+        manualArea.style.display = 'block';
+        contentBox.style.display = 'none';
+        manualBtn.innerHTML = "👁️";
+        manualBtn.title = "원문보기";
+        document.getElementById('aiManualInput').focus();
+    }
+}
 /** AI에게 대화 도중 추가 질문하기 */
 export async function askFollowUp() {
     if (isAiProcessing) return;
@@ -298,10 +450,12 @@ function updateAiButtonState(isLoading) {
     
     if (followUpBtn) {
         followUpBtn.disabled = isLoading;
-        followUpBtn.innerText = isLoading ? "⏳ 분석중" : "🔍 추가질문";
+        followUpBtn.innerHTML = isLoading ? "⏳" : "💬";
+        followUpBtn.title = isLoading ? "분석중" : "추가질문";
     }
-    if (saveBtn) saveBtn.disabled = isLoading;
-    if (reRequestBtn) reRequestBtn.disabled = isLoading;
+    if (saveBtn) saveBtn.disabled = isLoading; // saveBtn text is handled in saveAiKnowledge
+    if (reRequestBtn) reRequestBtn.disabled = isLoading; // reRequestBtn text is handled in showAiResponseModal
+
 }
 
 /** AI 답변 모달 출력 */
@@ -312,13 +466,19 @@ export function showAiResponseModal(query, answer, source) {
     const saveBtn = document.getElementById('btnAiSave');
     const reRequestBtn = document.getElementById('btnAiReRequest');
     
+    const closeBtn = modal.querySelector('.close-btn');
+    // [추가] 새로운 버튼 및 입력 영역 초기화
+    const copyBtn = document.getElementById('btnAiCopyRaw');
+    const manualBtn = document.getElementById('btnAiManualMode');
+    const manualArea = document.getElementById('aiManualInputArea');
+    
     if (!modal || !content || !sourceEl) {
         console.error("AI Response Modal elements not found in DOM");
         return;
     }
 
     // 모달 크기 최적화 스타일 강제 적용
-    const innerContent = modal.querySelector('.modal-content');
+    const innerContent = modal.querySelector('.container');
     if (innerContent) {
         innerContent.style.width = '90vw'; // 화면 너비의 90%
         innerContent.style.maxWidth = '900px'; // 최대 900px
@@ -330,10 +490,29 @@ export function showAiResponseModal(query, answer, source) {
     const isRealTimeAi = source.includes("실시간 AI 분석");
     const isFromDatabase = source.includes("DB");
 
-    // 1. [저장] 버튼: 실시간 AI 답변일 때만 표시 (학습용)
+    // [추가] DB 검색 결과일 때만 복사 및 직접 입력 버튼 노출
+    if (copyBtn) {
+        copyBtn.style.display = isFromDatabase ? "inline-flex" : "none";
+        copyBtn.innerHTML = "📋"; // 아이콘
+        copyBtn.title = "원문복사";
+    }
+    if (manualBtn) {
+        manualBtn.style.display = isFromDatabase ? "inline-flex" : "none";
+        manualBtn.innerHTML = "✍️"; // 아이콘
+        manualBtn.title = "직접입력";
+    }
+    
+    // 입력창 및 내용 초기화
+    if (manualArea) manualArea.style.display = 'none';
+    content.style.display = 'block';
+    document.getElementById('aiManualInput').value = '';
+
+    // 1. [저장] 버튼: 항상 표시 (학습용)
     if (saveBtn) {
-        saveBtn.style.display = isRealTimeAi ? "inline-flex" : "none";
+        saveBtn.style.display = "inline-flex";
         saveBtn.disabled = false;
+        saveBtn.innerHTML = "💾"; // 아이콘
+        saveBtn.title = "답변 저장";
     }
     
     // 2. [AI 재요청] 버튼: DB 검색 결과일 때만 표시
@@ -341,6 +520,8 @@ export function showAiResponseModal(query, answer, source) {
         reRequestBtn.style.display = isFromDatabase ? "inline-flex" : "none";
         reRequestBtn.onclick = () => {
             // [수정] 현재 모달에 표시된 'answer'(DB 원문)를 AI에게 전달하여 재정리 요청
+            // AI 재요청 시에는 현재 모달의 content.innerText를 rawDbContext로 사용
+            const currentModalContent = document.getElementById('aiAnswerContent').innerText;
             handleAiSearch(query, state.lastCadLayersSet, answer);
         };
     }
@@ -354,10 +535,35 @@ export function showAiResponseModal(query, answer, source) {
     content.innerHTML = formatResponseText(answer);
 
     // [추가] 새로운 답변 로드 시 스크롤을 최상단으로 이동 (이전 DB 검색 결과 등으로 인한 가독성 문제 해결)
-    const scrollArea = modal.querySelector('.modal-content');
+    const scrollArea = modal.querySelector('.container');
     if (scrollArea) scrollArea.scrollTop = 0;
 
     modal.style.display = 'flex';
+
+    // 닫기 버튼도 아이콘으로 명시
+    if (closeBtn) closeBtn.innerHTML = "&times;";
+
+}
+
+/** [추가] AI 답변 텍스트를 R2에 업로드하고 URL 반환 */
+async function uploadAiTextToR2(text) {
+    try {
+        const timestamp = Date.now();
+        const r2Path = `knowledge_content/AI_Confirmed_Knowledge/${timestamp}.json`;
+        
+        // 1. Presigned URL 획득
+        const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}&type=application/json`, {
+            headers: { 'Authorization': WORKER_AUTH_KEY }
+        });
+        const { url: uploadUrl } = await presignRes.json();
+
+        // 2. R2에 JSON 업로드
+        await fetch(uploadUrl, { method: 'PUT', body: JSON.stringify({ content: text }), headers: { 'Content-Type': 'application/json' } });
+        
+        // R2_BASE_URL 또는 state 설정값을 사용하여 최종 URL 반환
+        const baseUrl = R2_BASE_URL || (state.r2Config ? state.r2Config.publicUrl : "");
+        return `${baseUrl.replace(/\/$/, '')}/${r2Path}`;
+    } catch (e) { console.error("AI 답변 R2 업로드 실패:", e); return null; }
 }
 
 /** AI 답변 지식 저장 (학습용) */
@@ -377,11 +583,21 @@ export async function saveAiKnowledge() {
     
     try {
         isAiProcessing = true;
+        const manualInput = document.getElementById('aiManualInput').value.trim();
+        
+        // [핵심] 직접 입력된 내용이 있으면 그것을 사용, 없으면 AI 답변 사용
+        const finalAnswerToSave = manualInput || state.lastAiAnswer;
+
+        if (!finalAnswerToSave) {
+            showAlert("저장할 내용이 없습니다.", "error");
+            return;
+        }
+
         if (saveBtn) {
             saveBtn.disabled = true;
             saveBtn.innerHTML = '<span class="spinner"></span> 저장 중...';
         }
-        showAlert("지식을 학습 데이터로 저장 중...", "info");
+        showAlert("지식을 DB에 업로드 중...", "info");
 
         // [개선] 전체 대화 맥락을 포함한 질문 생성
         let fullStoredQuery = state.originalAiQuery;
@@ -389,31 +605,35 @@ export async function saveAiKnowledge() {
             fullStoredQuery += ` (검토/교정: ${state.aiCorrectionHistory.join(' -> ')})`;
         }
 
+        // [하이브리드] 텍스트 내용을 R2에 먼저 업로드
+        const contentUrl = await uploadAiTextToR2(`질문: ${fullStoredQuery}\n답변: ${finalAnswerToSave}`);
+
         const payload = {
+            project_id: 'GENERAL', // AI 지식은 기본적으로 전체 공유(GENERAL)로 저장
             file_name: 'AI_Confirmed_Knowledge', // AI 답변임을 알 수 있도록 고정 파일명 부여
-            content: `질문: ${fullStoredQuery}\n답변: ${state.lastAiAnswer}`,
-            metadata: { type: 'ai_save', user: state.currentUser || 'anonymous', original_query: state.lastAiQuery }
+            content_url: contentUrl, // R2 URL 저장
+            embedding: null, // 자동 임베딩 중단 상태 (데이터 구조 유지를 위해 null 보존)
+            metadata: { type: 'ai_save', user: state.currentUser || 'anonymous', original_query: fullStoredQuery }
         };
 
         // [수정] PostgREST POST 요청 시 단일 객체보다 배열([])로 감싸서 전송하는 것이 스키마 매핑 에러 방지에 유리함
-        await callSupabaseDirect('pdf_knowledge', 'POST', [payload]);
+        const result = await callSupabaseDirect('pdf_knowledge', 'POST', [payload]);
 
         // [개선] 스마트폰 환경에서 메시지를 확실히 인지하도록 버튼 상태 직접 변경 및 지연 닫기
         if (saveBtn) {
-            saveBtn.innerHTML = '✅ 저장 완료!';
+            saveBtn.innerHTML = '✅';
+            saveBtn.title = '저장 완료!';
             saveBtn.style.backgroundColor = '#4CAF50';
             saveBtn.style.color = 'white';
         }
         showAlert("지식 저장 완료!", "success");
         
         // 사용자가 성공 상태를 확인할 수 있도록 1.2초 후 모달 닫기
-        setTimeout(() => {
-            document.getElementById('aiResponseModal').style.display = 'none';
-            if (saveBtn) {
-                saveBtn.style.backgroundColor = '';
-                saveBtn.style.color = '';
-            }
-        }, 1200);
+        // 모달 닫기 로직은 showAiResponseModal에서 처리
+        // document.getElementById('aiResponseModal').style.display = 'none';
+        // if (saveBtn) { saveBtn.style.backgroundColor = ''; saveBtn.style.color = ''; }
+        // 대신, 모달이 닫힐 때 버튼 상태를 초기화하도록 변경
+        document.getElementById('aiResponseModal').style.display = 'none'; // 모달 닫기
     } catch (e) {
         console.error("AI 지식 저장 실패 상세 원인:", e);
         if (saveBtn) saveBtn.innerHTML = '❌ 저장 실패';
@@ -426,35 +646,16 @@ export async function saveAiKnowledge() {
     } finally {
         isAiProcessing = false;
         if (saveBtn && !saveBtn.innerHTML.includes('완료')) {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '💾 답변 저장';
+            // 저장 실패 시 버튼 상태 원복
+            saveBtn.disabled = false; 
+            saveBtn.innerHTML = '💾';
+            saveBtn.title = '답변 저장';
         }
-    }
-}
-
-/** [추가] 현재 API Key로 사용 가능한 모델 리스트 출력 (점검용) */
-export async function checkAvailableModels() {
-    console.log("🔍 접근 가능한 Gemini 모델 리스트 조회 중...");
-    try {
-        const res = await callAiEdge("모델 리스트 확인", null, 'list_models');
-        if (res.success && res.models) {
-            console.table(res.models.map(m => ({
-                name: m.name.replace('models/', ''),
-                displayName: m.displayName,
-                supportedMethods: m.supportedGenerationMethods ? m.supportedGenerationMethods.join(', ') : 'N/A'
-            })));
-            console.log("💡 추천 모델: 'gemini-2.5-flash-lite'를 사용하세요.");
-            showAlert("콘솔창(F12)에서 사용 가능한 모델 리스트를 확인하세요.", "success");
-        } else {
-            console.error("모델 리스트 조회 실패:", res.error);
-            showAlert("리스트 조회 실패: " + res.error, "error");
-        }
-    } catch (error) {
-        console.error("checkAvailableModels Error:", error);
     }
 }
 
 // 브라우저 콘솔 및 HTML에서 직접 호출할 수 있도록 전역 객체에 등록
-window.checkAvailableModels = checkAvailableModels;
 window.saveAiKnowledge = saveAiKnowledge;
 window.askFollowUp = askFollowUp;
+window.copyRawContent = copyRawContent;
+window.toggleManualInput = toggleManualInput;

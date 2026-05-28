@@ -673,13 +673,23 @@
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid #eee; padding-bottom:10px;">
             <h3 style="margin:0; color:#667eea;">✨ AI 분석 답변</h3>
             <div style="display:flex; gap:5px;">
-                <button id="btnAiFollowUp" class="btn btn-info" style="padding:4px 10px; font-size:13px;" onclick="window.askFollowUp()">🔍 추가질문</button>
-                <button class="btn btn-secondary" style="padding:4px 10px; font-size:13px;" onclick="document.getElementById('aiResponseModal').style.display='none'">닫기</button>
+                <!-- [추가] 원문 복사 및 수동 모드 버튼 -->
+                <button id="btnAiCopyRaw" class="btn btn-outline" style="padding:4px 10px; font-size:13px; display:none;" onclick="window.copyRawContent()" title="원문복사">📋</button>
+                <button id="btnAiManualMode" class="btn btn-outline" style="padding:4px 10px; font-size:13px; display:none;" onclick="window.toggleManualInput()" title="직접입력">✍️</button>
+                <button id="btnAiFollowUp" class="btn btn-info" style="padding:4px 10px; font-size:13px;" onclick="window.askFollowUp()" title="추가질문">💬</button>
+                <button class="close-btn btn btn-secondary" style="padding:4px 10px; font-size:18px; line-height:1;" onclick="document.getElementById('aiResponseModal').style.display='none'" title="닫기">&times;</button>
             </div>
         </div>
         <div class="ai-response-container" style="flex: 1; overflow-y: auto; padding-right: 5px;">
             <div id="aiAnswerSource" class="ai-source-hint"></div>
+            
+            <!-- [수정] 수동 입력 영역 추가 -->
             <div id="aiAnswerContent" class="ai-answer-box"></div>
+            <div id="aiManualInputArea" style="display:none; margin-top:10px;">
+                <label style="font-size:12px; color:#666; display:block; margin-bottom:5px;">정리된 내용을 아래에 붙여넣으세요:</label>
+                <textarea id="aiManualInput" style="width:100%; height:250px; padding:10px; border:1px solid #2196F3; border-radius:8px; font-size:13px;" placeholder="외부 AI가 정리한 답변을 이곳에 붙여넣으세요..."></textarea>
+            </div>
+
             <div class="ai-btn-group">
                 <span style="font-size:12px; color:#666; margin-right:auto; align-self:center;">답변이 정확한가요?</span>
                 <button id="btnAiSave" class="btn btn-outline" style="border-color:#40c057; color:#40c057; padding:5px 15px;" onclick="window.saveAiKnowledge()">💾 저장</button>

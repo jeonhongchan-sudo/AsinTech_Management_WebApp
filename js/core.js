@@ -96,10 +96,22 @@ export async function callSupabaseDirect(endpoint, method = 'GET', body = null, 
     };
     if (body) options.body = JSON.stringify(body);
     const response = await fetch(`${baseUrl}/rest/v1/${endpoint}`, options);
-    if (!response.ok) throw new Error(`Supabase Error: ${response.status}`);
+
+    // 204 No Content는 본문이 없으므로 즉시 null 반환
     if (response.status === 204) return null;
-    const text = await response.text();
-    return text ? JSON.parse(text) : null;
+
+    // 응답 스트림을 텍스트로 한 번만 읽어 확보합니다.
+    const responseText = await response.text();
+
+    if (!response.ok) {
+        throw new Error(`Supabase Error: ${response.status} - ${responseText}`);
+    }
+
+    try {
+        return responseText ? JSON.parse(responseText) : {};
+    } catch (e) {
+        return { success: false, error: responseText || "JSON 파싱 실패" };
+    }
 }
 
 // [추가] Supabase Edge Function (AI) 호출 함수
@@ -121,7 +133,16 @@ export async function callAiEdge(prompt, context = "", type = "general") {
         });
 
         clearTimeout(timeoutId);
-        return await response.json();
+        
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+            return await response.json();
+        }
+        
+        // JSON이 아닌 경우(546 에러 등) 텍스트로 읽어서 에러 메시지 생성
+        const errorText = await response.text();
+        throw new Error(`서버 오류 (${response.status}): ${errorText.substring(0, 100)}`);
+
     } catch (error) {
         if (error.name === 'AbortError') return { success: false, error: "요청 시간 초과 (45초)" };
         return { success: false, error: error.toString() };

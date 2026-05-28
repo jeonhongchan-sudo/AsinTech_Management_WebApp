@@ -1,6 +1,4 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-// [변경] Hugging Face의 Transformers.js를 사용하여 API 없이 벡터 생성
-import { pipeline } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1";
 
 // 환경 변수(Secrets)에서 안전하게 가져오도록 변경
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
@@ -8,6 +6,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); // 서비스 롤 키 사용 권장
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+// [유지] 사용자 요청에 따라 최신 모델인 gemini-2.5-flash-lite 유지
 const API_URL = `${API_BASE}/models/gemini-2.5-flash-lite:generateContent`;
 
 const corsHeaders = {
@@ -90,45 +89,17 @@ serve(async (req) => {
 6. 데이터가 없는 경우 절대 지어내지 말고 "데이터를 찾을 수 없다"고 답변하세요.`;
     let vectorContext = "";
 
-    // [복구] 지침서 기반 답변을 위한 벡터 검색 로직
-    if (type === 'point_search' && !prompt.includes("프로젝트")) { // 단순 검색일 때만 벡터 검색 수행
-        // 1. [변경] 로컬 모델(Transformers.js)을 사용하여 검색어 임베딩 생성
-        // API를 호출하지 않으므로 429 에러가 발생하지 않습니다.
-        const embedder = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2');
-        const output = await embedder(prompt, {
-            pooling: 'mean',
-            normalize: true,
-        });
-        
-        const queryEmbedding = Array.from(output.data);
-
-        if (queryEmbedding) {
-            // 2. Supabase RPC 호출하여 유사 지식 검색
-            const searchRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_pdf_knowledge`, {
-                method: 'POST',
-                headers: {
-                    'apikey': SUPABASE_KEY,
-                    'Authorization': `Bearer ${SUPABASE_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    query_embedding: queryEmbedding,
-                    match_threshold: 0.3, // 유사도 임계값 조절 가능
-                    match_count: 5
-                })
-            });
-
-            if (searchRes.ok) {
-                const matchedKnowledge = await searchRes.json();
-                if (matchedKnowledge && matchedKnowledge.length > 0) {
-                    vectorContext = "\n\n[참고 지침서 내용]\n" + matchedKnowledge.map(k => k.content).join("\n---\n");
-                    systemInstruction += "제공된 '[참고 지침서 내용]'을 최우선 근거로 사용하여 답변하세요. 수치나 규격 등 비교가 필요한 데이터는 반드시 마크다운 표(|---|)를 사용하여 가독성을 높이세요.";
-                }
-            }
-        }
+    // [변경] 리소스 부족으로 인한 벡터 검색 중단. 일반적인 GIS 질문에 대응하도록 설정 변경.
+    if (type === 'point_search' || type === 'semantic_search_only') {
         systemInstruction += "\n사용자가 입력한 검색어가 GIS 관련 용어라면 제공된 도면 레이어 정보를 참고하여 답변하고, 만약 일반적인 질문이라면 범용적인 AI로서 답변하세요.";
+        if (type === 'semantic_search_only') return new Response(JSON.stringify({ success: false, error: "임베딩 기능 중단" }), { headers: corsHeaders });
     } else if (type === 'pdf_summary') {
-      systemInstruction += "제공된 PDF 텍스트 내용을 요약하고 사용자의 질문에 답하세요.";
+      systemInstruction += `
+[요약 및 가시화 전문가 모드]
+1. 당신의 역할은 사용자가 검색한 DB 결과물을 시각적으로 아름답고 가독성 좋게 정리하는 '포맷터(Formatter)'입니다.
+2. 사용자의 질문에 '추론해줘'라는 명확한 명령이 없다면, 절대 외부 정보를 결합하거나 추론하지 마세요. 
+3. 오직 제공된 텍스트 내용만을 바탕으로 항목별 요약, 강조, 표(Table) 등을 활용하여 이쁘게 정리하세요.
+4. 사용자가 '추론해줘'라고 요청한 경우에만 주어진 정보를 바탕으로 한 논리적인 추론과 분석을 수행하세요.`;
     }
 
     // [추가] 30초 타임아웃 설정 (Gate가 무한정 열려있는 것 방지)
@@ -185,7 +156,8 @@ serve(async (req) => {
         }
         
         if (call.name === "execute_web_command") {
-          return new Response(JSON.stringify({ success: true, answer: "명령 실행", command: call.args }), { headers: corsHeaders });
+          finalAnswer = `[명령 실행 요청: ${call.args.action}]`; // 루프를 종료하기 위해 finalAnswer를 채움
+          return new Response(JSON.stringify({ success: true, answer: finalAnswer, command: call.args }), { headers: corsHeaders });
         }
 
         // 대화 기록에 추가하고 루프 계속

@@ -71,6 +71,7 @@ function handleApiRequest(e) {
 
       // [설정]
       case 'getSupabaseConfig': response = getSupabaseConfig(); break;
+      case 'getR2Config': response = getR2Config(); break;
 
       // [GitHub Action]
       case 'triggerGitHubAction': response = triggerGitHubAction(e.parameter.projectId); break;
@@ -558,6 +559,23 @@ function getSupabaseConfig() {
     const adminUser = props.getProperty('AD_USER');
     if (!url || !key) return { success: false, error: 'Supabase 설정이 스크립트 속성에 없습니다.' };
     return { success: true, url: url, key: key, vworldKey: vworldKey, adminUser: adminUser };
+  } catch (e) { return { success: false, error: e.toString() }; }
+}
+
+/** [추가] R2 설정 정보를 반환 (다른 프로그램과 동일한 방식) */
+function getR2Config() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    return {
+      success: true,
+      // 사용자님께서 알려주신 스크립트 속성 키값 그대로 매핑
+      R2_Access_Key_ID: props.getProperty('R2_Access_Key_ID'),
+      R2_BUCKET_NAME: props.getProperty('R2_BUCKET_NAME'),
+      R2_Endpoints: props.getProperty('R2_Endpoints'),
+      R2_Public_Url: props.getProperty('R2_Public_Url'),
+      R2_Secret_Access_Key: props.getProperty('R2_Secret_Access_Key'),
+      R2_Token: props.getProperty('R2_Token')
+    };
   } catch (e) { return { success: false, error: e.toString() }; }
 }
 

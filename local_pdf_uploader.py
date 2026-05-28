@@ -5,9 +5,13 @@ import re
 import requests
 import threading
 import pdfplumber
+import boto3
+import json
+from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox
 from supabase import create_client
+from botocore.client import Config
 
 # 1. 한글 인코딩 에러 ('ascii' codec) 해결을 위한 스트림 설정
 sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
@@ -16,6 +20,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 # Cloudflare Worker 정보 (js/core.js 참조)
 WORKER_URL = "https://asin-r2-worker.jeonhongchan.workers.dev"
 WORKER_AUTH_KEY = "asin_tech_secret_2024"
+GAS_URL = "https://script.google.com/macros/s/AKfycbyBjiUmdE_ISu1Uk-3zwb75owaRWNIyRZu-RgAqmvxvvAho8RsGotvqF4PnHZ34_1r6/exec"
 
 class PDFUploaderApp:
     def __init__(self, root):
@@ -23,24 +28,65 @@ class PDFUploaderApp:
         self.root.title("아신테크 지침서 업데이트 도구 (파일별 갱신)")
         self.root.geometry("750x600")
         self.supabase_client = None
+        self.s3_client = None
+        self.r2_bucket = None
+        self.r2_public_url = None
 
         self.setup_ui()
         self.load_remote_config()
 
     def load_remote_config(self):
-        """Worker에서 Supabase 설정을 가져옵니다."""
+        """다른 프로그램(asin_app.py 등)과 동일하게 GAS에서 Supabase와 R2 설정을 각각 가져옵니다."""
         self.log("🛰️ 서버에서 접속 정보를 가져오는 중...")
         try:
-            headers = {"Authorization": WORKER_AUTH_KEY}
-            response = requests.get(f"{WORKER_URL}/config", headers=headers, timeout=10)
-            response.raise_for_status()
-            config = response.json()
-            
-            if config.get("success"):
-                self.supabase_client = create_client(config["url"], config["key"])
-                self.log("[✅] 서버 연결 성공")
+            # 1. Supabase 설정 가져오기 (action=getSupabaseConfig)
+            supa_res = requests.get(f"{GAS_URL}?action=getSupabaseConfig", timeout=10)
+            supa_res.raise_for_status()
+            supa_config = supa_res.json()
+
+            if supa_config.get("success"):
+                self.supabase_client = create_client(supa_config["url"], supa_config["key"])
+                self.log("[✅] Supabase 연결 정보 로드 완료")
             else:
-                raise Exception("Worker 응답 내 설정 정보가 없습니다.")
+                self.log(f"[❌] Supabase 설정 로드 실패: {supa_config.get('error')}")
+
+            # 2. R2 설정 가져오기 (다른 프로그램들처럼 action=getR2Config 별도 호출)
+            r2_res = requests.get(f"{GAS_URL}?action=getR2Config", timeout=10)
+            r2_res.raise_for_status()
+            r2_config = r2_res.json()
+
+            if r2_config.get("success") is True or "R2_Endpoints" in r2_config:
+                # 사용자께서 명시하신 GAS 스크립트 속성 키값 그대로 매핑
+                self.r2_bucket = r2_config.get("R2_BUCKET_NAME")
+                self.r2_public_url = r2_config.get("R2_Public_Url")
+                access_key = r2_config.get("R2_Access_Key_ID")
+                secret_key = r2_config.get("R2_Secret_Access_Key")
+                endpoint = r2_config.get("R2_Endpoints")
+
+                # [체크] 어떤 값이 누락되었는지 확인하기 위한 맵
+                r2_check = {
+                    "R2_BUCKET_NAME": self.r2_bucket,
+                    "R2_Public_Url": self.r2_public_url,
+                    "R2_Access_Key_ID": access_key,
+                    "R2_Secret_Access_Key": secret_key,
+                    "R2_Endpoints": endpoint
+                }
+                missing = [k for k, v in r2_check.items() if not v]
+
+                if not missing and access_key:
+                    self.s3_client = boto3.client(
+                        's3',
+                        endpoint_url=endpoint,
+                        aws_access_key_id=access_key,
+                        aws_secret_access_key=secret_key,
+                        config=Config(signature_version='s3v4')
+                    )
+                    self.log("[✅] R2 저장소 연결 정보 로드 완료")
+                else:
+                    self.log(f"[❌] R2 설정 로드 실패 (누락 또는 빈 값: {', '.join(missing)})")
+            else:
+                self.log("[❌] R2 설정 정보를 가져오지 못했습니다. (action=getR2Config 확인 필요)")
+
         except Exception as e:
             self.log(f"[❌] 설정 로드 실패: {e}")
             messagebox.showerror("오류", f"서버 설정을 가져올 수 없습니다.\n{e}")
@@ -86,7 +132,7 @@ class PDFUploaderApp:
         return text.strip()
 
     def start_upload_thread(self):
-        if not self.supabase_client:
+        if not self.supabase_client or not self.s3_client:
             return messagebox.showwarning("준비 중", "서버 설정 로딩 중입니다. 잠시만 기다려주세요.")
             
         msg = "선택한 파일들과 동일한 이름의 기존 데이터는 삭제되고 새로 업데이트됩니다.\n진행하시겠습니까?"
@@ -96,6 +142,21 @@ class PDFUploaderApp:
         self.btn_start.config(state=tk.DISABLED)
         self.btn_select.config(state=tk.DISABLED)
         threading.Thread(target=self.process_uploads, daemon=True).start()
+
+    def upload_chunk_to_r2(self, r2_path, text):
+        """[개선] Worker 없이 R2에 직접 업로드 (boto3)"""
+        if not self.s3_client: return None
+        
+        try:
+            self.s3_client.put_object(
+                Bucket=self.r2_bucket,
+                Key=r2_path,
+                Body=json.dumps({"content": text}, ensure_ascii=False),
+                ContentType='application/json'
+            )
+            return f"{self.r2_public_url}/{r2_path}"
+        except Exception as e:
+            return None
 
     def process_uploads(self):
         for file_path in self.selected_files:
@@ -139,17 +200,34 @@ class PDFUploaderApp:
                 batch_size = 10
                 for j in range(0, len(all_chunks), batch_size):
                     batch = all_chunks[j:j+batch_size]
-                    payload = []
-                    for chunk in batch:
-                        payload.append({
-                            "project_id": "GENERAL",
-                            "file_name": file_name,
-                            "content": chunk["text"],
-                            "embedding": None, # 새벽 3시에 GitHub Action이 채움
-                            "metadata": {"page": chunk["page"]}
-                        })
                     
-                    self.supabase_client.table("pdf_knowledge").insert(payload).execute()
+                    # [개선] ThreadPoolExecutor를 사용하여 R2 업로드 병렬화
+                    safe_file_name = re.sub(r'[\\/:*?"<>|() ]', '_', file_name)
+                    
+                    def upload_task(chunk):
+                        r2_path = f"knowledge_content/{safe_file_name}/page_{chunk['page']}.json"
+                        url = self.upload_chunk_to_r2(r2_path, chunk["text"])
+                        return {**chunk, "url": url}
+
+                    with ThreadPoolExecutor(max_workers=5) as executor:
+                        results = list(executor.map(upload_task, batch))
+
+                    # DB 삽입용 페이로드 생성
+                    db_payload = []
+                    for res in results:
+                        if res["url"]:
+                            db_payload.append({
+                                "project_id": "GENERAL",
+                                "file_name": file_name,
+                                "content_url": res["url"],
+                                "embedding": None,
+                                "metadata": {"page": res["page"]}
+                            })
+                        else:
+                            self.log(f"  - [⚠️] {res['page']}페이지 R2 업로드 누락됨")
+
+                    if db_payload:
+                        self.supabase_client.table("pdf_knowledge").insert(db_payload).execute()
                     
                     current_pos = min(j + batch_size, len(all_chunks))
                     self.log(f"  - [{current_pos}/{len(all_chunks)}] 페이지 완료")
@@ -161,7 +239,7 @@ class PDFUploaderApp:
                 print(e)
 
         self.log("\n[✨] 모든 선택 파일의 업데이트가 끝났습니다.")
-        self.log("💡 비어있는 벡터(Embedding)는 새벽 3시에 자동으로 생성됩니다.")
+        self.log("💡 자동 임베딩 기능이 중단되었습니다. (데이터는 원문 및 키워드 위주로 검색됩니다)")
         messagebox.showinfo("완료", "지침서 업데이트가 성공적으로 완료되었습니다.")
         
         self.btn_select.config(state=tk.NORMAL)

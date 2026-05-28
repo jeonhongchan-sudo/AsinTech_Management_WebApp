@@ -20,6 +20,8 @@ index.txt
 Colab_embed.txt
 
 # GitHub Actions 관련 파일 (별도 레포지토리에서 관리)
+auto_embed.py
+auto_embedding.yml
 convert_r2.py
 requirements.txt
 cad_schema.json
