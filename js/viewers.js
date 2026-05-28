@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\viewers.js
 import { state, callApi, callSupabaseDirect, showAlert, R2_BASE_URL } from './core.js';
 import { UIS_DATA, ROAD_LEDGER_ITEMS, PDF_TOC_DATA, NETWORK_RTK_DATA, NON_CONFORMITY_CASES_DATA, NUMERIC_MAP_DATA, GNSS_NOTICE_DATA, PUBLIC_SURVEY_FAQ_DATA, REGULATION_REVISION_DATA, MATERIAL_ABBREVIATION_DATA, PUBLIC_SURVEY_REGULATIONS_DATA } from './data.js';
-import { handleAiSearch, handleDatabaseSearch } from './ai.js';
+import { handleAiSearch, handleDatabaseSearch, showModalMessage } from './ai.js';
 
 export function selectGuideline(type) {
     document.querySelectorAll('.guide-menu-item').forEach(b => b.classList.remove('active'));
@@ -1100,7 +1100,12 @@ export async function searchPoints() {
             if (searchTerm.includes("추론")) {
                 handleAiSearch(searchTerm, null);
             } else {
-                showAlert("DB에서 검색 결과를 찾을 수 없습니다.", "info");
+                // [수정] showAlert 대신 모달 내에 결과 없음 메시지 표시 (X 버튼 포함)
+                showModalMessage(
+                    "🔍 검색 결과가 없습니다.", 
+                    "지침 DB에서 해당 내용을 찾을 수 없습니다. 더 자세한 분석이나 추론이 필요하시면 질문에 <strong>'추론'</strong> 키워드를 포함해 보세요.", 
+                    'info'
+                );
             }
         }
         return;

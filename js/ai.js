@@ -44,22 +44,59 @@ function formatResponseText(text) {
     return formatted;
 }
 
+/** [추가] 모달 내 공통 에러/정보 메시지 출력 헬퍼 (사용자가 눌러야 닫히는 X 버튼 포함) */
+export function showModalMessage(title, message, type = 'error') {
+    const contentEl = document.getElementById('aiAnswerContent');
+    const modal = document.getElementById('aiResponseModal');
+    if (!contentEl || !modal) return;
+
+    // [추가] 모달이 닫혀있는 경우 강제로 열어서 메시지 인지 보장
+    modal.style.display = 'flex';
+    // 스크롤을 상단으로 이동
+    const scrollArea = modal.querySelector('.container');
+    if (scrollArea) scrollArea.scrollTop = 0;
+
+    const bgColor = type === 'error' ? '#fff5f5' : '#e7f5ff';
+    const borderColor = type === 'error' ? '#ffa8a8' : '#a5d8ff';
+    const textColor = type === 'error' ? '#e03131' : '#1c7ed6';
+
+    contentEl.innerHTML = `
+        <div style="color:${textColor}; padding:20px; background:${bgColor}; border-radius:8px; border:1px solid ${borderColor}; position:relative; margin:10px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+            <strong style="font-size:16px;">${title}</strong><br>
+            <p style="margin-top:10px; font-size:14px; line-height:1.6; color:#333;">${message}</p>
+            <button onclick="window.closeAiResponseModal()" 
+                style="position:absolute; top:8px; right:10px; background:none; border:none; font-size:28px; cursor:pointer; color:${textColor}; line-height:1; font-weight:bold;">&times;</button>
+        </div>
+    `;
+}
+
 /** [1순위 후순위] AI 없이 DB에서 지침서 키워드 검색 */
 export async function handleDatabaseSearch(query) {
+    // [추가] 즉시 모달 열기 및 로딩 표시 (UI 멈춤 인지 방지)
+    showAiResponseModal(query, "", "📚 통합 DB 검색");
+    const contentEl = document.getElementById('aiAnswerContent');
+    if (contentEl) {
+        contentEl.innerHTML = `<div style="text-align:center; padding:30px; color:#666;"><span class="spinner"></span> 지침 및 지식 DB에서 정보를 탐색 중입니다...</div>`;
+    }
+
+    // [핵심] 브라우저가 모달과 로딩바를 먼저 렌더링할 수 있도록 제어권을 잠시 넘김
+    await new Promise(resolve => setTimeout(resolve, 50));
+
     try {
         const originalCleanQuery = query.replace(/\s+/g, ' ').trim();
-        if (!originalCleanQuery) return false;
+        if (!originalCleanQuery) { closeAiResponseModal(); return false; }
 
         const queryNoSpace = originalCleanQuery.replace(/\s+/g, '').toLowerCase();
+        // [수정] 검색 키워드 추출 시 제외어(조사 및 무의미한 보조 단어)를 대폭 추가하여 검색 의도를 강화
         const searchWords = originalCleanQuery.split(/\s+/)
-            .map(w => w.replace(/(에서|으로|의|은|는|이|가|을|를|도|에|기준|안내|방법)$/, '')) 
+            .map(w => w.replace(/(에서|으로|의|은|는|이|가|을|를|도|에|기준|안내|방법|작성|대한|관한|사항|정리|요청|알려|어떻게|알아|확인|검색|분석|설명|보여|보여줘|알려줘|찾아|찾아줘|해줘)$/, '')) 
             .filter(w => w.length >= 2);
         if (searchWords.length === 0) searchWords.push(originalCleanQuery);
 
         const allFoundResults = [];
 
         // 1. DB 목록 및 본문 검색 헬퍼
-        const allKnowledge = await callSupabaseDirect(`pdf_knowledge?select=file_name,content_url,metadata`);
+        const allKnowledge = await callSupabaseDirect(`pdf_knowledge?select=id,file_name,content_url,metadata`);
         if (!allKnowledge || allKnowledge.length === 0) return false;
 
         const searchInList = async (list) => {
@@ -79,9 +116,10 @@ export async function handleDatabaseSearch(query) {
                     searchWords.forEach(w => { if (cleanContent.includes(w.toLowerCase())) matchCount++; });
                     const matchRatio = matchCount / searchWords.length;
 
-                    if (isFullMatch || matchRatio >= 0.5) {
+                    // [강화] 검색 결과 임계값을 0.5에서 0.7으로 상향하여 관련성이 낮은 결과 필터링 강화
+                    if (isFullMatch || matchRatio >= 0.7) {
                         let displayContent = content;
-                        if (content.length > 1500) {
+                        if (content.length > 1700) {
                             const idx = cleanContent.indexOf(queryNoSpace);
                             if (idx !== -1) {
                                 const start = Math.max(0, idx - 300);
@@ -166,12 +204,43 @@ export async function handleDatabaseSearch(query) {
         if (allFoundResults.length > 0) {
             // 점수순 정렬 (검증된 지식 -> 로컬 -> 본문 순으로 가중치 반영됨)
             allFoundResults.sort((a, b) => b.score - a.score);
+            // [수정] 결과 출력 직전 로딩 UI를 제거하여 사용자에게 검색 완료 사실을 적시함
+            if (contentEl) contentEl.innerHTML = "";
             displayCombinedResults(allFoundResults, originalCleanQuery, "📚 통합 DB 검색 결과");
             return true;
         }
 
         return false;
-    } catch (e) { console.error("DB 검색 오류:", e); return false; }
+    } catch (e) { console.error("DB 검색 오류:", e); showModalMessage("⚠️ DB 검색 중 오류가 발생했습니다.", e.message, 'error'); return false; }
+}
+
+/** [추가] 잘못 저장된 AI 지식(Confirmed Knowledge) 삭제 */
+export async function deleteConfirmedKnowledge(id, contentUrl) {
+    if (!confirm("이 저장된 답변이 잘못되었나요? DB와 저장소에서 완전히 삭제하시겠습니까?")) return;
+
+    try {
+        // 1. R2에서 파일 삭제 (Worker 이용)
+        if (contentUrl && contentUrl.includes('r2.dev')) {
+            const r2Prefix = R2_BASE_URL || (state.r2Config ? state.r2Config.publicUrl : "");
+            const filePath = contentUrl.split(r2Prefix.replace(/\/$/, '') + '/')[1];
+            
+            if (filePath) {
+                await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': WORKER_AUTH_KEY }
+                });
+            }
+        }
+
+        // 2. Supabase에서 레코드 삭제
+        await callSupabaseDirect(`pdf_knowledge?id=eq.${id}`, 'DELETE');
+
+        showAlert("해당 지식이 성공적으로 삭제되었습니다.", "success");
+        closeAiResponseModal(); // 상태 동기화를 위해 모달을 닫음
+    } catch (e) {
+        console.error("지식 삭제 실패:", e);
+        showAlert("삭제 중 오류가 발생했습니다: " + e.message, "error");
+    }
 }
 
 /** [추가] 통합 검색 결과를 모달로 표시하는 헬퍼 */
@@ -181,11 +250,17 @@ function displayCombinedResults(matches, query, sourceLabel) {
     topResults.forEach((match, idx) => {
         let content = match.content;
         const pageInfo = match.metadata?.page ? ` - p.${match.metadata.page}` : "";
+        let deleteBtn = "";
         if (match.file_name === 'AI_Confirmed_Knowledge') {
             const answerStartIndex = content.indexOf('답변:');
             if (answerStartIndex !== -1) content = content.substring(answerStartIndex + '답변:'.length).trim();
+            
+            // [추가] AI 답변인 경우 오답 삭제 버튼 노출
+            if (match.id) {
+                deleteBtn = ` <span onclick="window.deleteConfirmedKnowledge('${match.id}', '${match.content_url}')" style="color:#e03131; cursor:pointer; font-size:11px; margin-left:8px; border:1px solid #ffa8a8; padding:2px 5px; border-radius:4px; background:#fff; vertical-align:middle; font-weight:normal;">🗑️ 오답삭제</span>`;
+            }
         }
-        combinedAnswer += `**[검색결과 ${idx + 1}] ${match.file_name}${pageInfo}**\n${content}\n\n`;
+        combinedAnswer += `**[검색결과 ${idx + 1}] ${match.file_name}${pageInfo}**${deleteBtn}\n${content}\n\n`;
         if (idx < topResults.length - 1) combinedAnswer += "---\n\n";
     });
     showAiResponseModal(query, combinedAnswer.trim(), sourceLabel);
@@ -309,16 +384,12 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
             
             // [추가] 분석 실패 시 모달의 내용을 에러 안내로 변경하여 사용자 혼란 방지
             const contentEl = document.getElementById('aiAnswerContent');
-            if (contentEl) {
-                const errorMsg = res.error || "응답 형식이 올바르지 않습니다.";
-                contentEl.innerHTML = `<div style="color:#e03131; padding:20px; background:#fff5f5; border-radius:8px; border:1px solid #ffa8a8;">
-                    <strong>⚠️ AI 분석 중 오류가 발생했습니다.</strong><br><small>${errorMsg}</small>
-                </div>`;
-            }
+            const errorMsg = res.error || "응답 형식이 올바르지 않습니다.";
+            showModalMessage("⚠️ AI 분석 중 오류가 발생했습니다.", errorMsg, 'error');
 
             // [추가] limit: 0 에러에 대한 특수 처리
             if (res.error && res.error.includes("limit: 0")) {
-                showAlert("⚠️ [심각] 구글 API 일일 할당량이 소진되었거나 계정이 일시 차단되었습니다. 대시보드를 확인하세요.", "error");
+                showModalMessage("⚠️ API 할당량 소진", "구글 API 일일 할당량이 모두 소진되었습니다. 내일 다시 이용 가능합니다.", 'error');
                 console.error("🚨 Gemini API 할당량 소진 또는 차단 상태입니다. (limit: 0 확인)");
                 lastAiRequestTime = Date.now() + (3600 * 1000); // 1시간 동안 버튼 잠금
                 startAiCooldownUI(3600);
@@ -334,11 +405,11 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
                 const retryMatch = res.error.match(/retry in ([\d.]+)s/);
                 const waitSeconds = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) + 5 : 60; // 징벌적 차단 방지를 위해 더 넉넉히 대기
                 
-                showAlert(`⚠️ AI 접속량이 너무 많습니다. ${waitSeconds}초간 중단됩니다.`, "error");
+                showModalMessage("⚠️ AI 접속량이 너무 많습니다.", `${waitSeconds}초간 중단됩니다. 잠시 후 다시 시도해 주세요.`, 'error');
                 lastAiRequestTime = Date.now() + (waitSeconds * 1000); 
                 startAiCooldownUI(waitSeconds);
             } else {
-                showAlert("AI 분석 실패: " + (res.error || "응답값이 없습니다."), "error");
+                showModalMessage("⚠️ AI 분석 실패", res.error || "응답값이 없습니다.", 'error');
                 lastAiRequestTime = Date.now();
             }
         }
@@ -675,3 +746,4 @@ window.saveAiKnowledge = saveAiKnowledge;
 window.askFollowUp = askFollowUp;
 window.copyRawContent = copyRawContent;
 window.toggleManualInput = toggleManualInput;
+window.deleteConfirmedKnowledge = deleteConfirmedKnowledge;
