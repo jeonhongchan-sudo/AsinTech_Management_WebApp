@@ -677,7 +677,7 @@
                 <button id="btnAiCopyRaw" class="btn btn-outline" style="padding:4px 10px; font-size:13px; display:none;" onclick="window.copyRawContent()" title="원문복사">📋</button>
                 <button id="btnAiManualMode" class="btn btn-outline" style="padding:4px 10px; font-size:13px; display:none;" onclick="window.toggleManualInput()" title="직접입력">✍️</button>
                 <button id="btnAiFollowUp" class="btn btn-info" style="padding:4px 10px; font-size:13px;" onclick="window.askFollowUp()" title="추가질문">💬</button>
-                <button class="close-btn btn btn-secondary" style="padding:4px 10px; font-size:18px; line-height:1;" onclick="document.getElementById('aiResponseModal').style.display='none'" title="닫기">&times;</button>
+                <button class="close-btn btn btn-secondary" style="padding:4px 10px; font-size:18px; line-height:1;" onclick="window.closeAiResponseModal()" title="닫기">&times;</button>
             </div>
         </div>
         <div class="ai-response-container" style="flex: 1; overflow-y: auto; padding-right: 5px;">

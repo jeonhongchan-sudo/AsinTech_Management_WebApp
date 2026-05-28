@@ -2,7 +2,7 @@
 import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY, R2_BASE_URL } from './core.js';
 import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleMarkers, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider, openLayerStyleModal, closeLayerStyleModal, switchStyleTab, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, updateIndividualStyle, loadCadProjects, toggleDynamicText, showProjectInfo, switchProjectInfoTab, searchPoints, clearSearchMarkers, resetSearchUI } from './viewers.js';
 import { loadProjects, openPhotoManager, closePhotoManager, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, deleteProjectMemos, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, cleanupR2Orphans, saveMemo, roomCreateProject, roomDeleteProject, roomUploadCad, openCadConfigUI, executeCadConversion, togglePhotoMenu } from './managers.js';
-import { saveAiKnowledge, askFollowUp } from './ai.js';
+import { saveAiKnowledge, askFollowUp, closeAiResponseModal } from './ai.js';
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.switchTab = switchTab;
@@ -75,6 +75,7 @@ window.clearSearchMarkers = clearSearchMarkers; // [추가]
 window.resetSearchUI = resetSearchUI; // [추가]
 window.saveAiKnowledge = saveAiKnowledge; // [추가] ai.js 모듈에서 바인딩
 window.askFollowUp = askFollowUp; // [추가] AI 추가 질문
+window.closeAiResponseModal = closeAiResponseModal; // [추가] 모달 닫기 및 초기화
 
 // [추가] 지도 팝업 내 사진 탐색(Lightbox) 연동 브릿지 함수
 window.openMatchedLightbox = function(index) {

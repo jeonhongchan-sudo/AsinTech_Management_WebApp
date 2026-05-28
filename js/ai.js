@@ -56,6 +56,8 @@ export async function handleDatabaseSearch(query) {
             .filter(w => w.length >= 2);
         if (searchWords.length === 0) searchWords.push(originalCleanQuery);
 
+        const allFoundResults = [];
+
         // 1. DB 목록 및 본문 검색 헬퍼
         const allKnowledge = await callSupabaseDirect(`pdf_knowledge?select=file_name,content_url,metadata`);
         if (!allKnowledge || allKnowledge.length === 0) return false;
@@ -99,14 +101,11 @@ export async function handleDatabaseSearch(query) {
         console.log("🔍 [Step 1] 검증된 지식 탐색 중...");
         const confirmedList = allKnowledge.filter(k => k.file_name === 'AI_Confirmed_Knowledge');
         const confirmedMatches = await searchInList(confirmedList);
-        if (confirmedMatches.length > 0) {
-            displayCombinedResults(confirmedMatches, originalCleanQuery, "💡 검증된 AI 지식 (DB)");
-            return true;
-        }
+        if (confirmedMatches.length > 0) allFoundResults.push(...confirmedMatches);
 
         // [Step 2] 로컬 지침 데이터(data.js) 검색
         console.log("🔍 [Step 2] 로컬 지침 데이터 탐색 중...");
-        const localMatches = [];
+        const currentLocalMatches = [];
         const localSources = [
             { name: "공공측량 작업규정 본문", data: PUBLIC_SURVEY_REGULATIONS_DATA },
             { name: "공공측량제도 FAQ", data: PUBLIC_SURVEY_FAQ_DATA },
@@ -150,25 +149,27 @@ export async function handleDatabaseSearch(query) {
                     const match = chapters.find(c => JSON.stringify(c).replace(/\s+/g, '').toLowerCase().includes(queryNoSpace));
                     if (match) foundText = `[부적합 사례 분석]\n\n${JSON.stringify(match, (k, v) => (k === 'chapter' || k === 'title') ? undefined : v, 2).replace(/[\[\]"{}]/g, '').replace(/\\n/g, '\n').trim()}`;
                 }
-                if (foundText) localMatches.push({ file_name: source.name, content: foundText, score: 3.0, metadata: {} });
+                if (foundText) currentLocalMatches.push({ file_name: source.name, content: foundText, score: 3.0, metadata: {} });
             }
         }
-        if (localMatches.length > 0) {
-            displayCombinedResults(localMatches, originalCleanQuery, "📚 로컬 지침 DB 검색");
-            return true;
-        }
+        if (currentLocalMatches.length > 0) allFoundResults.push(...currentLocalMatches);
 
         // [Step 3] 전체 지침서 본문 정밀 탐색 (R2 Deep Search)
-        console.log("🔍 [Step 3] 본문 정밀 탐색 시작...");
-        showAlert("지침서 본문 내용을 정밀 검색 중입니다. 잠시만 기다려주세요...", "info");
-        const otherList = allKnowledge.filter(k => k.file_name !== 'AI_Confirmed_Knowledge');
-        const deepMatches = await searchInList(otherList);
-        if (deepMatches.length > 0) {
-            displayCombinedResults(deepMatches, originalCleanQuery, "📚 통합 DB 본문 검색");
+        // 검증된 지식이나 로컬 데이터가 있더라도 더 깊은 정보를 위해 함께 검색
+        if (allFoundResults.length < 5) {
+            console.log("🔍 [Step 3] 본문 정밀 탐색 시작...");
+            const otherList = allKnowledge.filter(k => k.file_name !== 'AI_Confirmed_Knowledge');
+            const deepMatches = await searchInList(otherList);
+            if (deepMatches.length > 0) allFoundResults.push(...deepMatches);
+        }
+
+        if (allFoundResults.length > 0) {
+            // 점수순 정렬 (검증된 지식 -> 로컬 -> 본문 순으로 가중치 반영됨)
+            allFoundResults.sort((a, b) => b.score - a.score);
+            displayCombinedResults(allFoundResults, originalCleanQuery, "📚 통합 DB 검색 결과");
             return true;
         }
 
-        console.log("ℹ️ [Search] 일치하는 결과 없음");
         return false;
     } catch (e) { console.error("DB 검색 오류:", e); return false; }
 }
@@ -252,13 +253,13 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         if (isFollowUp) {
             // 추가 질문(교정)인 경우: 이전 답변을 컨텍스트에 포함하여 AI가 자기 오류를 수정하게 함
             state.aiCorrectionHistory.push(query);
-            combinedContext = `${systemContextPrefix}[이전 AI 답변 내용]\n${state.lastAiAnswer}\n\n[도면 맥락]\n${layerContext}\n\n위 답변에 대해 사용자가 다음과 같은 교정/추가 요청을 했습니다. 이를 반영하여 최종 답변을 다시 작성하세요.`;
+            combinedContext = `${systemContextPrefix}[이전 대화 요약]\n${state.lastAiAnswer}\n\n[도면 맥락]\n${layerContext}\n\n위 답변과 사용자 히스토리를 종합하여 질문에 답하세요.`;
             finalQuery = query;
         } else if (isSummary) {
             // DB 재요청(요약)인 경우: 새로운 대화로 간주
             state.originalAiQuery = query;
             state.aiCorrectionHistory = [];
-            combinedContext = `${systemContextPrefix}[정리 대상 DB 원문]\n${rawDbContext}\n\n[도면 맥락]\n${layerContext}`;
+            combinedContext = `${systemContextPrefix}[분석 대상 데이터]\n${rawDbContext}\n\n[도면 맥락]\n${layerContext}`;
         } else {
             // 완전히 새로운 질문인 경우
             state.originalAiQuery = query;
@@ -269,9 +270,9 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         // 프롬프트 의도 보강
         let apiQuery = query;
         if (isSummary) {
-            apiQuery = `'${query}'에 대해 검색된 위 DB 지침 내용을 항목별로 가독성 좋게 재구성해서 아주 이쁘게 정리해줘. 외부 지식을 이용한 추론은 하지 말고 오직 주어진 내용으로만 작성해.`;
+            apiQuery = `'${query}'에 대해 검색된 위 DB 지침 내용을 항목별로 가독성 좋게 재구성해서 아주 이쁘게 정리해줘. 외부 지식을 이용한 추론은 하지 말고 오직 주어진 내용으로만 작성해. 분량은 1500자 이내로 핵심만 담아줘.`;
         } else if (isFollowUp) {
-            apiQuery = `사용자 요청: ${query}`;
+            apiQuery = `지금까지의 대화와 사용자 요청('${query}')을 종합하여 가장 정확한 답변을 1500자 이내로 요약하고 정리해줘.`;
         }
         
         const res = await callAiEdge(apiQuery, combinedContext, requestType);
@@ -432,10 +433,25 @@ export function toggleManualInput() {
         document.getElementById('aiManualInput').focus();
     }
 }
+
+/** [추가] 모달 닫기 및 AI 상태 초기화 (캐시/반복 방지) */
+export function closeAiResponseModal() {
+    const modal = document.getElementById('aiResponseModal');
+    if (modal) modal.style.display = 'none';
+    
+    // 중요 상태 초기화
+    state.lastAiAnswer = "";
+    state.lastAiQuery = "";
+    state.originalAiQuery = null;
+    state.aiCorrectionHistory = [];
+    
+    console.log("🧹 AI Response State Cleared.");
+}
+
 /** AI에게 대화 도중 추가 질문하기 */
 export async function askFollowUp() {
     if (isAiProcessing) return;
-    const nextQuery = prompt("AI에게 궁금한 내용을 더 입력하세요:");
+    const nextQuery = prompt("대화 맥락을 유지하며 추가 질문을 하거나, '요약해줘'라고 요청하세요:");
     if (!nextQuery || !nextQuery.trim()) return;
     
     // [수정] 4번째 인자 isFollowUp을 true로 전달하여 맥락 유지
