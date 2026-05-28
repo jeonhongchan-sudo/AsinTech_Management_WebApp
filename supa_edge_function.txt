@@ -1,4 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+// [변경] Hugging Face의 Transformers.js를 사용하여 API 없이 벡터 생성
+import { pipeline } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1";
 
 // 환경 변수(Secrets)에서 안전하게 가져오도록 변경
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
@@ -7,8 +9,6 @@ const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); // 서비스 롤
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const API_URL = `${API_BASE}/models/gemini-2.5-flash-lite:generateContent`;
-// 사용자님의 모델 리스트 35번 항목(gemini-embedding-001)으로 모델 변경
-const EMBED_URL = `${API_BASE}/models/gemini-embedding-001:embedContent`;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -92,17 +92,15 @@ serve(async (req) => {
 
     // [복구] 지침서 기반 답변을 위한 벡터 검색 로직
     if (type === 'point_search' && !prompt.includes("프로젝트")) { // 단순 검색일 때만 벡터 검색 수행
-        // 1. 질문의 임베딩 생성 (검색용 - gemini-embedding-001 사용)
-        const embedRes = await fetch(`${EMBED_URL}?key=${GEMINI_API_KEY}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                content: { parts: [{ text: prompt }] }, 
-                task_type: "RETRIEVAL_QUERY"
-            })
+        // 1. [변경] 로컬 모델(Transformers.js)을 사용하여 검색어 임베딩 생성
+        // API를 호출하지 않으므로 429 에러가 발생하지 않습니다.
+        const embedder = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2');
+        const output = await embedder(prompt, {
+            pooling: 'mean',
+            normalize: true,
         });
-        const embedData = await embedRes.json();
-        const queryEmbedding = embedData.embedding?.values;
+        
+        const queryEmbedding = Array.from(output.data);
 
         if (queryEmbedding) {
             // 2. Supabase RPC 호출하여 유사 지식 검색
