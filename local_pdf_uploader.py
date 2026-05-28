@@ -127,8 +127,12 @@ class PDFUploaderApp:
         if not text: return ""
         # 유니코드 제어 문자 및 불필요한 공백 제거
         text = text.replace('\0', '')
+        # 마침표/쉼표 뒤 공백 확보
         text = re.sub(r'([\.?!,])(?=\S)', r'\1 ', text)
-        text = re.sub(r'\s+', ' ', text)
+        # [수정] 탭과 일반 공백은 하나로 줄이되, 줄바꿈(\n)은 보존하여 지침서 기호 구조를 유지
+        text = re.sub(r'[ \t]+', ' ', text)
+        # 연속된 3개 이상의 개행은 2개로 축소
+        text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
     def start_upload_thread(self):
@@ -173,25 +177,37 @@ class PDFUploaderApp:
                 all_chunks = []
                 with pdfplumber.open(file_path) as pdf:
                     for i, page in enumerate(pdf.pages):
+                        raw_text = page.extract_text() or ""
+                        
+                        # [추가] 목차(Index) 감지 로직
+                        is_index = False
+                        first_lines = raw_text.strip().split('\n')[:5]
+                        header_check = "".join(first_lines).replace(" ", "").upper()
+                        if any(kw in header_check for kw in ["목차", "CONTENTS", "INDEX"]):
+                            is_index = True
+
                         table_data = ""
                         tables = page.extract_tables()
                         if tables:
                             for table in tables:
-                                for row in table:
+                                if not table: continue
+                                # [개선] 마크다운 표준 표 형식(구분선 포함)으로 생성
+                                for row_idx, row in enumerate(table):
                                     cells = [str(c).replace('\n', ' ') if c else "" for c in row]
                                     table_data += "| " + " | ".join(cells) + " |\n"
+                                    if row_idx == 0: # 헤더 바로 다음에 구분선(|---|) 삽입
+                                        table_data += "| " + " | ".join(["---"] * len(cells)) + " |\n"
                                 table_data += "\n"
                         
-                        raw_text = page.extract_text() or ""
                         text_content = self.clean_text_quality(raw_text)
                         
                         # 데이터 구조화
                         combined = f"### 출처: {file_name} (p.{i+1}) ###\n\n"
-                        if table_data.strip(): 
+                        if table_data.strip():
                             combined += "#### [표 데이터] ####\n" + table_data + "\n"
                         combined += "#### [지침 내용] ####\n" + text_content
                         
-                        all_chunks.append({"page": i + 1, "text": combined})
+                        all_chunks.append({"page": i + 1, "text": combined, "is_index": is_index})
 
                 # 3. 새로운 데이터 삽입 (embedding은 NULL로 두어 새벽에 처리되게 함)
                 self.log(f"[*] 총 {len(all_chunks)}페이지 삽입 중...")
@@ -221,7 +237,7 @@ class PDFUploaderApp:
                                 "file_name": file_name,
                                 "content_url": res["url"],
                                 "embedding": None,
-                                "metadata": {"page": res["page"]}
+                                "metadata": {"page": res["page"], "is_index": res.get("is_index", False)}
                             })
                         else:
                             self.log(f"  - [⚠️] {res['page']}페이지 R2 업로드 누락됨")

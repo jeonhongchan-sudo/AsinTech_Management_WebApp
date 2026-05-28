@@ -1,6 +1,6 @@
 // e:\Program\SelfProgram\아신테크\js\ai.js
 import { state, callSupabaseDirect, showAlert, callAiEdge, WORKER_URL, WORKER_AUTH_KEY, R2_BASE_URL } from './core.js';
-import { UIS_DATA, NETWORK_RTK_DATA, NON_CONFORMITY_CASES_DATA, NUMERIC_MAP_DATA, GNSS_NOTICE_DATA, PUBLIC_SURVEY_FAQ_DATA, REGULATION_REVISION_DATA, MATERIAL_ABBREVIATION_DATA, PUBLIC_SURVEY_REGULATIONS_DATA } from './data.js';
+import { matchComplexQuery } from './search_engine.js';
 
 let isAiProcessing = false; // [추가] 중복 요청 방지 변수
 let lastAiRequestTime = 0;   // [추가] 물리적 쿨타임 체크용
@@ -29,6 +29,11 @@ function formatResponseText(text) {
             return part;
         }).join('');
     }
+
+    // [추가] 지침서 특수 기호(●, ■, ※, ○, □, -, ① 등) 감지 및 색상 강조
+    // 줄바꿈(\n)이 살아있는 상태에서 각 행의 시작점에 있는 기호를 강조합니다.
+    text = text.replace(/^([ \t]*)([●■※○□▶▷\-•·]|(?:\d+\.)|(?:\d+\))|[①-⑮])(?=\s|[가-힣a-zA-Z0-9])/gm, 
+        '$1<strong style="color:#D32F2F;">$2</strong>');
 
     let formatted = text
         .replace(/([\.?!])(?=\S)/g, "$1 ") // 2. 마침표 뒤 한 칸 띄우기
@@ -83,15 +88,7 @@ export async function handleDatabaseSearch(query) {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     try {
-        const originalCleanQuery = query.replace(/\s+/g, ' ').trim();
-        if (!originalCleanQuery) { closeAiResponseModal(); return false; }
-
-        const queryNoSpace = originalCleanQuery.replace(/\s+/g, '').toLowerCase();
-        // [수정] 검색 키워드 추출 시 제외어(조사 및 무의미한 보조 단어)를 대폭 추가하여 검색 의도를 강화
-        const searchWords = originalCleanQuery.split(/\s+/)
-            .map(w => w.replace(/(에서|으로|의|은|는|이|가|을|를|도|에|기준|안내|방법|작성|대한|관한|사항|정리|요청|알려|어떻게|알아|확인|검색|분석|설명|보여|보여줘|알려줘|찾아|찾아줘|해줘)$/, '')) 
-            .filter(w => w.length >= 2);
-        if (searchWords.length === 0) searchWords.push(originalCleanQuery);
+        if (!query || !query.trim()) { closeAiResponseModal(); return false; }
 
         const allFoundResults = [];
 
@@ -110,24 +107,18 @@ export async function handleDatabaseSearch(query) {
                         knowledgeContentCache.set(item.content_url, content);
                     }
                     if (!content) return null;
-                    const cleanContent = content.toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
-                    const isFullMatch = cleanContent.includes(queryNoSpace);
-                    let matchCount = 0;
-                    searchWords.forEach(w => { if (cleanContent.includes(w.toLowerCase())) matchCount++; });
-                    const matchRatio = matchCount / searchWords.length;
 
-                    // [강화] 검색 결과 임계값을 0.5에서 0.7으로 상향하여 관련성이 낮은 결과 필터링 강화
-                    if (isFullMatch || matchRatio >= 0.7) {
+                    // [통합] 중앙화된 복합 검색 엔진 사용
+                    const score = matchComplexQuery(content, query);
+
+                    if (score > 0) {
                         let displayContent = content;
-                        if (content.length > 1700) {
-                            const idx = cleanContent.indexOf(queryNoSpace);
-                            if (idx !== -1) {
-                                const start = Math.max(0, idx - 300);
-                                const end = Math.min(content.length, idx + 1500);
-                                displayContent = `... (앞부분 중략) ...\n\n${content.substring(start, end)}\n\n... (뒷부분 중략) ...`;
-                            }
+                        if (content.length > 1500) {
+                            const start = Math.max(0, content.length / 2 - 750);
+                            const end = Math.min(content.length, start + 1500);
+                            displayContent = `... (검색 내용 포함 구간 발췌) ...\n\n${content.substring(start, end)}\n\n... (중략) ...`;
                         }
-                        return { ...item, content: displayContent, score: (isFullMatch ? 2.0 : 0) + matchRatio, matchRatio };
+                        return { ...item, content: displayContent, score: score + (item.file_name === 'AI_Confirmed_Knowledge' ? 1.0 : 0) };
                     }
                 } catch (e) { console.warn(`로드 실패: ${item.file_name}`, e); }
                 return null;
@@ -141,62 +132,13 @@ export async function handleDatabaseSearch(query) {
         const confirmedMatches = await searchInList(confirmedList);
         if (confirmedMatches.length > 0) allFoundResults.push(...confirmedMatches);
 
-        // [Step 2] 로컬 지침 데이터(data.js) 검색
-        console.log("🔍 [Step 2] 로컬 지침 데이터 탐색 중...");
-        const currentLocalMatches = [];
-        const localSources = [
-            { name: "공공측량 작업규정 본문", data: PUBLIC_SURVEY_REGULATIONS_DATA },
-            { name: "공공측량제도 FAQ", data: PUBLIC_SURVEY_FAQ_DATA },
-            { name: "지하시설물 측량 코드표", data: UIS_DATA },
-            { name: "지하시설물 재질약어표", data: MATERIAL_ABBREVIATION_DATA },
-            { name: "공공측량 성과심사 부적합 사례", data: NON_CONFORMITY_CASES_DATA },
-            { name: "공공측량 작업규정 개정 안내", data: REGULATION_REVISION_DATA },
-            { name: "네트워크RTK 서비스 안내", data: NETWORK_RTK_DATA },
-            { name: "수치지도 도엽번호 안내", data: NUMERIC_MAP_DATA },
-            { name: "GNSS 관측 방식 주의사항", data: GNSS_NOTICE_DATA }
-        ];
-
-        for (const source of localSources) {
-            const stringified = JSON.stringify(source.data);
-            if (stringified.replace(/\s+/g, '').toLowerCase().includes(queryNoSpace)) {
-                let foundText = "";
-                if (source.name === "공공측량 작업규정 본문") {
-                    const articles = PUBLIC_SURVEY_REGULATIONS_DATA.parts.flatMap(p => p.articles);
-                    const match = articles.find(a => JSON.stringify(a).replace(/\s+/g, '').includes(queryNoSpace));
-                    if (match) {
-                        const title = `${match.articleId} ${match.title || ''}`;
-                        const content = Array.isArray(match.paragraphs || match.content || match.definitions) 
-                            ? JSON.stringify(match.paragraphs || match.content || match.definitions, null, 2).replace(/[\[\]"{}]/g, '').replace(/\\n/g, '\n')
-                            : (match.paragraphs || match.content || match.definitions);
-                        foundText = `[${title}]\n\n${content}`;
-                    }
-                } else if (source.name === "공공측량제도 FAQ") {
-                    const questions = PUBLIC_SURVEY_FAQ_DATA.chapters.flatMap(c => c.questions);
-                    const match = questions.find(q => JSON.stringify(q).replace(/\s+/g, '').toLowerCase().includes(queryNoSpace));
-                    if (match) foundText = `[FAQ: ${match.question}]\n\n답변: ${match.answer || '상세 내용 참조'}`;
-                } else if (source.name === "지하시설물 측량 코드표") {
-                    const items = UIS_DATA.flatMap(g => g.items);
-                    const match = items.find(i => i.name.replace(/\s+/g, '').toLowerCase().includes(queryNoSpace));
-                    if (match) foundText = `[코드표 매칭]\n- 명칭: ${match.name}\n- 코드: ${match.code}\n- 형태: ${match.type}`;
-                } else if (source.name === "지하시설물 재질약어표") {
-                    const rows = MATERIAL_ABBREVIATION_DATA.tables.flatMap(t => t.data);
-                    const match = rows.find(r => JSON.stringify(r).replace(/\s+/g, '').toLowerCase().includes(queryNoSpace));
-                    if (match) foundText = `[재질약어 정보]\n- 약어: ${match.abbreviation || '-'}\n- 원어: ${match.originalTerm || '-'}\n- 설명: ${match.description || '-'}`;
-                } else if (source.name === "공공측량 성과심사 부적합 사례") {
-                    const chapters = NON_CONFORMITY_CASES_DATA.contents;
-                    const match = chapters.find(c => JSON.stringify(c).replace(/\s+/g, '').toLowerCase().includes(queryNoSpace));
-                    if (match) foundText = `[부적합 사례 분석]\n\n${JSON.stringify(match, (k, v) => (k === 'chapter' || k === 'title') ? undefined : v, 2).replace(/[\[\]"{}]/g, '').replace(/\\n/g, '\n').trim()}`;
-                }
-                if (foundText) currentLocalMatches.push({ file_name: source.name, content: foundText, score: 3.0, metadata: {} });
-            }
-        }
-        if (currentLocalMatches.length > 0) allFoundResults.push(...currentLocalMatches);
-
-        // [Step 3] 전체 지침서 본문 정밀 탐색 (R2 Deep Search)
-        // 검증된 지식이나 로컬 데이터가 있더라도 더 깊은 정보를 위해 함께 검색
-        if (allFoundResults.length < 5) {
+        // [Step 2] 전체 지침서 본문 실시간 탐색 (R2 Deep Search)
+        // 업로더를 통해 추가된 모든 PDF 데이터가 여기서 자동으로 검색됩니다.
+        // 별도의 코드 수정 없이 DB/R2에 데이터가 존재하면 바로 탐색 대상이 됩니다.
+        if (allFoundResults.length < 10) {
             console.log("🔍 [Step 3] 본문 정밀 탐색 시작...");
-            const otherList = allKnowledge.filter(k => k.file_name !== 'AI_Confirmed_Knowledge');
+            // [수정] 메타데이터의 is_index 플래그를 확인하여 목차 페이지는 검색 결과에서 원천 제외
+            const otherList = allKnowledge.filter(k => k.file_name !== 'AI_Confirmed_Knowledge' && k.metadata?.is_index !== true);
             const deepMatches = await searchInList(otherList);
             if (deepMatches.length > 0) allFoundResults.push(...deepMatches);
         }
@@ -206,7 +148,7 @@ export async function handleDatabaseSearch(query) {
             allFoundResults.sort((a, b) => b.score - a.score);
             // [수정] 결과 출력 직전 로딩 UI를 제거하여 사용자에게 검색 완료 사실을 적시함
             if (contentEl) contentEl.innerHTML = "";
-            displayCombinedResults(allFoundResults, originalCleanQuery, "📚 통합 DB 검색 결과");
+            displayCombinedResults(allFoundResults, query, "📚 통합 DB 검색 결과");
             return true;
         }
 
@@ -576,10 +518,11 @@ export function showAiResponseModal(query, answer, source) {
     // source 문자열에 'AI 분석'이 포함되면 실시간 답변임
     const isRealTimeAi = source.includes("실시간 AI 분석");
     const isFromDatabase = source.includes("DB");
+    const isAnalysis = source.includes("분석"); // [추가] 무결성 분석 여부 체크
 
     // [추가] DB 검색 결과일 때만 복사 및 직접 입력 버튼 노출
     if (copyBtn) {
-        copyBtn.style.display = isFromDatabase ? "inline-flex" : "none";
+        copyBtn.style.display = (isFromDatabase && !isAnalysis) ? "inline-flex" : "none";
         copyBtn.innerHTML = "📋"; // 아이콘
         copyBtn.title = "원문복사";
     }
@@ -594,9 +537,15 @@ export function showAiResponseModal(query, answer, source) {
     content.style.display = 'block';
     document.getElementById('aiManualInput').value = '';
 
+    // [추가] 분석 모드일 때는 추가 질문 버튼 숨김
+    const followUpBtn = document.getElementById('btnAiFollowUp');
+    if (followUpBtn) {
+        followUpBtn.style.display = isAnalysis ? "none" : "inline-flex";
+    }
+
     // 1. [저장] 버튼: 항상 표시 (학습용)
     if (saveBtn) {
-        saveBtn.style.display = "inline-flex";
+        saveBtn.style.display = isAnalysis ? "none" : "inline-flex"; // [수정] 분석 결과는 저장 금지
         saveBtn.disabled = false;
         saveBtn.innerHTML = "💾"; // 아이콘
         saveBtn.title = "답변 저장";
@@ -604,7 +553,7 @@ export function showAiResponseModal(query, answer, source) {
     
     // 2. [AI 재요청] 버튼: DB 검색 결과일 때만 표시
     if (reRequestBtn) {
-        reRequestBtn.style.display = isFromDatabase ? "inline-flex" : "none";
+        reRequestBtn.style.display = (isFromDatabase && !isAnalysis) ? "inline-flex" : "none";
         reRequestBtn.onclick = () => {
             // [수정] 현재 모달에 표시된 'answer'(DB 원문)를 AI에게 전달하여 재정리 요청
             // AI 재요청 시에는 현재 모달의 content.innerText를 rawDbContext로 사용

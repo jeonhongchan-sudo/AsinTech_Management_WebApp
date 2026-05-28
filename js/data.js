@@ -1017,3 +1017,16 @@ export const PUBLIC_SURVEY_REGULATIONS_DATA = {
     }
   ]
 };
+
+/** [추가] 통합 지침서 레지스트리 (검색 및 메뉴 구성용) */
+export const GUIDELINE_REGISTRY = [
+    { id: 'publicSurveyReg', name: "공공측량 작업규정 본문", data: PUBLIC_SURVEY_REGULATIONS_DATA },
+    { id: 'faq', name: "공공측량제도 FAQ", data: PUBLIC_SURVEY_FAQ_DATA },
+    { id: 'uis', name: "지하시설물 측량 코드표", data: UIS_DATA },
+    { id: 'materialAbbr', name: "지하시설물 재질약어표", data: MATERIAL_ABBREVIATION_DATA },
+    { id: 'nonConformity', name: "공공측량 성과심사 부적합 사례", data: NON_CONFORMITY_CASES_DATA },
+    { id: 'regulationRevision', name: "공공측량 작업규정 개정 안내", data: REGULATION_REVISION_DATA },
+    { id: 'rtk', name: "네트워크RTK 서비스 안내", data: NETWORK_RTK_DATA },
+    { id: 'numericMap', name: "수치지도 도엽번호 안내", data: NUMERIC_MAP_DATA },
+    { id: 'gnssNotice', name: "GNSS 관측 방식 주의사항", data: GNSS_NOTICE_DATA }
+];

@@ -2,6 +2,7 @@
 import { state, callApi, callSupabaseDirect, showAlert, R2_BASE_URL } from './core.js';
 import { UIS_DATA, ROAD_LEDGER_ITEMS, PDF_TOC_DATA, NETWORK_RTK_DATA, NON_CONFORMITY_CASES_DATA, NUMERIC_MAP_DATA, GNSS_NOTICE_DATA, PUBLIC_SURVEY_FAQ_DATA, REGULATION_REVISION_DATA, MATERIAL_ABBREVIATION_DATA, PUBLIC_SURVEY_REGULATIONS_DATA } from './data.js';
 import { handleAiSearch, handleDatabaseSearch, showModalMessage } from './ai.js';
+import { matchComplexQuery } from './search_engine.js';
 
 export function selectGuideline(type) {
     document.querySelectorAll('.guide-menu-item').forEach(b => b.classList.remove('active'));
@@ -790,9 +791,9 @@ function renderPublicSurveyRegulations() {
 }
 
 // --- CAD Viewer Logic ---
-let cadMap = null;
+export let cadMap = null;
 let cadProtocol = null;
-let cadLayers = new Set();
+export let cadLayers = new Set();
 let cadLayerColors = {};
 let cadHiddenLayers = new Set();
 let memoMarkers = []; // [추가] 메모 마커 관리용 배열
@@ -824,7 +825,6 @@ export async function initCadViewer() {
 }
 
 window.loadCadProjects = loadCadProjects; // [추가] 외부 호출을 위해 전역 연결
-window.searchPoints = searchPoints;
 window.resetSearchUI = resetSearchUI;
 window.selectGuideline = selectGuideline;
 window.showProjectInfo = showProjectInfo;
@@ -1079,104 +1079,26 @@ export function toggleBackgroundMap(isVisible) {
     updateCadStyle();
 }
 
-// 포인트 명칭 검색 기능 (검색 범위 확장 및 수량 파악 기능)
-export async function searchPoints() {
-    const isProjectSelected = !!state.currentCadProjectId;
-
-    let searchTerm = prompt(
-        isProjectSelected
-            ? "포인트 검색 문법 안내:\n• & : 또는 (예: 제수변&이토변)\n• 공백 : 그리고 (예: 제수변 50)\n• ! : 제외 (예: 제수변!하단)\n\n검색어를 입력하세요:"
-            : "검색어를 입력하세요 (지침 및 지식 DB 검색):"
-    );
-
-    if (!searchTerm || !searchTerm.trim()) return;
-
-    // 1. 프로젝트 미선택: DB 검색 -> 실패 시 AI 순차 수행
-    if (!isProjectSelected) {
-        const foundInDb = await handleDatabaseSearch(searchTerm.trim());
-        
-        if (!foundInDb) {
-            // [수정] '추론' 키워드가 포함된 경우에만 AI 일반 질문 허용
-            if (searchTerm.includes("추론")) {
-                handleAiSearch(searchTerm, null);
-            } else {
-                // [수정] showAlert 대신 모달 내에 결과 없음 메시지 표시 (X 버튼 포함)
-                showModalMessage(
-                    "🔍 검색 결과가 없습니다.", 
-                    "지침 DB에서 해당 내용을 찾을 수 없습니다. 더 자세한 분석이나 추론이 필요하시면 질문에 <strong>'추론'</strong> 키워드를 포함해 보세요.", 
-                    'info'
-                );
-            }
-        }
-        return;
-    }
-
-    // 2. 프로젝트 선택: 구현된 문법 기반 도면 검색만 수행
-    if (!cadMap) return showAlert("지도가 로드되지 않았습니다.", "info");
-
-    // [개선] 검색어 및 데이터 전처리 유틸리티
-    const sanitize = (str) => {
-        if (str === null || str === undefined) return '';
-        return str.toString().toLowerCase()
-            .replace(/\s+/g, '')             // 모든 공백 제거
-            .replace(/%%[cdp]/gi, '')        // CAD 제어코드 제거 (%%c:Φ, %%d:°, %%p:±)
-            .replace(/[/\\-_.]/g, '');       // 일반 구분 기호(/, \, -, _, .) 제거
-    };
-
-    // [수정] 검색어 파싱 고도화: '포함&조건 공백조건 !제외1 !제외2' 형태 대응
-    const parts = searchTerm.split('!');
-    const includePart = parts[0];
-    // 여러 개의 제외 단어를 배열로 수집
-    const excludeTerms = parts.slice(1).map(t => sanitize(t)).filter(t => t !== "");
-
-    // '&'를 기준으로 OR 그룹 분리 (이것 또는 저것)
-    const orGroups = includePart.split('&').filter(g => g.trim() !== "");
-
-    if (orGroups.length === 0) return; // 포함할 단어가 없으면 중단
-    
-    // 1. [수정] PMTiles 대신 로드된 GeoJSON에서 전역 검색 수행
-    let features = [];
-    if (state.currentProjectGeoJSON && state.currentProjectGeoJSON.features) {
-        features = state.currentProjectGeoJSON.features.filter(f => f.geometry && f.geometry.type === 'Point');
-    } else {
-        // Fallback: GeoJSON 로드 전이면 기존 타일 기반 검색 시도
-        features = cadMap.querySourceFeatures('cad_source', { sourceLayer: 'point' });
-    }
-
-    const matches = features.filter(f => {
-        const combinedValues = Object.values(f.properties).map(v => sanitize(v)).join(' ');
-        
-        // 1. 포함 조건 확인 (OR 그룹 중 하나라도 만족해야 함)
-        const hasAnyInclude = orGroups.some(group => {
-            // 그룹 내의 단어들은 모두 포함되어야 함 (공백 기준 AND 조건)
-            const andTerms = group.trim().split(/\s+/).map(t => sanitize(t)).filter(t => t !== "");
-            if (andTerms.length === 0) return false;
-            return andTerms.every(term => combinedValues.includes(term));
-        });
-
-        if (!hasAnyInclude) return false;
-
-        // 2. 제외 조건 확인 (제외 단어 중 하나라도 들어있으면 탈락)
-        const hasAnyExclude = excludeTerms.some(term => combinedValues.includes(term));
-        
-        return !hasAnyExclude;
-    });
-
-    if (matches.length === 0) {
-        return showAlert("도면 내에 일치하는 포인트가 없습니다.", "info");
-    }
-
+/** [추가] 개별 포인트 위치 강조 표시 (분석 결과물 연동용) */
+export function showPointLocation(lon, lat, label, handle) {
+    if (!cadMap) return;
     clearSearchMarkers();
+    const marker = new maplibregl.Marker({ color: '#FF0000' }).setLngLat([lon, lat]).addTo(cadMap);
+    state.searchMarkers.push({ marker: marker, handle: handle });
+    cadMap.flyTo({ center: [lon, lat], zoom: 20, speed: 1.2, essential: true });
+    document.getElementById('btnResetSearch').style.display = 'block';
+}
 
+/** [추가] 검색된 포인트들을 지도에 마커로 표시 */
+export function renderSearchResults(matches) {
+    clearSearchMarkers();
     const uniqueMatches = [];
     const seenKeys = new Set();
-
     matches.forEach(f => {
         const props = f.properties;
         const coords = f.geometry.coordinates; // WGS84 [lon, lat]
         const label = (props.text || props.TEXT || props.label || props.layer || '').toString();
         const handle = props.handle;
-
         if (coords && coords[0] !== 0 && coords[1] !== 0) {
             const key = `${coords[0].toFixed(7)}|${coords[1].toFixed(7)}|${handle}`;
             if (!seenKeys.has(key)) {
@@ -1185,10 +1107,12 @@ export async function searchPoints() {
             }
         }
     });
-
     if (uniqueMatches.length === 0) return showAlert("좌표 정보가 있는 포인트를 찾을 수 없습니다.", "info");
+    displayMatchesOnMap(uniqueMatches);
+}
 
-    // 2. 결과 표시 및 정밀 이동 (GeoJSON 좌표 사용)
+/** [추가] 정제된 매칭 리스트를 실제 마커로 변환 */
+export function displayMatchesOnMap(uniqueMatches) {
     const bounds = new maplibregl.LngLatBounds();
     uniqueMatches.forEach(m => {
         const marker = new maplibregl.Marker().setLngLat([m.lon, m.lat]).addTo(cadMap);
@@ -1197,7 +1121,6 @@ export async function searchPoints() {
         state.searchMarkers.push({ marker: marker, handle: m.handle });
         bounds.extend([m.lon, m.lat]);
     });
-
     if (uniqueMatches.length === 1) {
         cadMap.flyTo({ center: [uniqueMatches[0].lon, uniqueMatches[0].lat], zoom: 20, speed: 1.2, essential: true });
     } else {
