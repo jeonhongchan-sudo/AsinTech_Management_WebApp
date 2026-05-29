@@ -49,12 +49,12 @@ export function openGisSearchModal() {
                         <span><b>!</b> : 검색 제외 (NOT)</span>
                         <span><b>~</b> : ~에서 (지점연결)</span>
                         <span><b>[거리]</b> : 연장/거리 계산</span>
-                        <span><b>^</b> : ~내에서 (포함/범위)</span>
+                        <span><b>사진</b> : 사진 매칭 분석</span>
                         <span><b>?</b> : 분석 리포트 출력</span>
                         <span><b>📍</b> : 지도 마커 표시</span>
                     </div>
                     <div style="color:#2c5282; font-weight:bold; font-size:10.5px; background:#ebf8ff; padding:5px 8px; border-radius:4px;">
-                        • 예: A~B[거리]? | 레이어[거리]>10📍 | 레이어^사진?
+                        • 예: A~B[거리]? | 레이어[거리]>10📍 | 레이어사진?
                     </div>
                 </div>
                 <div id="gisSearchShortcuts" style="margin-bottom:8px; display:flex; gap:6px;">
@@ -83,7 +83,7 @@ export function openGisSearchModal() {
             overlay.style.display = 'block';
             listEl.innerHTML = Array.from(cadLayers).sort().map(l => 
                 `<div style="cursor:pointer; padding:8px; background:#fff; border:1px solid #eee; border-radius:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center;" 
-                      onclick="const input = document.getElementById('gisSearchInput'); input.value = '${l}' + input.value; document.getElementById('layerSelectorOverlay').style.display='none'; input.focus();">${l}</div>`
+                      onclick="const input = document.getElementById('gisSearchInput'); input.value += '${l}'; document.getElementById('layerSelectorOverlay').style.display='none'; input.focus();">${l}</div>`
             ).join('');
         };
 
@@ -171,12 +171,18 @@ async function executeGisSearch(searchTerm) {
     // 기호를 제거한 순수 문법 내용 추출
     let cleanInput = searchTerm.replace(/[📍?]/g, '').trim();
 
-    // 2. 포인트~포인트 거리 분석 문법 체크 (A~B^[거리])
-    const p2pMatch = cleanInput.match(/(.+)\~(.+?)\^?\[거리\]/);
-    if (p2pMatch) {
-        const p1 = p2pMatch[1].trim();
-        const p2 = p2pMatch[2].trim();
-        if (p1 && p2) return analyzePointToPointDistance(p1, p2, useBookmark, isAudit);
+    // 2. 포인트 간 누적 거리 분석 문법 체크 (A~B~C...[거리] 또는 A~B[거리]+B~C[거리])
+    if (cleanInput.includes('~') && cleanInput.includes('[거리]')) {
+        const pointNames = cleanInput
+            .replace(/\[거리\]/g, '') // [거리] 태그 일괄 제거
+            .replace(/\^/g, '')       // ^ 기호 제거
+            .split(/[~+]/)            // ~ 또는 + 기호로 모든 포인트 분리
+            .map(p => p.trim())
+            .filter(p => p !== "");
+
+        if (pointNames.length >= 2) {
+            return analyzePointToPointDistance(pointNames, useBookmark, isAudit);
+        }
     }
 
     // 2. 거리 분석 문법 체크 (레이어^[거리]>숫자)
@@ -188,11 +194,14 @@ async function executeGisSearch(searchTerm) {
         return analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit);
     }
 
-    // 3. 사진 매칭 분석 문법 체크 (^사진)
-    if (cleanInput.includes('^사진')) {
-        const targetLayer = cleanInput.split('^')[0].trim();
-        if (!targetLayer) return showAlert("분석할 레이어 명칭을 먼저 입력하세요.", "info");
-        return analyzePhotoMismatch(targetLayer, useBookmark, isAudit);
+    // 3. 사진 매칭 분석 문법 체크 (사진)
+    if (cleanInput.includes('사진')) {
+        // 레이어 명칭 추출: '사진' 앞부분에서 ^ 기호가 있다면 제거하여 유연하게 대응
+        const targetLayer = cleanInput.split('사진')[0].replace(/\^$/, '').trim();
+        
+        // 레이어 명칭이 앞에 명시된 경우에만 미스매칭 분석 실행 
+        // (단순히 '사진' 키워드만 검색할 때는 일반 포인트 검색으로 처리됨)
+        if (targetLayer) return analyzePhotoMismatch(targetLayer, useBookmark, isAudit);
     }
 
     // 4. 거리 합산 분석 문법 체크 ([거리])
@@ -258,8 +267,9 @@ async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit) {
     const points = state.currentProjectGeoJSON.features.filter(f => {
         if (!f.geometry || !f.properties.layer) return false;
         // [수정] 대소문자 및 기호 무시 비교 적용
+        // [수정] 복합 문법(&) 지원을 위해 matchComplexQuery 사용
         return f.geometry.type === 'Point' && 
-               sanitizeSearchText(f.properties.layer) === sanitizeSearchText(targetLayer);
+               matchComplexQuery(f.properties.layer, targetLayer) > 0;
     });
 
     const photos = state.projectPhotos;
@@ -309,8 +319,8 @@ async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit) {
     if (contentEl) contentEl.innerHTML = html;
 }
 
-/** [추가] 특정 두 포인트 간의 직선 거리 계산 (Supabase PostGIS 활용) */
-async function analyzePointToPointDistance(p1Name, p2Name, useBookmark, isAudit) {
+/** [수정] 여러 포인트 간의 누적 직선 거리 계산 (Chained Path Distance) */
+async function analyzePointToPointDistance(pointNames, useBookmark, isAudit) {
     if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
     if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
 
@@ -321,32 +331,37 @@ async function analyzePointToPointDistance(p1Name, p2Name, useBookmark, isAudit)
         const cleanName = sanitizeSearchText(name);
         return features.find(f => 
             f.geometry.type === 'Point' && 
-            (sanitizeSearchText(f.properties.text || '') === cleanName || 
+            (sanitizeSearchText(f.properties.text || '').includes(cleanName) || 
              f.properties.handle === name)
         );
     };
 
-    const feat1 = findPoint(p1Name);
-    const feat2 = findPoint(p2Name);
+    const foundPoints = [];
+    const missingNames = [];
+    
+    pointNames.forEach(name => {
+        const pt = findPoint(name);
+        if (pt) foundPoints.push(pt);
+        else missingNames.push(name);
+    });
 
-    if (!feat1 || !feat2) {
-        const missing = [];
-        if (!feat1) missing.push(`[${p1Name}]`);
-        if (!feat2) missing.push(`[${p2Name}]`);
-        return showAlert(`포인트를 찾을 수 없습니다: ${missing.join(', ')}`, "info");
+    if (missingNames.length > 0) {
+        return showAlert(`포인트를 찾을 수 없습니다: ${missingNames.join(', ')}`, "info");
+    }
+    if (foundPoints.length < 2) {
+        return showAlert("분석을 위해 최소 2개 이상의 포인트가 필요합니다.", "info");
     }
 
-    const c1 = feat1.geometry.coordinates;
-    const c2 = feat2.geometry.coordinates;
+    const coords = foundPoints.map(p => p.geometry.coordinates);
 
-    // Supabase RPC에 보낼 임시 선분 피처 생성 (두 지점을 잇는 선)
+    // Supabase RPC에 보낼 경로 피처 생성 (여러 지점을 잇는 LineString)
     const segmentFeature = {
         type: 'Feature',
         properties: { handle: 'P2P_SEGMENT' },
-        geometry: { type: 'LineString', coordinates: [c1, c2] }
+        geometry: { type: 'LineString', coordinates: coords }
     };
 
-    showAlert("두 지점 간 거리 계산 중...", "info");
+    showAlert(`${foundPoints.length}개 지점 연결 거리 계산 중...`, "info");
 
     try {
         // 기존에 등록된 calculate_line_lengths RPC 재활용
@@ -359,26 +374,33 @@ async function analyzePointToPointDistance(p1Name, p2Name, useBookmark, isAudit)
         const lengthM = results[0].length_m;
 
         if (isAudit) {
+            let segmentsInfo = "";
+            for(let i=0; i < foundPoints.length - 1; i++) {
+                const n1 = foundPoints[i].properties.text || foundPoints[i].properties.handle;
+                const n2 = foundPoints[i+1].properties.text || foundPoints[i+1].properties.handle;
+                segmentsInfo += `<div style="padding:4px 0; border-bottom:1px dashed #eee;">• ${n1} ➔ ${n2}</div>`;
+            }
+
             let html = `
                 <div style="padding:5px;">
-                    <h3 style="color:#673AB7; margin-bottom:15px; border-bottom:2px solid #673AB7; padding-bottom:10px;">📏 포인트 간 거리 산출</h3>
+                    <h3 style="color:#673AB7; margin-bottom:15px; border-bottom:2px solid #673AB7; padding-bottom:10px;">📏 누적 경로 거리 산출</h3>
                     <div style="background:#f3e5f5; padding:20px; border-radius:12px; text-align:center; border:1px solid #d1c4e9; margin-bottom:20px;">
-                        <div style="font-size:12px; color:#7e57c2; margin-bottom:8px; font-weight:bold;">${p1Name} ↔ ${p2Name}</div>
+                        <div style="font-size:12px; color:#7e57c2; margin-bottom:8px; font-weight:bold;">${pointNames.join(' ➔ ')}</div>
                         <div style="font-size:28px; font-weight:bold; color:#512da8;">${lengthM.toFixed(3)} m</div>
                         <div style="font-size:11px; color:#9575cd; margin-top:10px;">기준 좌표계: ${state.currentProjectSourceCrs}</div>
                     </div>
-                    <div style="font-size:12px; color:#666; line-height:1.6;">
-                        • <b>출발:</b> ${feat1.properties.text || feat1.properties.handle} (${c1[0].toFixed(7)}, ${c1[1].toFixed(7)})<br>
-                        • <b>도착:</b> ${feat2.properties.text || feat2.properties.handle} (${c2[0].toFixed(7)}, ${c2[1].toFixed(7)})
+                    <div style="font-size:12px; color:#666; line-height:1.6; background:#fcfcfc; padding:10px; border-radius:8px; border:1px solid #eee;">
+                        <strong style="display:block; margin-bottom:5px; color:#333;">📍 구간별 경로:</strong>
+                        ${segmentsInfo}
                     </div>
                 </div>`;
-            showAiResponseModal(`거리계산: ${p1Name}~${p2Name}`, "분석 결과", "📊 공간 연산 분석");
+            showAiResponseModal(`거리계산: ${pointNames.join('~')}`, "분석 결과", "📊 공간 연산 분석");
             const contentEl = document.getElementById('aiAnswerContent');
             if (contentEl) contentEl.innerHTML = html;
         }
 
         if (useBookmark) {
-            renderSearchResults([feat1, feat2]);
+            renderSearchResults(foundPoints);
         }
     } catch (e) {
         showAlert("거리 계산 실패: " + e.message, "error");
@@ -394,8 +416,9 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit) {
     const lineFeatures = state.currentProjectGeoJSON.features.filter(f => {
         if (!f.geometry || !f.properties.layer) return false;
         const isLineOrPoly = f.geometry.type.includes('LineString') || f.geometry.type.includes('Polygon');
+        // [수정] 복합 문법(&) 지원을 위해 matchComplexQuery 사용
         return isLineOrPoly && 
-               sanitizeSearchText(f.properties.layer) === sanitizeSearchText(targetLayer);
+               matchComplexQuery(f.properties.layer, targetLayer) > 0;
     });
 
     if (lineFeatures.length === 0) {
@@ -464,8 +487,9 @@ async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit) 
 
     const points = state.currentProjectGeoJSON.features.filter(f => {
         if (!f.geometry || !f.properties.layer) return false;
+        // [수정] 복합 문법(&) 지원을 위해 matchComplexQuery 사용
         return f.geometry.type === 'Point' && 
-               sanitizeSearchText(f.properties.layer) === sanitizeSearchText(targetLayer);
+               matchComplexQuery(f.properties.layer, targetLayer) > 0;
     });
 
     if (points.length < 2) {
