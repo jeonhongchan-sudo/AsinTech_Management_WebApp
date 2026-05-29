@@ -87,10 +87,10 @@ export function openGisSearchModal() {
             ).join('');
         };
 
-        // [추가] 사진 자원 결합 버튼 (^사진)
+        // [추가] 사진 자원 결합 버튼 (사진)
         modal.querySelector('#btnShortcutPhoto').onclick = () => {
             const input = document.getElementById('gisSearchInput');
-            input.value += '^사진';
+            input.value += '사진';
             input.focus();
         };
 
