@@ -131,7 +131,7 @@ export function openGisSearchModal() {
     titleEl.innerText = isProjectSelected ? '🔍 도면 포인트 검색' : '📚 지침서 및 지식 DB 검색';
     shortcuts.style.display = isProjectSelected ? 'flex' : 'none';
     helpBox.style.display = isProjectSelected ? 'block' : 'none';
-    input.placeholder = isProjectSelected ? "검색어 또는 문법 입력..." : "지침서 키워드 입력 (예: 네트워크RTK, 추론 등)";
+    input.placeholder = isProjectSelected ? "검색어 또는 문법 입력..." : "지침서 키워드 입력 (예: 네트워크RTK 등)";
 
     document.getElementById('gisSearchInput').value = '';
     document.getElementById('layerSelectorOverlay').style.display = 'none';
@@ -148,12 +148,13 @@ async function executeGisSearch(searchTerm) {
         const cleanQuery = searchTerm.replace(/[📍?]/g, '').trim();
         if (!cleanQuery) return;
         
-        const foundInDb = await handleDatabaseSearch(cleanQuery);
-        if (!foundInDb) {
-            if (cleanQuery.includes("추론")) {
-                handleAiSearch(cleanQuery, null);
-            } else {
-                showModalMessage("🔍 검색 결과가 없습니다.", "지침 DB에서 내용을 찾을 수 없습니다. 추론이 필요하면 <strong>'추론'</strong> 키워드를 포함하세요.", 'info');
+        // [수정] '아신' 키워드가 있으면 AI 분석 우선 실행 (DB 탐색 -> 요약)
+        if (cleanQuery.includes("아신")) {
+            handleAiSearch(cleanQuery, null);
+        } else {
+            const foundInDb = await handleDatabaseSearch(cleanQuery);
+            if (!foundInDb) {
+                showModalMessage("🔍 검색 결과가 없습니다.", "지침 DB에서 내용을 찾을 수 없습니다. AI 분석이 필요하면 질문에 <strong>에이전트명</strong>을 포함하세요.", 'info');
             }
         }
         return;

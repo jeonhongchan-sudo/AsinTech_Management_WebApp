@@ -239,41 +239,33 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         // [추가] 2026-05-27 날짜 및 모델 고정 컨텍스트
         const systemContextPrefix = "오늘 날짜는 2026년 5월 27일입니다. 반드시 gemini-2.5-flash-lite 모델의 특성을 살려 답변하세요.\n";
 
-        // [통합] 즉시 모달 열기 및 로딩 표시 (DB 검색 기능과 UI 통일)
-        const sourceLabel = isSummary ? "📚 지침 요약 분석" : "🔍 실시간 AI 분석";
-        showAiResponseModal(query, "", sourceLabel);
-        
-        const contentEl = document.getElementById('aiAnswerContent');
-        if (contentEl) {
-            const loadingMsg = isSummary ? "지침서 내용을 읽기 쉽게 정리하고 있습니다..." : "도면과 지침을 분석하여 답변을 생성하고 있습니다...";
-            contentEl.innerHTML = `<div style="text-align:center; padding:30px; color:#666;"><span class="spinner"></span> AI 에이전트가 ${loadingMsg}</div>`;
-        }
+        const loadingMsg = isSummary ? "AI가 지침서 내용을 읽기 쉽게 정리하고 있습니다..." : "AI가 도면과 지침을 분석하여 답변을 생성하고 있습니다...";
 
-        // [핵심] 브라우저가 모달과 로딩바를 먼저 렌더링할 수 있도록 제어권을 잠시 넘김
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // [추가] 모달이 열려있는 상태에서 추가 질문 시, 기존 내용을 비우고 로딩 표시 (혼란 방지)
+        const contentEl = document.getElementById('aiAnswerContent');
+        if (contentEl && document.getElementById('aiResponseModal').style.display === 'flex') {
+            contentEl.innerHTML = `<div style="text-align:center; padding:30px; color:#666;"><span class="spinner"></span> ${loadingMsg}</div>`;
+        }
 
         // 추가 질문을 위해 현재 사용된 레이어 셋을 상태에 보관
         state.lastCadLayersSet = cadLayersSet;
+
+        const isGeneral = !cadLayersSet || cadLayersSet.size === 0;
+        if (!isSummary) {
+            showAlert(isGeneral ? "AI가 답변을 준비 중입니다..." : "AI가 도면 레이어와 지침을 분석 중입니다...", "info");
+        }
         
         // 현재 도면의 레이어 목록을 컨텍스트로 제공
-        const isGeneral = !cadLayersSet || cadLayersSet.size === 0;
         const layerContext = !isGeneral ? Array.from(cadLayersSet).join(', ') : "정보 없음 (일반 질문)";
 
         // [핵심] 대화 맥락 유지 및 질문 히스토리 관리
         let combinedContext = "";
         let finalQuery = query;
-        
-        // [추가] "아신" 키워드 포함 여부 확인 (전체 로직의 기준)
-        const hasAgentName = (state.originalAiQuery || "").includes("아신") || query.includes("아신");
 
         if (isFollowUp) {
             // 추가 질문(교정)인 경우: 이전 답변을 컨텍스트에 포함하여 AI가 자기 오류를 수정하게 함
             state.aiCorrectionHistory.push(query);
             combinedContext = `${systemContextPrefix}[이전 대화 요약]\n${state.lastAiAnswer}\n\n[도면 맥락]\n${layerContext}\n\n위 답변과 사용자 히스토리를 종합하여 질문에 답하세요.`;
-            // [로직 1 반영] 아신 키워드가 없으면 외부 지식 차단 명시
-            if (!hasAgentName) {
-                combinedContext += "\n⚠️ 주의: 외부 지식을 활용한 추론은 절대 하지 말고, 오직 이전 답변에 포함된 DB 정보 내에서만 대답하세요.";
-            }
             finalQuery = query;
         } else if (isSummary) {
             // DB 재요청(요약)인 경우: 새로운 대화로 간주
@@ -290,8 +282,7 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         // 프롬프트 의도 보강
         let apiQuery = query;
         if (isSummary) {
-            // [로직 1 반영] 아신 키워드가 없는 '요약' 요청은 외부 지식 절대 금지
-            apiQuery = `'${query}'에 대해 검색된 위 DB 지침 내용을 항목별로 가독성 좋게 재구성해서 아주 이쁘게 정리해줘. 외부 지식을 이용한 추론이나 일반 정보 답변은 절대 하지 말고 오직 주어진 내용으로만 작성해. 분량은 1500자 이내로 핵심만 담아줘.`;
+            apiQuery = `'${query}'에 대해 검색된 위 DB 지침 내용을 항목별로 가독성 좋게 재구성해서 아주 이쁘게 정리해줘. 외부 지식을 이용한 추론은 하지 말고 오직 주어진 내용으로만 작성해. 분량은 1500자 이내로 핵심만 담아줘.`;
         } else if (isFollowUp) {
             apiQuery = `지금까지의 대화와 사용자 요청('${query}')을 종합하여 가장 정확한 답변을 1500자 이내로 요약하고 정리해줘.`;
         }
@@ -313,8 +304,12 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
                     if (dataCount > 0) {
                         // AI 답변 내에 이미 숫자가 포함되어 있을 것이므로, 헤더에만 참조 건수 표시
                         displayAnswer = `✅ **실시간 DB 데이터 분석 결과 (최종 ${dataCount}건 확인)**\n\n${res.answer}`;
-                    } else if (displayAnswer.includes("찾을 수 없") || displayAnswer.includes("없습니다")) {
+                    } else if (requestType === 'point_search' && state.currentCadProjectId && (displayAnswer.includes("찾을 수 없") || displayAnswer.includes("없습니다"))) {
+                        // 프로젝트 모드이고 실제 결과가 없는 경우에만 힌트 노출
                         displayAnswer = `🔍 **조회 결과 알림**\n\n${res.answer}\n\n> 프로젝트 명칭(한글)이 정확한지 확인해 주세요.`;
+                    } else {
+                        // 일반적인 '아신' 에이전트 질문은 AI 답변 원문을 그대로 표시
+                        displayAnswer = res.answer;
                     }
                 } catch (e) {
                     console.warn("RawData Parsing 실패", e);
@@ -328,7 +323,8 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
             // [개선] 에러 객체 전체를 파악할 수 있도록 보강
             console.error("AI Edge Function Error Detail:", res);
             
-            // [추가] 분석 실패 시 모달 내부 메시지 창으로 안내 (DB 검색과 동일)
+            // [추가] 분석 실패 시 모달의 내용을 에러 안내로 변경하여 사용자 혼란 방지
+            const contentEl = document.getElementById('aiAnswerContent');
             const errorMsg = res.error || "응답 형식이 올바르지 않습니다.";
             showModalMessage("⚠️ AI 분석 중 오류가 발생했습니다.", errorMsg, 'error');
 
@@ -435,7 +431,6 @@ export function toggleManualInput() {
     const contentBox = document.getElementById('aiAnswerContent');
     const manualArea = document.getElementById('aiManualInputArea');
     const manualBtn = document.getElementById('btnAiManualMode');
-    const manualInput = document.getElementById('aiManualInput');
     const isManual = manualArea.style.display === 'block';
     
     if (isManual) {
@@ -444,15 +439,11 @@ export function toggleManualInput() {
         manualBtn.innerHTML = "✍️";
         manualBtn.title = "직접입력";
     } else {
-        // [추가] 직접 입력 모드 전환 시, 현재 표시된 답변 원문을 입력창에 자동으로 채워줌 (편집 편의성 제공)
-        if (manualInput && !manualInput.value.trim()) {
-            manualInput.value = state.lastAiAnswer || "";
-        }
         manualArea.style.display = 'block';
         contentBox.style.display = 'none';
         manualBtn.innerHTML = "👁️";
         manualBtn.title = "원문보기";
-        if (manualInput) manualInput.focus();
+        document.getElementById('aiManualInput').focus();
     }
 }
 
@@ -531,14 +522,14 @@ export function showAiResponseModal(query, answer, source) {
     // [수정] 프로젝트 선택 여부(GIS 모드)를 기준으로 버튼 노출 결정
     const isProjectMode = !!state.currentCadProjectId;
 
-    // [수정] 지침서 모드(!isProjectMode)일 경우, DB 검색 결과뿐 아니라 AI 분석 답변 시에도 복사/직접입력 버튼 노출
+    // [추가] DB 검색 결과일 때만 복사 및 직접 입력 버튼 노출 (지침서 모드 한정)
     if (copyBtn) {
-        copyBtn.style.display = (!isProjectMode) ? "inline-flex" : "none";
+        copyBtn.style.display = (isFromDatabase && !isProjectMode) ? "inline-flex" : "none";
         copyBtn.innerHTML = "📋"; // 아이콘
         copyBtn.title = "원문복사";
     }
     if (manualBtn) {
-        manualBtn.style.display = (!isProjectMode) ? "inline-flex" : "none";
+        manualBtn.style.display = (isFromDatabase && !isProjectMode) ? "inline-flex" : "none";
         manualBtn.innerHTML = "✍️"; // 아이콘
         manualBtn.title = "직접입력";
     }

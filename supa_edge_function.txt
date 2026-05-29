@@ -51,27 +51,13 @@ serve(async (req) => {
         function_declarations: [
           {
             name: "query_table_data",
-            description: "프로젝트 정보(상세, 메모, 사진, 도면파일)를 조회합니다. 명칭이나 장소로 질문 시 반드시 'cad_projects' 테이블에서 'name' 컬럼으로 ID를 먼저 검색하세요.",
+            description: "지침서 및 매뉴얼(pdf_knowledge) 정보를 조회합니다. 검색어는 문장 형태가 아닌 핵심 명사 위주로 띄어쓰기를 포함하여 입력하세요. (예: '네트워크RTK 기준' 등)",
             parameters: {
               type: "OBJECT",
               properties: {
-                table: { type: "STRING", enum: ["cad_projects", "project_detail", "memos", "photos", "cad_files", "pdf_knowledge"], description: "조회할 테이블명 (지침/매뉴얼 검색 시 pdf_knowledge 사용)" },
-                project_id: { type: "STRING", description: "숫자로 된 프로젝트 고유 ID" },
-                search_keyword: { type: "STRING", description: "프로젝트 한글 이름 검색 키워드 (cad_projects 테이블 조회 시 사용)" }
+                search_keyword: { type: "STRING", description: "검색 키워드 (예: 네트워크RTK, 도로대장 등)" }
               },
-              required: ["table"]
-            }
-          },
-          {
-            name: "execute_web_command",
-            description: "웹 화면을 조작하거나 특정 기능을 실행합니다 (지도 이동, 탭 전환 등).",
-            parameters: {
-              type: "OBJECT",
-              properties: {
-                action: { type: "STRING", enum: ["open_map", "switch_tab", "search_point"], description: "실행할 액션" },
-                target_id: { type: "STRING", description: "대상 프로젝트 ID 또는 탭 이름" }
-              },
-              required: ["action"]
+              required: ["search_keyword"]
             }
           }
         ]
@@ -79,28 +65,24 @@ serve(async (req) => {
     ];
 
     // 시스템 프롬프트 설정 (학습형 AI의 정체성 부여)
-    let systemInstruction = `당신은 '아신테크 GIS 관리 도구'의 전문 에이전트입니다.
+    let systemInstruction = `당신은 '아신테크 GIS 관리 도구'의 지식 검색 에이전트 '아신'입니다.
 [데이터 접근 규칙]
-1. 사용자 질문에 포함된 지명이나 현장 이름은 'cad_projects' 테이블의 'name' 컬럼에 해당합니다. 
-2. 반드시 'cad_projects'에서 ID를 먼저 찾은 후, 그 ID를 사용하여 'project_detail', 'memos' 등에서 상세 정보를 조회하세요.
-3. 'project_detail'의 'work_location'은 검색 기준으로 사용하지 마세요.
-4. 보안 경고: 'project_shares', 'user_settings' 테이블은 절대 접근 금지입니다.
-5. 필요한 정보(ID 등)를 얻었다면 멈추지 말고 다음 단계(메모 조회 등)의 도구를 계속 호출하여 최종 결론을 내세요.
-6. 데이터가 없는 경우 절대 지어내지 말고 "데이터를 찾을 수 없다"고 답변하세요.`;
-    let vectorContext = "";
+1. 사용자의 질문에 답변하기 위해 반드시 'query_table_data' 도구를 사용하여 'pdf_knowledge' 테이블을 전수 조사하세요. 결과가 나오지 않는다면 더 짧은 핵심 단어로 키워드를 바꿔서 재시도하세요.
+2. [로직 분기]
+   - 질문에 '아신' 키워드가 포함된 경우: DB(pdf_knowledge) 전수 조사 후 정보가 부족하다면 일반적인 측량/GIS 지식(외부 정보)을 활용하여 답변하세요.
+   - 질문에 '아신' 키워드가 없는 경우: 오직 DB에서 검색된 내용으로만 답변해야 하며, 외부 정보를 결합하거나 추론하여 답변하는 것은 절대 금지됩니다.
+3. 정체성 규정: 당신의 이름은 '아신'이지만, 답변 시 자기소개는 절대 하지 마세요. 정보 전달에만 집중하세요.`;
 
-    // [변경] 리소스 부족으로 인한 벡터 검색 중단. 일반적인 GIS 질문에 대응하도록 설정 변경.
-    if (type === 'point_search' || type === 'semantic_search_only') {
-        systemInstruction += "\n사용자가 입력한 검색어가 GIS 관련 용어라면 제공된 도면 레이어 정보를 참고하여 답변하고, 만약 일반적인 질문이라면 범용적인 AI로서 답변하세요.";
-        if (type === 'semantic_search_only') return new Response(JSON.stringify({ success: false, error: "임베딩 기능 중단" }), { headers: corsHeaders });
+    if (type === 'point_search') {
+      systemInstruction += "\n사용자가 입력한 검색어가 GIS 관련 용어라면 제공된 도면 레이어 정보를 참고하여 답변하고, 만약 일반적인 질문이라면 범용적인 AI로서 답변하세요.";
     } else if (type === 'pdf_summary') {
       systemInstruction += `
 [요약 및 가시화 전문가 모드]
 1. 당신의 역할은 사용자가 검색한 DB 결과물을 시각적으로 아름답고 지침서 양식에 맞게 정리하는 '포맷터(Formatter)'입니다.
-2. 사용자의 질문에 '추론해줘'라는 명확한 명령이 없다면, 절대 외부 정보를 결합하거나 추론하지 마세요. 
+2. 사용자의 질문(또는 재요청)에 '아신' 키워드가 없다면, 절대 외부 정보를 결합하거나 추론하지 마세요. 
 3. 오직 제공된 텍스트 내용만을 바탕으로 항목별 요약, 강조, 표(Table) 등을 활용하여 이쁘게 정리하세요. 
    특히 원문의 기호(●, ■, ※, ① 등)를 적극적으로 유지하여 지침서 특유의 계층 구조를 보존하세요.
-4. 사용자가 '추론해줘'라고 요청한 경우에만 주어진 정보를 바탕으로 한 논리적인 추론과 분석을 수행하세요.
+4. 사용자가 '아신' 키워드를 포함한 경우에만 주어진 정보를 바탕으로 한 논리적인 추론과 분석(일반 정보 포함)을 수행하세요.
 5. 데이터에 '#### [표 데이터] ####'가 포함되어 있다면 해당 내용은 반드시 마크다운 표(|---|) 형식으로 변환하여 가독성을 높이세요.`;
     }
 
@@ -111,7 +93,7 @@ serve(async (req) => {
     // [핵심] 에이전틱 루프 구현: AI가 도구를 다 쓸 때까지 최대 5회 반복
     let contents = [{
       role: "user",
-      parts: [{ text: `${systemInstruction}\n\n[도면 레이어 맥락]\n${context || ""}${vectorContext}\n\n[User Query]\n${prompt}` }]
+      parts: [{ text: `${systemInstruction}\n\n[도면 레이어 맥락]\n${context || ""}\n\n[User Query]\n${prompt}` }]
     }];
     let finalAnswer = "";
     let lastRawData = [];
@@ -142,27 +124,17 @@ serve(async (req) => {
         let result = [];
 
         if (call.name === "query_table_data") {
-          const { table, project_id, search_keyword } = call.args;
-          let url = `${SUPABASE_URL}/rest/v1/${table}?select=*`;
-          if (project_id) {
-            const idField = (table === 'photos') ? 'cad_project_id' : (table === 'cad_projects' ? 'id' : 'project_id');
-            url += `&${idField}=eq.${project_id}`;
-          }
+          const { search_keyword } = call.args;
+          let url = `${SUPABASE_URL}/rest/v1/pdf_knowledge?select=*`;
           if (search_keyword) {
-            let nameField = 'file_name';
-            if (table === 'cad_projects') nameField = 'name';
-            else if (table === 'memos' || table === 'pdf_knowledge') nameField = 'content';
-            
-            url += `&${nameField}=ilike.*${encodeURIComponent(search_keyword)}*`;
+            // [개선] 공백을 와일드카드(*)로 변환하여 띄어쓰기나 순서가 조금 달라도 검색되도록 유연화
+            // 예: "공공 측량 기준" -> "*공공*측량*기준*"
+            const fuzzyKeyword = search_keyword.trim().split(/\s+/).join('*');
+            url += `&content=ilike.*${encodeURIComponent(fuzzyKeyword)}*`;
           }
           const dbRes = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
           result = await dbRes.json();
-          lastRawData = result; // 마지막 조회 데이터를 저장
-        }
-        
-        if (call.name === "execute_web_command") {
-          finalAnswer = `[명령 실행 요청: ${call.args.action}]`; // 루프를 종료하기 위해 finalAnswer를 채움
-          return new Response(JSON.stringify({ success: true, answer: finalAnswer, command: call.args }), { headers: corsHeaders });
+          if (Array.isArray(result)) lastRawData.push(...result); // 데이터 누락 방지를 위한 누적 저장
         }
 
         // 대화 기록에 추가하고 루프 계속

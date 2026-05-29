@@ -164,7 +164,6 @@ class PDFUploaderApp:
                             "project_id": "GENERAL",
                             "file_name": file_name,
                             "content": chunk["text"],  # 순수 텍스트(text 타입)로 저장
-                            "embedding": None,
                             "metadata": {"page": chunk["page"], "is_index": chunk.get("is_index", False)}
                         })
 
@@ -181,7 +180,6 @@ class PDFUploaderApp:
                 print(e)
 
         self.log("\n[✨] 모든 선택 파일의 업데이트가 끝났습니다.")
-        self.log("💡 자동 임베딩 기능이 중단되었습니다. (데이터는 원문 및 키워드 위주로 검색됩니다)")
         messagebox.showinfo("완료", "지침서 업데이트가 성공적으로 완료되었습니다.")
         
         self.btn_select.config(state=tk.NORMAL)
