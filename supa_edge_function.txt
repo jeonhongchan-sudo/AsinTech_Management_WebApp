@@ -55,7 +55,7 @@ serve(async (req) => {
             parameters: {
               type: "OBJECT",
               properties: {
-                table: { type: "STRING", enum: ["cad_projects", "project_detail", "memos", "photos", "cad_files"], description: "조회할 테이블명" },
+                table: { type: "STRING", enum: ["cad_projects", "project_detail", "memos", "photos", "cad_files", "pdf_knowledge"], description: "조회할 테이블명 (지침/매뉴얼 검색 시 pdf_knowledge 사용)" },
                 project_id: { type: "STRING", description: "숫자로 된 프로젝트 고유 ID" },
                 search_keyword: { type: "STRING", description: "프로젝트 한글 이름 검색 키워드 (cad_projects 테이블 조회 시 사용)" }
               },
@@ -96,10 +96,12 @@ serve(async (req) => {
     } else if (type === 'pdf_summary') {
       systemInstruction += `
 [요약 및 가시화 전문가 모드]
-1. 당신의 역할은 사용자가 검색한 DB 결과물을 시각적으로 아름답고 가독성 좋게 정리하는 '포맷터(Formatter)'입니다.
+1. 당신의 역할은 사용자가 검색한 DB 결과물을 시각적으로 아름답고 지침서 양식에 맞게 정리하는 '포맷터(Formatter)'입니다.
 2. 사용자의 질문에 '추론해줘'라는 명확한 명령이 없다면, 절대 외부 정보를 결합하거나 추론하지 마세요. 
-3. 오직 제공된 텍스트 내용만을 바탕으로 항목별 요약, 강조, 표(Table) 등을 활용하여 이쁘게 정리하세요.
-4. 사용자가 '추론해줘'라고 요청한 경우에만 주어진 정보를 바탕으로 한 논리적인 추론과 분석을 수행하세요.`;
+3. 오직 제공된 텍스트 내용만을 바탕으로 항목별 요약, 강조, 표(Table) 등을 활용하여 이쁘게 정리하세요. 
+   특히 원문의 기호(●, ■, ※, ① 등)를 적극적으로 유지하여 지침서 특유의 계층 구조를 보존하세요.
+4. 사용자가 '추론해줘'라고 요청한 경우에만 주어진 정보를 바탕으로 한 논리적인 추론과 분석을 수행하세요.
+5. 데이터에 '#### [표 데이터] ####'가 포함되어 있다면 해당 내용은 반드시 마크다운 표(|---|) 형식으로 변환하여 가독성을 높이세요.`;
     }
 
     // [추가] 30초 타임아웃 설정 (Gate가 무한정 열려있는 것 방지)
@@ -147,7 +149,10 @@ serve(async (req) => {
             url += `&${idField}=eq.${project_id}`;
           }
           if (search_keyword) {
-            let nameField = (table === 'cad_projects') ? 'name' : (table === 'memos' ? 'content' : 'file_name');
+            let nameField = 'file_name';
+            if (table === 'cad_projects') nameField = 'name';
+            else if (table === 'memos' || table === 'pdf_knowledge') nameField = 'content';
+            
             url += `&${nameField}=ilike.*${encodeURIComponent(search_keyword)}*`;
           }
           const dbRes = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });

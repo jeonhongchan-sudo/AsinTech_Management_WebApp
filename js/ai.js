@@ -30,6 +30,14 @@ function formatResponseText(text) {
         }).join('');
     }
 
+    // [추가] DB 업로더가 생성한 구조적 태그 시각화 (출처 및 섹션 헤더)
+    // 1. 출처 정보 (### 출처: ... ###)
+    text = text.replace(/### (출처:.*?) ###/g, 
+        '<div style="font-size:11px; color:#868e96; margin-bottom:10px; border-bottom:1px solid #e9ecef; padding-bottom:5px; font-weight:bold;">📍 $1</div>');
+    // 2. 섹션 헤더 (#### [표 데이터] ####, #### [지침 내용] #### 등)
+    text = text.replace(/#### \[(.*?)\] ####/g, 
+        '<div style="margin:18px 0 8px 0; padding:4px 12px; background:#f8f9fa; border-left:4px solid #228be6; font-weight:bold; color:#495057; font-size:13px; border-radius:0 4px 4px 0; box-shadow: 1px 1px 2px rgba(0,0,0,0.05);">$1</div>');
+
     // [추가] 지침서 특수 기호(●, ■, ※, ○, □, -, ① 등) 감지 및 색상 강조
     // 줄바꿈(\n)이 살아있는 상태에서 각 행의 시작점에 있는 기호를 강조합니다.
     text = text.replace(/^([ \t]*)([●■※○□▶▷\-•·]|(?:\d+\.)|(?:\d+\))|[①-⑮])(?=\s|[가-힣a-zA-Z0-9])/gm, 
@@ -93,19 +101,21 @@ export async function handleDatabaseSearch(query) {
         const allFoundResults = [];
 
         // 1. DB 목록 및 본문 검색 헬퍼
-        const allKnowledge = await callSupabaseDirect(`pdf_knowledge?select=id,file_name,content_url,metadata`);
+        // [최적화] 서버에서 검색어가 포함된 데이터만 골라오도록 필터 추가 (네트워크 전송량 감소)
+        // 복합 문법 중 첫 번째 단어를 기준으로 서버 측에서 1차 필터링을 수행합니다.
+        const firstKeyword = query.split(/[&! ]/).filter(k => k.trim().length > 0)[0];
+        let supabaseQuery = `pdf_knowledge?select=id,file_name,content,metadata`;
+        if (firstKeyword) {
+            supabaseQuery += `&content=ilike.*${encodeURIComponent(firstKeyword)}*`;
+        }
+        
+        const allKnowledge = await callSupabaseDirect(supabaseQuery);
         if (!allKnowledge || allKnowledge.length === 0) return false;
 
         const searchInList = async (list) => {
             const promises = list.map(async (item) => {
                 try {
-                    let content = knowledgeContentCache.get(item.content_url);
-                    if (!content && item.content_url) {
-                        const res = await fetch(item.content_url);
-                        const data = await res.json();
-                        content = data.content || "";
-                        knowledgeContentCache.set(item.content_url, content);
-                    }
+                    const content = item.content; // DB에서 가져온 텍스트 바로 사용
                     if (!content) return null;
 
                     // [통합] 중앙화된 복합 검색 엔진 사용
@@ -157,23 +167,10 @@ export async function handleDatabaseSearch(query) {
 }
 
 /** [추가] 잘못 저장된 AI 지식(Confirmed Knowledge) 삭제 */
-export async function deleteConfirmedKnowledge(id, contentUrl) {
+export async function deleteConfirmedKnowledge(id) {
     if (!confirm("이 저장된 답변이 잘못되었나요? DB와 저장소에서 완전히 삭제하시겠습니까?")) return;
 
     try {
-        // 1. R2에서 파일 삭제 (Worker 이용)
-        if (contentUrl && contentUrl.includes('r2.dev')) {
-            const r2Prefix = R2_BASE_URL || (state.r2Config ? state.r2Config.publicUrl : "");
-            const filePath = contentUrl.split(r2Prefix.replace(/\/$/, '') + '/')[1];
-            
-            if (filePath) {
-                await fetch(`${WORKER_URL}/${encodeURIComponent(filePath)}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': WORKER_AUTH_KEY }
-                });
-            }
-        }
-
         // 2. Supabase에서 레코드 삭제
         await callSupabaseDirect(`pdf_knowledge?id=eq.${id}`, 'DELETE');
 
@@ -199,7 +196,7 @@ function displayCombinedResults(matches, query, sourceLabel) {
             
             // [추가] AI 답변인 경우 오답 삭제 버튼 노출
             if (match.id) {
-                deleteBtn = ` <span onclick="window.deleteConfirmedKnowledge('${match.id}', '${match.content_url}')" style="color:#e03131; cursor:pointer; font-size:11px; margin-left:8px; border:1px solid #ffa8a8; padding:2px 5px; border-radius:4px; background:#fff; vertical-align:middle; font-weight:normal;">🗑️ 오답삭제</span>`;
+                deleteBtn = ` <span onclick="window.deleteConfirmedKnowledge('${match.id}')" style="color:#e03131; cursor:pointer; font-size:11px; margin-left:8px; border:1px solid #ffa8a8; padding:2px 5px; border-radius:4px; background:#fff; vertical-align:middle; font-weight:normal;">🗑️ 오답삭제</span>`;
             }
         }
         combinedAnswer += `**[검색결과 ${idx + 1}] ${match.file_name}${pageInfo}**${deleteBtn}\n${content}\n\n`;
@@ -583,27 +580,6 @@ export function showAiResponseModal(query, answer, source) {
 
 }
 
-/** [추가] AI 답변 텍스트를 R2에 업로드하고 URL 반환 */
-async function uploadAiTextToR2(text) {
-    try {
-        const timestamp = Date.now();
-        const r2Path = `knowledge_content/AI_Confirmed_Knowledge/${timestamp}.json`;
-        
-        // 1. Presigned URL 획득
-        const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}&type=application/json`, {
-            headers: { 'Authorization': WORKER_AUTH_KEY }
-        });
-        const { url: uploadUrl } = await presignRes.json();
-
-        // 2. R2에 JSON 업로드
-        await fetch(uploadUrl, { method: 'PUT', body: JSON.stringify({ content: text }), headers: { 'Content-Type': 'application/json' } });
-        
-        // R2_BASE_URL 또는 state 설정값을 사용하여 최종 URL 반환
-        const baseUrl = R2_BASE_URL || (state.r2Config ? state.r2Config.publicUrl : "");
-        return `${baseUrl.replace(/\/$/, '')}/${r2Path}`;
-    } catch (e) { console.error("AI 답변 R2 업로드 실패:", e); return null; }
-}
-
 /** AI 답변 지식 저장 (학습용) */
 export async function saveAiKnowledge() {
     const now = Date.now();
@@ -643,13 +619,10 @@ export async function saveAiKnowledge() {
             fullStoredQuery += ` (검토/교정: ${state.aiCorrectionHistory.join(' -> ')})`;
         }
 
-        // [하이브리드] 텍스트 내용을 R2에 먼저 업로드
-        const contentUrl = await uploadAiTextToR2(`질문: ${fullStoredQuery}\n답변: ${finalAnswerToSave}`);
-
         const payload = {
             project_id: 'GENERAL', // AI 지식은 기본적으로 전체 공유(GENERAL)로 저장
             file_name: 'AI_Confirmed_Knowledge', // AI 답변임을 알 수 있도록 고정 파일명 부여
-            content_url: contentUrl, // R2 URL 저장
+            content: `질문: ${fullStoredQuery}\n답변: ${finalAnswerToSave}`, // 본문을 직접 DB에 저장
             embedding: null, // 자동 임베딩 중단 상태 (데이터 구조 유지를 위해 null 보존)
             metadata: { type: 'ai_save', user: state.currentUser || 'anonymous', original_query: fullStoredQuery }
         };
