@@ -8,31 +8,30 @@ import { cadMap, cadLayers, renderSearchResults, showPointLocation, displayMatch
 
 /** [통합] 포인트 찾기 진입점 (viewers.js에서 이관) */
 export async function searchPoints() {
+    // 프로젝트가 선택된 상태인데 지도가 없다면 오류이지만, 
+    // 지침서 검색(프로젝트 미선택)은 지도 없이도 가능해야 합니다.
     const isProjectSelected = !!state.currentCadProjectId;
+    if (isProjectSelected && !cadMap) return showAlert("지도가 로드되지 않았습니다.", "info");
 
-    // 1. 프로젝트 미선택: 지침 DB 검색 및 AI 처리 (기존 로직)
-    if (!isProjectSelected) {
-        let searchTerm = prompt("검색어를 입력하세요 (지침 및 지식 DB 검색):");
-        if (!searchTerm || !searchTerm.trim()) return;
-        const foundInDb = await handleDatabaseSearch(searchTerm.trim());
-        if (!foundInDb) {
-            if (searchTerm.includes("추론")) {
-                handleAiSearch(searchTerm, null);
-            } else {
-                showModalMessage("🔍 검색 결과가 없습니다.", "지침 DB에서 내용을 찾을 수 없습니다. 추론이 필요하면 <strong>'추론'</strong> 키워드를 포함하세요.", 'info');
-            }
-        }
-        return;
-    }
-
-    // 2. 프로젝트 선택: 분석 문법 전용 모달 호출
-    if (!cadMap) return showAlert("지도가 로드되지 않았습니다.", "info");
+    // 프로젝트 선택 여부와 상관없이 통합 모달을 호출합니다.
     openGisSearchModal();
+}
+
+/** [추가] 프로젝트 선택 상태에 따른 검색 버튼 텍스트 업데이트 */
+export function updateSearchButtonUI() {
+    const btn = document.getElementById('btnSearchPoints');
+    if (!btn) return;
+    
+    const isProjectSelected = !!state.currentCadProjectId;
+    btn.innerText = isProjectSelected ? '프로젝트 검색' : '지침서 검색';
+    btn.title = isProjectSelected ? '도면 내 포인트 및 거리 분석' : '지침서 및 지식 DB 검색';
 }
 
 /** [추가] 프로젝트 전용 GIS 검색 모달 (단축 버튼 및 특수 문법 UI 관리) */
 export function openGisSearchModal() {
     let modal = document.getElementById('gisSearchModal');
+    const isProjectSelected = !!state.currentCadProjectId;
+
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'gisSearchModal';
@@ -40,12 +39,23 @@ export function openGisSearchModal() {
         modal.innerHTML = `
             <div style="background:white; padding:20px; border-radius:12px; width:90%; max-width:450px; box-shadow:0 10px 30px rgba(0,0,0,0.3);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <h3 style="margin:0; font-size:18px; color:#333;">🔍 도면 포인트 검색</h3>
+                    <h3 id="gisSearchModalTitle" style="margin:0; font-size:18px; color:#333;">🔍 도면 포인트 검색</h3>
                     <button style="border:none; background:none; font-size:24px; cursor:pointer; color:#999;" onclick="document.getElementById('gisSearchModal').style.display='none'">&times;</button>
                 </div>
-                <div style="font-size:11px; color:#666; background:#f8f9fa; padding:10px; border-radius:6px; margin-bottom:12px; line-height:1.4;">
-                    • <b>&</b> : 또는 | <b>공백</b> : 그리고 | <b>!</b> : 제외<br>
-                    • <b>북마크(📍):</b> 결과 위치 지도 표시 | <b>분석(?):</b> 리포트 출력
+                <div id="gisSearchHelpBox" style="font-size:11px; color:#666; background:#fdfdfe; padding:12px; border-radius:8px; margin-bottom:15px; line-height:1.6; border:1px solid #edf2f7; box-shadow:inset 0 1px 2px rgba(0,0,0,0.02);">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px 12px; margin-bottom:8px; padding-bottom:8px; border-bottom:1px dotted #cbd5e0;">
+                        <span><b>&</b> : 또는 (OR)</span>
+                        <span><b>공백</b> : 그리고 (AND)</span>
+                        <span><b>!</b> : 검색 제외 (NOT)</span>
+                        <span><b>~</b> : ~에서 (지점연결)</span>
+                        <span><b>[거리]</b> : 연장/거리 계산</span>
+                        <span><b>^</b> : ~내에서 (포함/범위)</span>
+                        <span><b>?</b> : 분석 리포트 출력</span>
+                        <span><b>📍</b> : 지도 마커 표시</span>
+                    </div>
+                    <div style="color:#2c5282; font-weight:bold; font-size:10.5px; background:#ebf8ff; padding:5px 8px; border-radius:4px;">
+                        • 예: A~B[거리]? | 레이어[거리]>10📍 | 레이어^사진?
+                    </div>
                 </div>
                 <div id="gisSearchShortcuts" style="margin-bottom:8px; display:flex; gap:6px;">
                     <button class="btn btn-outline btn-sm" id="btnShortcutLayer" style="padding:4px 8px; font-size:11px; border-color:#2196F3; color:#2196F3; font-weight:bold;">[Layer]</button>
@@ -87,7 +97,7 @@ export function openGisSearchModal() {
         // [추가] 거리 연산 버튼 (^거리>)
         modal.querySelector('#btnShortcutDistance').onclick = () => {
             const input = document.getElementById('gisSearchInput');
-            input.value += '^거리>';
+            input.value += '[거리]';
             input.focus();
         };
 
@@ -111,6 +121,18 @@ export function openGisSearchModal() {
         };
         modal.querySelector('#gisSearchInput').onkeyup = (e) => { if(e.key === 'Enter') modal.querySelector('#btnGisSearchExecute').click(); };
     }
+
+    // [수정] 열릴 때마다 프로젝트 선택 상태에 따라 UI 유연하게 변경
+    const titleEl = modal.querySelector('#gisSearchModalTitle');
+    const shortcuts = modal.querySelector('#gisSearchShortcuts');
+    const helpBox = modal.querySelector('#gisSearchHelpBox');
+    const input = document.getElementById('gisSearchInput');
+
+    titleEl.innerText = isProjectSelected ? '🔍 도면 포인트 검색' : '📚 지침서 및 지식 DB 검색';
+    shortcuts.style.display = isProjectSelected ? 'flex' : 'none';
+    helpBox.style.display = isProjectSelected ? 'block' : 'none';
+    input.placeholder = isProjectSelected ? "검색어 또는 문법 입력..." : "지침서 키워드 입력 (예: 네트워크RTK, 추론 등)";
+
     document.getElementById('gisSearchInput').value = '';
     document.getElementById('layerSelectorOverlay').style.display = 'none';
     modal.style.display = 'flex';
@@ -119,11 +141,28 @@ export function openGisSearchModal() {
 
 /** [추가] 프로젝트 검색/분석 명령 실행 분기 */
 async function executeGisSearch(searchTerm) {
-    // 1. 공통 기호 파싱 (📍: 지도 표시 여부, ?: 리스트 출력 여부)
+    const isProjectSelected = !!state.currentCadProjectId;
+
+    // 1. 프로젝트가 선택되지 않은 경우: 즉시 지침서 DB 검색 실행
+    if (!isProjectSelected) {
+        const cleanQuery = searchTerm.replace(/[📍?]/g, '').trim();
+        if (!cleanQuery) return;
+        
+        const foundInDb = await handleDatabaseSearch(cleanQuery);
+        if (!foundInDb) {
+            if (cleanQuery.includes("추론")) {
+                handleAiSearch(cleanQuery, null);
+            } else {
+                showModalMessage("🔍 검색 결과가 없습니다.", "지침 DB에서 내용을 찾을 수 없습니다. 추론이 필요하면 <strong>'추론'</strong> 키워드를 포함하세요.", 'info');
+            }
+        }
+        return;
+    }
+
+    // 2. 프로젝트가 선택된 경우: 기존 GIS 분석 로직 수행
     const useBookmark = searchTerm.includes('📍');
     const isAudit = searchTerm.includes('?');
     
-    // 출력 기호가 하나도 없으면 사용자에게 안내
     if (!useBookmark && !isAudit) {
         return showAlert("출력 형식을 선택하세요 (📍: 지도 표시, ?: 리스트 출력)", "info");
     }
@@ -131,8 +170,16 @@ async function executeGisSearch(searchTerm) {
     // 기호를 제거한 순수 문법 내용 추출
     let cleanInput = searchTerm.replace(/[📍?]/g, '').trim();
 
-    // 2. 거리 분석 문법 체크 (^거리>숫자)
-    const distMatch = cleanInput.match(/(.+)\^거리>([\d.]+)/);
+    // 2. 포인트~포인트 거리 분석 문법 체크 (A~B^[거리])
+    const p2pMatch = cleanInput.match(/(.+)\~(.+?)\^?\[거리\]/);
+    if (p2pMatch) {
+        const p1 = p2pMatch[1].trim();
+        const p2 = p2pMatch[2].trim();
+        if (p1 && p2) return analyzePointToPointDistance(p1, p2, useBookmark, isAudit);
+    }
+
+    // 2. 거리 분석 문법 체크 (레이어^[거리]>숫자)
+    const distMatch = cleanInput.match(/(.+?)\^?\[거리\]>([\d.]+)/);
     if (distMatch) {
         const targetLayer = distMatch[1].trim();
         const threshold = parseFloat(distMatch[2]);
@@ -145,6 +192,14 @@ async function executeGisSearch(searchTerm) {
         const targetLayer = cleanInput.split('^')[0].trim();
         if (!targetLayer) return showAlert("분석할 레이어 명칭을 먼저 입력하세요.", "info");
         return analyzePhotoMismatch(targetLayer, useBookmark, isAudit);
+    }
+
+    // 4. 거리 합산 분석 문법 체크 ([거리])
+    if (cleanInput.endsWith('[거리]')) {
+        // ^ 기호가 포함된 경우(레이어^[거리])를 대비해 ^ 제거 후 레이어명 추출
+        const targetLayer = cleanInput.split('[')[0].replace(/\^$/, '').trim();
+        if (!targetLayer) return showAlert("분석할 레이어 명칭을 입력하세요.", "info");
+        return analyzeTotalDistance(targetLayer, useBookmark, isAudit);
     }
 
     // 4. 일반 포인트 검색
@@ -199,9 +254,13 @@ async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit) {
     if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
     showAlert(`${targetLayer} 레이어 사진 매칭 분석 중...`, "info");
 
-    const points = state.currentProjectGeoJSON.features.filter(f => 
-        f.geometry.type === 'Point' && f.properties.layer === targetLayer
-    );
+    const points = state.currentProjectGeoJSON.features.filter(f => {
+        if (!f.geometry || !f.properties.layer) return false;
+        // [수정] 대소문자 및 기호 무시 비교 적용
+        return f.geometry.type === 'Point' && 
+               sanitizeSearchText(f.properties.layer) === sanitizeSearchText(targetLayer);
+    });
+
     const photos = state.projectPhotos;
     const unmatchedPoints = [];
     const matchedPhotoNames = new Set();
@@ -249,48 +308,214 @@ async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit) {
     if (contentEl) contentEl.innerHTML = html;
 }
 
+/** [추가] 특정 두 포인트 간의 직선 거리 계산 (Supabase PostGIS 활용) */
+async function analyzePointToPointDistance(p1Name, p2Name, useBookmark, isAudit) {
+    if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
+    if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
+
+    const features = state.currentProjectGeoJSON.features;
+    
+    // 포인트 찾기 검색 (Text 속성 또는 Handle ID 매칭)
+    const findPoint = (name) => {
+        const cleanName = sanitizeSearchText(name);
+        return features.find(f => 
+            f.geometry.type === 'Point' && 
+            (sanitizeSearchText(f.properties.text || '') === cleanName || 
+             f.properties.handle === name)
+        );
+    };
+
+    const feat1 = findPoint(p1Name);
+    const feat2 = findPoint(p2Name);
+
+    if (!feat1 || !feat2) {
+        const missing = [];
+        if (!feat1) missing.push(`[${p1Name}]`);
+        if (!feat2) missing.push(`[${p2Name}]`);
+        return showAlert(`포인트를 찾을 수 없습니다: ${missing.join(', ')}`, "info");
+    }
+
+    const c1 = feat1.geometry.coordinates;
+    const c2 = feat2.geometry.coordinates;
+
+    // Supabase RPC에 보낼 임시 선분 피처 생성 (두 지점을 잇는 선)
+    const segmentFeature = {
+        type: 'Feature',
+        properties: { handle: 'P2P_SEGMENT' },
+        geometry: { type: 'LineString', coordinates: [c1, c2] }
+    };
+
+    showAlert("두 지점 간 거리 계산 중...", "info");
+
+    try {
+        // 기존에 등록된 calculate_line_lengths RPC 재활용
+        const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+            geoms: [segmentFeature],
+            source_crs: state.currentProjectSourceCrs
+        });
+
+        if (!results || results.length === 0) throw new Error("계산 결과 없음");
+        const lengthM = results[0].length_m;
+
+        if (isAudit) {
+            let html = `
+                <div style="padding:5px;">
+                    <h3 style="color:#673AB7; margin-bottom:15px; border-bottom:2px solid #673AB7; padding-bottom:10px;">📏 포인트 간 거리 산출</h3>
+                    <div style="background:#f3e5f5; padding:20px; border-radius:12px; text-align:center; border:1px solid #d1c4e9; margin-bottom:20px;">
+                        <div style="font-size:12px; color:#7e57c2; margin-bottom:8px; font-weight:bold;">${p1Name} ↔ ${p2Name}</div>
+                        <div style="font-size:28px; font-weight:bold; color:#512da8;">${lengthM.toFixed(3)} m</div>
+                        <div style="font-size:11px; color:#9575cd; margin-top:10px;">기준 좌표계: ${state.currentProjectSourceCrs}</div>
+                    </div>
+                    <div style="font-size:12px; color:#666; line-height:1.6;">
+                        • <b>출발:</b> ${feat1.properties.text || feat1.properties.handle} (${c1[0].toFixed(7)}, ${c1[1].toFixed(7)})<br>
+                        • <b>도착:</b> ${feat2.properties.text || feat2.properties.handle} (${c2[0].toFixed(7)}, ${c2[1].toFixed(7)})
+                    </div>
+                </div>`;
+            showAiResponseModal(`거리계산: ${p1Name}~${p2Name}`, "분석 결과", "📊 공간 연산 분석");
+            const contentEl = document.getElementById('aiAnswerContent');
+            if (contentEl) contentEl.innerHTML = html;
+        }
+
+        if (useBookmark) {
+            renderSearchResults([feat1, feat2]);
+        }
+    } catch (e) {
+        showAlert("거리 계산 실패: " + e.message, "error");
+    }
+}
+
+/** [추가] 레이어별 전체 거리 산출 (Supabase PostGIS RPC 연동) */
+async function analyzeTotalDistance(targetLayer, useBookmark, isAudit) {
+    if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
+    if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
+
+    // 1. 해당 레이어의 선형 객체(LineString)만 추출
+    const lineFeatures = state.currentProjectGeoJSON.features.filter(f => {
+        if (!f.geometry || !f.properties.layer) return false;
+        const isLineOrPoly = f.geometry.type.includes('LineString') || f.geometry.type.includes('Polygon');
+        return isLineOrPoly && 
+               sanitizeSearchText(f.properties.layer) === sanitizeSearchText(targetLayer);
+    });
+
+    if (lineFeatures.length === 0) {
+        return showModalMessage("📏 분석 불가", `${targetLayer} 레이어에 선형 객체가 존재하지 않습니다.`, 'info');
+    }
+
+    showAlert(`${targetLayer} 거리 계산 중... (PostGIS)`, "info");
+
+    try {
+        // 2. Supabase RPC 호출
+        const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+            geoms: lineFeatures,
+            source_crs: state.currentProjectSourceCrs
+        });
+
+        if (!results || results.length === 0) throw new Error("계산 결과가 없습니다.");
+
+        // 3. 결과 리포트 생성
+        let totalSum = 0;
+        let html = `<div style="padding:5px;"><h3 style="color:#2c3e50; margin-bottom:15px; border-bottom:2px solid #2c3e50; padding-bottom:10px;">📏 레이어 거리 리포트: ${targetLayer}</h3>`;
+        
+        let listHtml = `<div style="border:1px solid #ddd; border-radius:8px; overflow:hidden; max-height:350px; overflow-y:auto; background:#fff;">`;
+        
+        results.forEach((res, idx) => {
+            totalSum += res.length_m;
+            const feat = lineFeatures.find(f => f.properties.handle === res.handle);
+            const label = feat?.properties.text || feat?.properties.handle || `객체 #${idx+1}`;
+            
+            listHtml += `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid #eee;">
+                    <span style="font-size:12px; color:#333;">${label}</span>
+                    <span style="font-size:12px; font-weight:bold; color:#16a085;">${res.length_m.toFixed(2)} m</span>
+                </div>`;
+        });
+        listHtml += `</div>`;
+
+        html += `
+            <div style="background:#f1f8f9; padding:15px; border-radius:8px; margin-bottom:15px; text-align:center; border:1px solid #a3d2ca;">
+                <div style="font-size:13px; color:#666; margin-bottom:5px;">총 연장 (Total)</div>
+                <div style="font-size:24px; font-weight:bold; color:#07689f;">${totalSum.toFixed(2)} m</div>
+                <div style="font-size:11px; color:#999; margin-top:5px;">기준 좌표계: ${state.currentProjectSourceCrs}</div>
+            </div>
+            <div style="font-size:12px; font-weight:bold; margin-bottom:8px; color:#555;">상세 내역 (${results.length}건)</div>
+            ${listHtml}
+        </div>`;
+
+        // 4. [📍 북마크] 선택 시 해당 레이어 전체를 지도에 강조 (기존 renderSearchResults 활용)
+        if (useBookmark) renderSearchResults(lineFeatures);
+
+        // 5. [?] 리스트 출력
+        if (isAudit) {
+            showAiResponseModal(`거리합산: ${targetLayer}`, "분석 결과", "📊 공간 통계 분석");
+            const contentEl = document.getElementById('aiAnswerContent');
+            if (contentEl) contentEl.innerHTML = html;
+        }
+    } catch (e) {
+        showAlert("거리 계산 실패: " + e.message, "error");
+    }
+}
+
 /** [수정] 포인트 간 거리 누락 분석 (R2 GeoJSON 기반 로컬 계산 및 북마크 통합) */
 async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit) {
     if (!state.currentProjectGeoJSON) return showAlert("도면 데이터(GeoJSON)가 아직 로드되지 않았습니다.", "error");
+    if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
     showAlert(`${targetLayer} 레이어 거리 분석 중...`, "info");
 
-    const points = state.currentProjectGeoJSON.features.filter(f => 
-        f.geometry.type === 'Point' && f.properties.layer === targetLayer
-    );
+    const points = state.currentProjectGeoJSON.features.filter(f => {
+        if (!f.geometry || !f.properties.layer) return false;
+        return f.geometry.type === 'Point' && 
+               sanitizeSearchText(f.properties.layer) === sanitizeSearchText(targetLayer);
+    });
 
     if (points.length < 2) {
         return showModalMessage("📏 분석 불가", "해당 레이어에 포인트가 2개 이상 존재해야 분석이 가능합니다.", 'info');
     }
 
-    const gaps = [];
-    const maxResults = 100;
+    // 1. 분석할 포인트 쌍(Segment) 생성 (성능 보호를 위해 분석 대상을 100개로 상향)
+    const segments = [];
+    const analysisPoints = points.slice(0, 100); 
 
-    // 포인트 간 거리 전수 조사
-    for (let i = 0; i < points.length; i++) {
-        const p1 = points[i];
-        const c1 = p1.geometry.coordinates;
-        const pos1 = new maplibregl.LngLat(c1[0], c1[1]);
-
-        for (let j = i + 1; j < points.length; j++) {
-            const p2 = points[j];
-            const c2 = p2.geometry.coordinates;
-            const pos2 = new maplibregl.LngLat(c2[0], c2[1]);
-            const dist = pos1.distanceTo(pos2);
-
-            if (dist > threshold && dist < threshold * 20) {
-                gaps.push({ p1, p2, dist, midLon: (c1[0] + c2[0]) / 2, midLat: (c1[1] + c2[1]) / 2 });
-            }
+    for (let i = 0; i < analysisPoints.length; i++) {
+        for (let j = i + 1; j < analysisPoints.length; j++) {
+            const p1 = analysisPoints[i];
+            const p2 = analysisPoints[j];
+            segments.push({
+                type: 'Feature',
+                properties: { handle: `${p1.properties.handle}_${p2.properties.handle}` },
+                geometry: { type: 'LineString', coordinates: [p1.geometry.coordinates, p2.geometry.coordinates] }
+            });
         }
-        if (gaps.length >= maxResults) break;
     }
 
-    gaps.sort((a, b) => b.dist - a.dist);
+    try {
+        // 2. 기존 calculate_line_lengths RPC 호출 (PostGIS 기반 정밀 계산으로 교체)
+        const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+            geoms: segments,
+            source_crs: state.currentProjectSourceCrs
+        });
 
-    if (gaps.length === 0) {
-        return showModalMessage("📏 거리 분석 결과", `${threshold}m를 초과하는 포인트 간격이 없습니다.`, 'info');
-    }
+        if (!results || results.length === 0) throw new Error("계산 결과 없음");
 
-    // 1. [📍 북마크] 📍 기호가 있을 때만 이격 구간의 양 끝 포인트 2개를 지도에 마킹
+        // 3. 임계값 필터링 및 결과 구성
+        const gaps = results
+            .filter(res => res.length_m > threshold && res.length_m < threshold * 20)
+            .map(res => {
+                const [h1, h2] = res.handle.split('_');
+                const p1 = points.find(p => p.properties.handle === h1);
+                const p2 = points.find(p => p.properties.handle === h2);
+                return {
+                    p1, p2, dist: res.length_m,
+                    midLon: (p1.geometry.coordinates[0] + p2.geometry.coordinates[0]) / 2,
+                    midLat: (p1.geometry.coordinates[1] + p2.geometry.coordinates[1]) / 2
+                };
+            })
+            .sort((a, b) => b.dist - a.dist);
+
+        if (gaps.length === 0) {
+            return showModalMessage("📏 거리 분석 결과", `${threshold}m를 초과하는 포인트 간격이 없습니다.`, 'info');
+        }
+
+    // 1. [� 북마크] 📍 기호가 있을 때만 이격 구간의 양 끝 포인트 2개를 지도에 마킹
     if (useBookmark) {
         const bookmarkPoints = [];
         gaps.forEach(g => {
@@ -333,6 +558,9 @@ async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit) 
     showAiResponseModal(`거리분석: ${targetLayer}`, "결과 리스트", "📚 공간 분석");
     const contentEl = document.getElementById('aiAnswerContent');
     if (contentEl) contentEl.innerHTML = html;
+    } catch (e) {
+        showAlert("거리 분석 실패: " + e.message, "error");
+    }
 }
 
 /** [추가] 사진 파일명과 포인트 텍스트 매칭 규칙 (정규식 기반) */

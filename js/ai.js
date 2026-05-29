@@ -518,16 +518,18 @@ export function showAiResponseModal(query, answer, source) {
     // source 문자열에 'AI 분석'이 포함되면 실시간 답변임
     const isRealTimeAi = source.includes("실시간 AI 분석");
     const isFromDatabase = source.includes("DB");
-    const isAnalysis = source.includes("분석"); // [추가] 무결성 분석 여부 체크
+    
+    // [수정] 프로젝트 선택 여부(GIS 모드)를 기준으로 버튼 노출 결정
+    const isProjectMode = !!state.currentCadProjectId;
 
-    // [추가] DB 검색 결과일 때만 복사 및 직접 입력 버튼 노출
+    // [추가] DB 검색 결과일 때만 복사 및 직접 입력 버튼 노출 (지침서 모드 한정)
     if (copyBtn) {
-        copyBtn.style.display = (isFromDatabase && !isAnalysis) ? "inline-flex" : "none";
+        copyBtn.style.display = (isFromDatabase && !isProjectMode) ? "inline-flex" : "none";
         copyBtn.innerHTML = "📋"; // 아이콘
         copyBtn.title = "원문복사";
     }
     if (manualBtn) {
-        manualBtn.style.display = isFromDatabase ? "inline-flex" : "none";
+        manualBtn.style.display = (isFromDatabase && !isProjectMode) ? "inline-flex" : "none";
         manualBtn.innerHTML = "✍️"; // 아이콘
         manualBtn.title = "직접입력";
     }
@@ -540,12 +542,12 @@ export function showAiResponseModal(query, answer, source) {
     // [추가] 분석 모드일 때는 추가 질문 버튼 숨김
     const followUpBtn = document.getElementById('btnAiFollowUp');
     if (followUpBtn) {
-        followUpBtn.style.display = isAnalysis ? "none" : "inline-flex";
+        followUpBtn.style.display = isProjectMode ? "none" : "inline-flex";
     }
 
-    // 1. [저장] 버튼: 항상 표시 (학습용)
+    // 1. [저장] 버튼: 지침서 모드에서만 표시 (학습용)
     if (saveBtn) {
-        saveBtn.style.display = isAnalysis ? "none" : "inline-flex"; // [수정] 분석 결과는 저장 금지
+        saveBtn.style.display = isProjectMode ? "none" : "inline-flex"; 
         saveBtn.disabled = false;
         saveBtn.innerHTML = "💾"; // 아이콘
         saveBtn.title = "답변 저장";
@@ -553,7 +555,7 @@ export function showAiResponseModal(query, answer, source) {
     
     // 2. [AI 재요청] 버튼: DB 검색 결과일 때만 표시
     if (reRequestBtn) {
-        reRequestBtn.style.display = (isFromDatabase && !isAnalysis) ? "inline-flex" : "none";
+        reRequestBtn.style.display = (isFromDatabase && !isProjectMode) ? "inline-flex" : "none";
         reRequestBtn.onclick = () => {
             // [수정] 현재 모달에 표시된 'answer'(DB 원문)를 AI에게 전달하여 재정리 요청
             // AI 재요청 시에는 현재 모달의 content.innerText를 rawDbContext로 사용

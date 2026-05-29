@@ -2,7 +2,7 @@
 import { state, callApi, callSupabaseDirect, showAlert, R2_BASE_URL } from './core.js';
 import { UIS_DATA, ROAD_LEDGER_ITEMS, PDF_TOC_DATA, NETWORK_RTK_DATA, NON_CONFORMITY_CASES_DATA, NUMERIC_MAP_DATA, GNSS_NOTICE_DATA, PUBLIC_SURVEY_FAQ_DATA, REGULATION_REVISION_DATA, MATERIAL_ABBREVIATION_DATA, PUBLIC_SURVEY_REGULATIONS_DATA } from './data.js';
 import { handleAiSearch, handleDatabaseSearch, showModalMessage } from './ai.js';
-import { matchComplexQuery } from './search_engine.js';
+import { matchComplexQuery, updateSearchButtonUI } from './search_engine.js';
 
 export function selectGuideline(type) {
     document.querySelectorAll('.guide-menu-item').forEach(b => b.classList.remove('active'));
@@ -821,6 +821,7 @@ export async function initCadViewer() {
         document.getElementById('cadLayerPanel').style.display = 'none';
         const toggleBtn = document.getElementById('cadLayerToggleBtn');
         if (toggleBtn) toggleBtn.style.display = 'none';
+        updateSearchButtonUI(); // 초기화 시점에 버튼 명칭 업데이트
     } catch (e) { console.error(e); if (select) select.innerHTML = '<option value="">초기화 실패</option>'; }
 }
 
@@ -1060,6 +1061,7 @@ export async function loadCadMap(projectId) {
             updateLayerDiscovery();
             snapMarkersToRenderedFeatures(); // [추가] 지도가 멈출 때마다 마커 위치 보정
         });
+        updateSearchButtonUI(); // [추가] 맵 로드 완료 시 버튼명 변경
     } catch (e) { console.error(e); showAlert('지도 로드 중 오류가 발생했습니다.', 'error'); }
 }
 
@@ -1778,6 +1780,7 @@ export function cleanupCadViewer() {
     memoMarkers = [];
     currentPopup = null;
     clearDistanceMeasurement(); // [추가] 거리 측정 초기화
+    updateSearchButtonUI(); // [추가] 맵 종료 시 버튼명 원복
 }
 
 // 전체화면 상태 변경 감지 리스너
@@ -1922,6 +1925,14 @@ async function handleMapClick(e) {
                 targetFeature = f;
             }
         });
+
+        // [수정] 0.006m 오차 해결: 지도 타일(PMTiles)의 양자화된 좌표 대신 원본 GeoJSON의 고정밀 좌표를 사용
+        if (targetFeature && targetFeature.properties.handle && state.currentProjectGeoJSON) {
+            const originalFeat = state.currentProjectGeoJSON.features.find(feat => 
+                feat.properties.handle === targetFeature.properties.handle
+            );
+            if (originalFeat) targetFeature = originalFeat;
+        }
     }
 
     // [수정] 스냅된 포인트가 없으면 클릭한 위치 좌표 사용
@@ -2214,7 +2225,7 @@ export function toggleDistanceMode(forceValue) {
 }
 
 // [추가] 거리 측정 클릭 핸들러
-function handleDistanceClick(coords) {
+async function handleDistanceClick(coords) {
     const lon = coords[0];
     const lat = coords[1];
 
@@ -2239,11 +2250,6 @@ function handleDistanceClick(coords) {
             .addTo(cadMap);
         state.distanceMarkers.push(endMarker);
 
-        // 거리 계산 (MapLibre LngLat 객체 활용)
-        const from = new maplibregl.LngLat(start.lon, start.lat);
-        const to = new maplibregl.LngLat(end.lon, end.lat);
-        const distance = from.distanceTo(to); // 미터 단위 반환
-        
         // 선 그리기 (GeoJSON Source & Layer 추가)
         const lineId = `dist-line-${Date.now()}`;
         cadMap.addSource(lineId, {
@@ -2271,7 +2277,7 @@ function handleDistanceClick(coords) {
         // [수정] 커스텀 닫기 버튼 (빨간색, 우측 상단)
         const popupContent = document.createElement('div');
         popupContent.style.cssText = 'padding-right: 20px; position: relative; min-width: 60px;';
-        popupContent.innerHTML = `<div style="font-weight:bold; font-size:14px;">${distance.toFixed(2)}m</div>`;
+        popupContent.innerHTML = `<div class="dist-val" style="font-weight:bold; font-size:14px;">계산 중...</div>`;
 
         const closeBtn = document.createElement('button');
         closeBtn.innerHTML = '×';
@@ -2290,6 +2296,30 @@ function handleDistanceClick(coords) {
         };
 
         state.distanceMarkers.push(popup);
+
+        // [수정] 정확한 거리 계산 (Supabase PostGIS RPC 활용 - 검색 로직과 통일)
+        try {
+            if (!state.currentProjectSourceCrs) throw new Error("좌표계 정보 없음");
+
+            const segmentFeature = {
+                type: 'Feature',
+                properties: { handle: 'MANUAL_MEASURE' },
+                geometry: { type: 'LineString', coordinates: [[start.lon, start.lat], [end.lon, end.lat]] }
+            };
+
+            const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+                geoms: [segmentFeature],
+                source_crs: state.currentProjectSourceCrs
+            });
+
+            if (results && results.length > 0) {
+                popupContent.querySelector('.dist-val').innerText = `${results[0].length_m.toFixed(3)}m`;
+            } else throw new Error();
+        } catch (err) {
+            // 서버 계산 실패 시 오해를 방지하기 위해 구면 거리 대신 명확하게 실패 메시지 표시
+            popupContent.querySelector('.dist-val').innerText = `계산 불가`;
+            popupContent.querySelector('.dist-val').style.color = '#dc3545';
+        }
 
         // 상태 초기화 (연속 측정을 위해 시작점 리셋)
         state.distanceStartPoint = null;
