@@ -1896,8 +1896,10 @@ async function handleMapClick(e) {
     const isNonInteractive = featuresUnderClick.some(f => f.properties.layer === 'Text_to_Pline');
     if (isNonInteractive) {
         if (currentPopup) {
-            currentPopup.remove();
-            currentPopup = null;
+            if (confirm('작성 중인 내용이 저장되지 않습니다. 메모 모달을 닫으시겠습니까?')) {
+                currentPopup.remove();
+                currentPopup = null;
+            }
         }
         return; // 상호작용 중단
     }
@@ -1956,6 +1958,9 @@ async function handleMapClick(e) {
 function openMemoPopup(feature) {
     // [추가] 이미 열린 팝업이 있다면 제거 (중복 방지)
     if (currentPopup) {
+        if (!confirm('작성 중인 내용이 저장되지 않습니다. 메모 모달을 닫으시겠습니까?')) {
+            return; // 사용자가 취소를 누르면 새로운 팝업을 열지 않고 현재 팝업 유지
+        }
         currentPopup.remove();
         currentPopup = null;
     }
@@ -2086,12 +2091,16 @@ function openMemoPopup(feature) {
     let actionButtonsHtml = '';
     if (memoId) {
         // [수정] 수정 버튼은 등급 무관 노출, 삭제 버튼은 권한 확인 후 노출
-        actionButtonsHtml = `<div style="display:flex; gap:5px;">
+        actionButtonsHtml = `<div style="display:flex; gap:4px;">
             ${canDelete ? `<button id="popupMemoDeleteBtn" class="btn btn-danger" style="flex:1; padding:5px; font-size:12px;">삭제</button>` : ''}
-            <button id="popupMemoSaveBtn" class="btn btn-primary" style="flex:${canDelete ? '1' : '2'}; padding:5px; font-size:12px;">수정</button>
+            <button id="popupMemoCancelBtn" class="btn btn-secondary" style="flex:1; padding:5px; font-size:11px;">취소</button>
+            <button id="popupMemoSaveBtn" class="btn btn-primary" style="flex:1; padding:5px; font-size:11px;">수정</button>
         </div>`;
     } else {
-        actionButtonsHtml = `<button id="popupMemoSaveBtn" class="btn btn-primary" style="width:100%; padding:5px; font-size:12px;">저장</button>`;
+        actionButtonsHtml = `<div style="display:flex; gap:4px;">
+            <button id="popupMemoCancelBtn" class="btn btn-secondary" style="flex:1; padding:5px; font-size:12px;">취소</button>
+            <button id="popupMemoSaveBtn" class="btn btn-primary" style="flex:1; padding:5px; font-size:12px;">저장</button>
+        </div>`;
     }
 
     const popupContent = document.createElement('div');
@@ -2120,7 +2129,8 @@ function openMemoPopup(feature) {
         ${mapLinksHtml}
     `;
 
-    const popup = new maplibregl.Popup({ closeOnClick: false })
+    // [수정] closeButton: false 설정을 통해 상단 X 버튼을 제거하고 실수로 닫히는 현상 방지
+    const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false })
         .setLngLat(coords)
         .setDOMContent(popupContent)
         .addTo(cadMap);
@@ -2160,6 +2170,16 @@ function openMemoPopup(feature) {
                     popup.remove(); // 팝업 닫기
                     showAlert("메모가 삭제되었습니다.");
                 } catch (e) { console.error(e); alert("삭제 실패: " + e.message); }
+            }
+        };
+    }
+
+    // [추가] 취소 버튼 이벤트 핸들러: 확인 절차 후 팝업 제거
+    const cancelBtn = popupContent.querySelector('#popupMemoCancelBtn');
+    if (cancelBtn) {
+        cancelBtn.onclick = () => {
+            if (confirm('메모 모달을 닫으시겠습니까?')) {
+                popup.remove();
             }
         };
     }

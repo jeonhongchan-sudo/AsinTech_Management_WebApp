@@ -49,6 +49,13 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .project-info p { margin: 0; font-size: 12px; color: #888; }
 .project-actions { display: flex; gap: 4px; flex-shrink: 0; }
 
+/* [추가] 모달 전용 바디 스타일: 기존 .container와의 충돌 방지 및 모바일 대응 */
+.modal-body { 
+    background: white; border-radius: 8px; padding: 25px; 
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    max-width: 940px; width: 95%; min-height: auto !important;
+}
+
 #photo-manager-interface { display: none; }
 .pm-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #f0f0f0; flex-wrap: wrap; gap: 10px; }
 .pm-title { display: flex; align-items: center; gap: 10px; }
@@ -63,7 +70,8 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .photo-actions { display: flex; gap: 4px; }
 .photo-actions button { flex: 1; font-size: 10px; padding: 4px; }
 
-.lightbox-overlay { display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); flex-direction: column; align-items: center; justify-content: center; }
+/* [수정] z-index를 최상위로 높여 다른 탭/버튼 클릭을 완벽히 차단 */
+.lightbox-overlay { display: none; position: fixed; z-index: 5000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); flex-direction: column; align-items: center; justify-content: center; }
 .lightbox-content-wrapper { position: relative; max-width: 90%; max-height: 80%; }
 .lightbox-image { max-width: 100%; max-height: 80vh; object-fit: contain; }
 .lightbox-caption { margin-top: 15px; color: #ccc; font-size: 16px; text-align: center; }
@@ -78,6 +86,12 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .alert-success { background: #d4edda; color: #155724; }
 .alert-error { background: #f8d7da; color: #721c24; }
 .empty-state { text-align: center; padding: 40px 20px; color: #999; background: #f9f9f9; border-radius: 10px; border: 2px dashed #eee; }
+
+/* [추가] 지도 위 터치 시 뜨는 팝업(Map Popup)의 X 버튼을 강제로 삭제 */
+.maplibregl-popup-close-button { display: none !important; }
+
+/* [추가] 팝업 내부 여백 조정 (입력란 확보) */
+.maplibregl-popup-content { padding: 20px 15px 15px 15px !important; border-radius: 8px !important; }
 
 /* --- 메모 관리 테이블 (PC 모드 최적화) --- */
 .list-view-table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
