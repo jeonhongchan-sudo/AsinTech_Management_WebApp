@@ -2128,7 +2128,7 @@ function renderMemoFiles(previewId, input = null) {
 // [추가] 일반 메모 저장 (위치 정보 없음)
 export async function saveGeneralMemo() {
     const projectId = document.getElementById('memoProjectSelect').value;
-    const content = document.getElementById('memoContentInput').value;
+    const content = document.getElementById('memoContentInput').value.trim();
     const isPublic = document.getElementById('memoPublicCheck').checked; // [추가] 공개 여부 확인
     
     

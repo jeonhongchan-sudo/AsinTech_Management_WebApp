@@ -2093,12 +2093,12 @@ function openMemoPopup(feature) {
         // [수정] 수정 버튼은 등급 무관 노출, 삭제 버튼은 권한 확인 후 노출
         actionButtonsHtml = `<div style="display:flex; gap:4px;">
             ${canDelete ? `<button id="popupMemoDeleteBtn" class="btn btn-danger" style="flex:1; padding:5px; font-size:12px;">삭제</button>` : ''}
-            <button id="popupMemoCancelBtn" class="btn btn-secondary" style="flex:1; padding:5px; font-size:11px;">취소</button>
+            <button id="popupMemoCancelBtn" class="btn btn-secondary" style="flex:1; padding:5px; font-size:11px;">닫기</button>
             <button id="popupMemoSaveBtn" class="btn btn-primary" style="flex:1; padding:5px; font-size:11px;">수정</button>
         </div>`;
     } else {
         actionButtonsHtml = `<div style="display:flex; gap:4px;">
-            <button id="popupMemoCancelBtn" class="btn btn-secondary" style="flex:1; padding:5px; font-size:12px;">취소</button>
+            <button id="popupMemoCancelBtn" class="btn btn-secondary" style="flex:1; padding:5px; font-size:12px;">닫기</button>
             <button id="popupMemoSaveBtn" class="btn btn-primary" style="flex:1; padding:5px; font-size:12px;">저장</button>
         </div>`;
     }
@@ -2107,10 +2107,11 @@ function openMemoPopup(feature) {
     popupContent.style.width = '200px';
     popupContent.innerHTML = `
         ${matchedPhotosHtml} <!-- 자동 매칭된 사진 영역 -->
-        <textarea id="popupMemoInput" style="width:100%; height:80px; margin-bottom:5px; font-size:13px;">${content}</textarea>
+        <textarea id="popupMemoInput" style="width:100%; height:80px; margin-bottom:8px; font-size:14px; padding:10px 12px; box-sizing:border-box; border:1px solid #ddd; border-radius:4px; line-height:1.5; outline:none; display:block; font-family:inherit;">${content}</textarea>
         <div style="display:flex; gap:5px; margin-bottom:5px;">
             <button class="btn btn-info" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoFile').click()" title="파일 선택">📁</button>
             <button class="btn btn-secondary" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoCamera').click()" title="사진 촬영">📷</button>
+            <button class="btn btn-outline" style="flex:1; padding:5px; font-size:16px;" onclick="window.copyToClipboard('popupMemoInput')" title="내용 복사">📋</button>
         </div>
         <!-- [복원] 지도 메모는 현장 정보를 위한 사진만 첨부 가능 -->
         <input type="file" id="popupMemoFile" accept="image/*" multiple style="display:none" onchange="window.handleMemoImageSelect(this, 'popupMemoPreview')">
@@ -2187,7 +2188,7 @@ function openMemoPopup(feature) {
     const saveBtn = popupContent.querySelector('#popupMemoSaveBtn');
     if (saveBtn) {
         saveBtn.onclick = async () => {
-        const newContent = popupContent.querySelector('#popupMemoInput').value;
+        const newContent = popupContent.querySelector('#popupMemoInput').value.trim();
         const newIsPublic = popupContent.querySelector('#popupMemoPublic').checked;
         let existingImages = popupContent.querySelector('#popupMemoUrl').value; 
         
@@ -2205,7 +2206,9 @@ function openMemoPopup(feature) {
             
             if (saveSuccess) { // 저장 성공 시에만 팝업 닫기
                 window.currentMemoFiles = []; // 전달 후 즉시 초기화
-                popup.remove();
+                saveBtn.disabled = false;
+                saveBtn.innerText = memoId ? "수정완료" : "저장완료";
+                setTimeout(() => { saveBtn.innerText = memoId ? "수정" : "저장"; }, 2000);
             } else {
                 saveBtn.disabled = false;
                 saveBtn.innerText = memoId ? "수정" : "저장";
@@ -2216,6 +2219,22 @@ function openMemoPopup(feature) {
     };
     }
 }
+
+// [추가] 클립보드 복사 유틸리티
+window.copyToClipboard = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.select();
+    el.setSelectionRange(0, 99999); // 모바일 대응
+    navigator.clipboard.writeText(el.value).then(() => {
+        showAlert("내용이 복사되었습니다.", "success");
+    }).catch(() => {
+        try {
+            document.execCommand('copy');
+            showAlert("내용이 복사되었습니다.", "success");
+        } catch(e) { showAlert("복사 실패", "error"); }
+    });
+};
 
 // [추가] 거리 측정 모드 토글
 // [수정] 거리 측정 모드 토글 (스위치 상태 동기화 추가)
