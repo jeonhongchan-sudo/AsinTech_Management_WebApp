@@ -1085,8 +1085,8 @@ export function toggleBackgroundMap(isVisible) {
 export function showPointLocation(lon, lat, label, handle) {
     if (!cadMap) return;
     clearSearchMarkers();
-    // [수정] 마커가 좌표 위로 뜨는 현상을 방지하기 위해 anchor를 'center'로 변경하여 포인트와 정확히 겹치게 수정
-    const marker = new maplibregl.Marker({ color: '#FF0000', anchor: 'center' }).setLngLat([lon, lat]).addTo(cadMap);
+    // [수정] 검색/문법 북마크 마커는 빨간색(#F44336)으로 표시
+    const marker = new maplibregl.Marker({ color: '#F44336', anchor: 'center' }).setLngLat([lon, lat]).addTo(cadMap);
     state.searchMarkers.push({ marker: marker, handle: handle });
     cadMap.flyTo({ center: [lon, lat], zoom: 20, speed: 1.2, essential: true });
     document.getElementById('btnResetSearch').style.display = 'block';
@@ -1118,8 +1118,8 @@ export function renderSearchResults(matches) {
 export function displayMatchesOnMap(uniqueMatches) {
     const bounds = new maplibregl.LngLatBounds();
     uniqueMatches.forEach(m => {
-        // [수정] 검색 결과 마커들도 좌표 중심에 정확히 일치하도록 anchor 설정 변경
-        const marker = new maplibregl.Marker({ anchor: 'center' }).setLngLat([m.lon, m.lat]).addTo(cadMap);
+        // [수정] 검색/문법 북마크 마커는 빨간색(#F44336)으로 표시
+        const marker = new maplibregl.Marker({ color: '#F44336', anchor: 'center' }).setLngLat([m.lon, m.lat]).addTo(cadMap);
         marker.getElement().style.pointerEvents = 'none';
         // Snap 기능을 위해 handle과 마커 객체를 함께 저장
         state.searchMarkers.push({ marker: marker, handle: m.handle });
@@ -1824,9 +1824,9 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
 
             const isHighlighted = memo.id === state.highlightedMemoId; // [추가] 강조 여부 확인
             
-            // [수정] 커스텀 물방울 핀 대신 기본 북마크(핀) 마커 사용 및 색상 구분
-            // 조사메모: 파란색(#2196F3), 일반메모(CAD 지점): 빨간색(#F44336)
-            const markerColor = memo.is_survey ? '#2196F3' : '#F44336';
+            // [수정] 메모 유형별 색상 구분
+            // 조사메모: 파란색(#2196F3), 일반메모: 노란색(#FFC107)
+            const markerColor = memo.is_survey ? '#2196F3' : '#FFC107';
             
             const marker = new maplibregl.Marker({ 
                 color: markerColor, 
@@ -1894,19 +1894,11 @@ function setupMapInteraction() {
 async function handleMapClick(e) {
     if (!state.currentCadProjectId) return;
 
-    // [추가] 'Text_to_Pline' 레이어는 시각적으로만 표시하고 상호작용(클릭)은 막음
+    // [수정] 메모 모달이 열려있는 상태에서는 지도 클릭 등 모든 외부 인터랙션을 무시 (작성 집중)
+    if (currentPopup) return;
+
+    // 'Text_to_Pline' 레이어 상호작용 차단
     const clickBbox = [[e.point.x - 2, e.point.y - 2], [e.point.x + 2, e.point.y + 2]];
-    const featuresUnderClick = cadMap.queryRenderedFeatures(clickBbox, { layers: ['cad-lines', 'cad-text'] });
-    const isNonInteractive = featuresUnderClick.some(f => f.properties.layer === 'Text_to_Pline');
-    if (isNonInteractive) {
-        if (currentPopup) {
-            if (confirm('작성 중인 내용이 저장되지 않습니다. 메모 모달을 닫으시겠습니까?')) {
-                currentPopup.remove();
-                currentPopup = null;
-            }
-        }
-        return; // 상호작용 중단
-    }
 
     // 1. 스냅 (Snap) - 클릭 지점 주변의 포인트 피처 검색
     const snapRadius = 8; // [수정] 스냅 범위를 15px에서 8px로 좁혀 인접 포인트 간섭 방지
@@ -1960,14 +1952,8 @@ async function handleMapClick(e) {
 
 // 메모 팝업 열기
 function openMemoPopup(feature) {
-    // [추가] 이미 열린 팝업이 있다면 제거 (중복 방지)
-    if (currentPopup) {
-        if (!confirm('작성 중인 내용이 저장되지 않습니다. 메모 모달을 닫으시겠습니까?')) {
-            return; // 사용자가 취소를 누르면 새로운 팝업을 열지 않고 현재 팝업 유지
-        }
-        currentPopup.remove();
-        currentPopup = null;
-    }
+    // [수정] 이미 열린 팝업이 있다면 다른 곳을 눌러도 반응하지 않음 (메모 작성 집중)
+    if (currentPopup) return;
 
     const coords = feature.geometry.coordinates; // [lon, lat]
     const lon = coords[0];
@@ -1980,6 +1966,9 @@ function openMemoPopup(feature) {
         Math.abs(m.lon - coords[0]) < 0.000001 && 
         Math.abs(m.lat - coords[1]) < 0.000001
     );
+
+    // [추가] 현재 조사 모드인지 또는 수정하려는 기존 메모가 조사 메모인지 확인
+    const isSurveyActive = state.isSurveyMode || (existingMemo && existingMemo.is_survey);
 
     const content = existingMemo ? existingMemo.content : '';
     const memoId = existingMemo ? existingMemo.id : null; // [추가] 수정 시 ID 전달
@@ -2108,10 +2097,21 @@ function openMemoPopup(feature) {
     }
 
     const popupContent = document.createElement('div');
-    popupContent.style.width = '200px';
+    popupContent.style.width = '280px';
+    
+    // [추가] 조사 메모 활성화 시 모달 배경색 및 테두리 변경 (Requirement: 원본 저장 알림)
+    if (isSurveyActive) {
+        popupContent.style.backgroundColor = '#e7f5ff';
+        popupContent.style.padding = '8px';
+        popupContent.style.borderRadius = '8px';
+        popupContent.style.border = '2px solid #339af0';
+        popupContent.style.boxSizing = 'border-box';
+    }
+
     popupContent.innerHTML = `
+        ${isSurveyActive ? '<div style="background:#228be6; color:white; font-size:11px; font-weight:bold; padding:3px 8px; border-radius:4px; margin-bottom:8px; display:inline-block; box-shadow:0 1px 3px rgba(0,0,0,0.15);">🔍 조사 메모 모드 (사진 원본 보존)</div>' : ''}
         ${matchedPhotosHtml} <!-- 자동 매칭된 사진 영역 -->
-        <textarea id="popupMemoInput" style="width:100%; height:80px; margin-bottom:8px; font-size:14px; padding:10px 12px; box-sizing:border-box; border:1px solid #ddd; border-radius:4px; line-height:1.5; outline:none; display:block; font-family:inherit;">${content}</textarea>
+        <textarea id="popupMemoInput" style="width:100%; height:100px; margin-bottom:8px; font-size:14px; padding:8px 4px; box-sizing:border-box; border:1px solid ${isSurveyActive ? '#339af0' : '#ddd'}; border-radius:4px; line-height:1.5; outline:none; display:block; font-family:inherit; background:white;">${content}</textarea>
         <div style="display:flex; gap:5px; margin-bottom:5px;">
             <button class="btn btn-info" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoFile').click()" title="파일 선택">📁</button>
             <button class="btn btn-secondary" style="flex:1; padding:5px; font-size:16px;" onclick="document.getElementById('popupMemoCamera').click()" title="사진 촬영">📷</button>
@@ -2146,12 +2146,18 @@ function openMemoPopup(feature) {
         .setDOMContent(popupContent)
         .addTo(cadMap);
 
+    // [추가] 메모 작성 중 외부 버튼 조작 차단 (Requirement 5)
+    const uiBlockers = document.querySelectorAll('.header, .sidebar, .tab-nav, .map-menu-bar');
+    uiBlockers.forEach(el => el.style.pointerEvents = 'none');
+
     // [추가] 팝업 열릴 때 전역 파일 배열 초기화
     window.currentMemoFiles = [];
 
     currentPopup = popup;
     popup.on('close', () => {
         if (currentPopup === popup) {
+            // [추가] UI 잠금 해제
+            uiBlockers.forEach(el => el.style.pointerEvents = 'auto');
             currentPopup = null;
             // [추가] 팝업 닫힐 때 선택된 파일들 초기화
             window.currentMemoFiles = [];
@@ -2188,11 +2194,8 @@ function openMemoPopup(feature) {
     // [추가] 취소 버튼 이벤트 핸들러: 확인 절차 후 팝업 제거
     const cancelBtn = popupContent.querySelector('#popupMemoCancelBtn');
     if (cancelBtn) {
-        cancelBtn.onclick = () => {
-            if (confirm('메모 모달을 닫으시겠습니까?')) {
-                popup.remove();
-            }
-        };
+        // [수정] 확인 없이 바로 닫기
+        cancelBtn.onclick = () => popup.remove();
     }
 
     const saveBtn = popupContent.querySelector('#popupMemoSaveBtn');
@@ -2212,13 +2215,9 @@ function openMemoPopup(feature) {
             saveBtn.innerText = "저장 중...";
 
             // [수정] memoId를 함께 전달하여 수정/신규 구분
-            const saveSuccess = await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, existingImages, tmX, tmY, chainage, files);
-            
-            if (saveSuccess) { // 저장 성공 시에만 팝업 닫기
-                window.currentMemoFiles = []; // 전달 후 즉시 초기화
-                saveBtn.disabled = false;
-                saveBtn.innerText = memoId ? "수정완료" : "저장완료";
-                setTimeout(() => { saveBtn.innerText = memoId ? "수정" : "저장"; }, 2000);
+            const saveSuccess = await window.saveMemo(state.currentCadProjectId, coords[0], coords[1], newContent, layer, memoId, newIsPublic, existingImages, tmX, tmY, chainage, files);            
+            if (saveSuccess) { 
+                popup.remove(); // [수정] 저장 성공 시 즉시 닫기
             } else {
                 saveBtn.disabled = false;
                 saveBtn.innerText = memoId ? "수정" : "저장";
