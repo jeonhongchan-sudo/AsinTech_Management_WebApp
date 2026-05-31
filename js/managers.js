@@ -431,6 +431,92 @@ export async function cleanupR2Orphans() {
     }
 }
 
+/** [추가] 지침서 DB 내 깨진 이미지/표 URL 정리 (R2 실제 파일 존재 여부 확인) */
+export async function syncBrokenKnowledgeAssets() {
+    if (!confirm("지침서 DB 내의 모든 시각 자료(R2) 존재 여부를 확인하고, 파일이 없는 URL은 DB에서 삭제하시겠습니까?\n데이터가 많을 경우 시간이 소요됩니다.")) return;
+    
+    showAlert("동기화 분석 시작...", "info");
+    try {
+        const data = await callSupabaseDirect('pdf_knowledge?select=id,table_svg_urls,image_urls');
+        let totalFixed = 0;
+
+        for (const item of data) {
+            const checkUrls = async (urls) => {
+                if (!urls || !Array.isArray(urls)) return urls;
+                const validUrls = [];
+                for (const url of urls) {
+                    try {
+                        // HEAD 요청으로 파일 존재 확인 (CORS 허용 전제)
+                        const res = await fetch(url, { method: 'HEAD' });
+                        if (res.ok) validUrls.append(url);
+                    } catch (e) { validUrls.push(url); } // 확인 실패 시 일단 보존
+                }
+                return validUrls;
+            };
+
+            // 실제 체크 (성능을 위해 404가 확실한 것만 걸러내기 위해 fetch 활용)
+            const svgValid = await Promise.all(item.table_svg_urls.map(async u => (await fetch(u, {method:'HEAD'})).ok ? u : null));
+            const imgValid = await Promise.all(item.image_urls.map(async u => (await fetch(u, {method:'HEAD'})).ok ? u : null));
+            
+            const newSvg = svgValid.filter(u => u !== null);
+            const newImg = imgValid.filter(u => u !== null);
+
+            if (newSvg.length !== item.table_svg_urls.length || newImg.length !== item.image_urls.length) {
+                await callSupabaseDirect(`pdf_knowledge?id=eq.${item.id}`, 'PATCH', {
+                    table_svg_urls: newSvg,
+                    image_urls: newImg
+                });
+                totalFixed++;
+            }
+        }
+        showAlert(`동기화 완료! ${totalFixed}개의 레코드가 수정되었습니다.`, "success");
+    } catch (e) { showAlert("동기화 중 오류: " + e.message, "error"); }
+}
+
+/** [추가] 지하시설물 시각 자료(R2 + DB) 개별 삭제 로직 (Admin 임시 도구) */
+window.deleteKnowledgeAsset = async function(url, type, knowledgeId) {
+    if (state.currentUser !== 'jeonhongchan') return;
+    if (!confirm("이 시각 자료를 R2 스토리지와 DB에서 완전히 삭제하시겠습니까?")) return;
+
+    try {
+        showAlert("자료 삭제 중...", "info");
+        
+        // URL 복원 (비교용)
+        const originalUrl = url.replace(/%5B/g, '[').replace(/%5D/g, ']');
+
+        // 1. R2 파일 삭제 (Worker 경유)
+        if (originalUrl.includes('r2.dev')) {
+            const r2Path = originalUrl.split(R2_BASE_URL + '/')[1];
+            if (r2Path) {
+                await fetch(`${WORKER_URL}/${encodeURIComponent(r2Path)}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': WORKER_AUTH_KEY }
+                }).catch(e => console.warn("R2 삭제 실패:", e));
+            }
+        }
+
+        // 2. Supabase DB 레코드 업데이트
+        const data = await callSupabaseDirect(`pdf_knowledge?id=eq.${knowledgeId}&select=table_svg_urls,image_urls`);
+        if (data && data.length > 0) {
+            const record = data[0];
+            const col = type === 'svg' ? 'table_svg_urls' : 'image_urls';
+            const currentList = record[col] || [];
+            
+            // 해당 URL만 필터링하여 제거
+            const newList = currentList.filter(u => u.trim() !== originalUrl.trim());
+            
+            if (currentList.length !== newList.length) {
+                await callSupabaseDirect(`pdf_knowledge?id=eq.${knowledgeId}`, 'PATCH', {
+                    [col]: newList
+                });
+                showAlert("성공적으로 삭제되었습니다. 다시 검색하면 결과가 사라집니다.", "success");
+            }
+        }
+    } catch (e) {
+        showAlert("삭제 중 오류 발생: " + e.message, "error");
+    }
+};
+
 // [추가] 개별 사진 파일 다운로드 (브라우저 다운로드 강제)
 export async function downloadPhotoFile(url, fileName, isSurvey) {
     if (!url) return;
@@ -2298,3 +2384,4 @@ window.removeExistingMemoImage = removeExistingMemoImage;
 window.syncSurveyMemoText = syncSurveyMemoText; // [추가] 윈도우 객체 바인딩 누락 수정
 window.resizeImage = resizeImage;
 window.fileToBase64 = fileToBase64;
+window.syncBrokenKnowledgeAssets = syncBrokenKnowledgeAssets; // 바인딩

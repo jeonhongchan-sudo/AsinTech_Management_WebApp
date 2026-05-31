@@ -10,6 +10,13 @@ let aiCooldownTimer = null;  // [추가] 쿨타임 타이머 변수 선언 누�
 function formatResponseText(text) {
     if (!text) return "";
     
+    // [개선] 2중 설명 방지: 시각 자료(ATTACH) 태그가 시작되기 전까지만 텍스트 표 블록을 제거합니다.
+    // ##### [표 데이터] ##### 부터 다음 섹션 헤더 또는 이미지 태그 전까지 내용을 지웁니다.
+    text = text.replace(/#{1,5} \[표 데이터\] #{1,5}[\s\S]*?(?=(?:#{1,5} \[|\[ATTACH_|$))/g, "");
+
+    // [추가] 불필요한 줄바꿈 정리 (중복 제거 후 발생하는 공백 제거)
+    text = text.trim();
+
     // 0. 마크다운 표(|---|)를 감지하여 HTML 테이블로 변환 (정규식 기반 개선)
     if (text.includes('|')) {
         const parts = text.split(/(\|[^\n]+\|\n\|[\s-:|]+\|\n(?:\|[^\n]+\|\n?)+)/g);
@@ -29,11 +36,11 @@ function formatResponseText(text) {
     }
 
     // [추가] DB 업로더가 생성한 구조적 태그 시각화 (출처 및 섹션 헤더)
-    // 1. 출처 정보 (### 출처: ... ###)
-    text = text.replace(/### (출처:.*?) ###/g, 
+    // 1. 출처 정보 (#### 출처: ... ####) - 다중 샵 지원
+    text = text.replace(/#{1,5} (출처:.*?) #{1,5}/g, 
         '<div style="font-size:11px; color:#868e96; margin-bottom:10px; border-bottom:1px solid #e9ecef; padding-bottom:5px; font-weight:bold;">📍 $1</div>');
-    // 2. 섹션 헤더 (#### [표 데이터] ####, #### [지침 내용] #### 등)
-    text = text.replace(/#### \[(.*?)\] ####/g, 
+    // 2. 섹션 헤더 (##### [표 데이터] ##### 등) - 다중 샵 지원
+    text = text.replace(/#{1,5} \[(.*?)\] #{1,5}/g, 
         '<div style="margin:18px 0 8px 0; padding:4px 12px; background:#f8f9fa; border-left:4px solid #228be6; font-weight:bold; color:#495057; font-size:13px; border-radius:0 4px 4px 0; box-shadow: 1px 1px 2px rgba(0,0,0,0.05);">$1</div>');
 
     // [추가] 지침서 특수 기호(●, ■, ※, ○, □, -, ① 등) 감지 및 색상 강조
@@ -41,11 +48,45 @@ function formatResponseText(text) {
     text = text.replace(/^([ \t]*)([●■※○□▶▷\-•·]|(?:\d+\.)|(?:\d+\))|[①-⑮])(?=\s|[가-힣a-zA-Z0-9])/gm, 
         '$1<strong style="color:#D32F2F;">$2</strong>');
 
-    let formatted = text
-        .replace(/([\.?!])(?=\S)/g, "$1 ") // 2. 마침표 뒤 한 칸 띄우기
-        .replace(/,(?=\S)/g, ", ")         // 1. 쉼표 뒤 한 칸 띄우기
-        .replace(/\n/g, "<br>")            // 4. 줄바꿈을 HTML로 변환하여 단락 유지
-        .trim();
+    // [중요] URL(도메인) 훼손 방지를 위해, 문장부호 뒤 공백 추가는 한글(Hangul) 문자 앞에서만 작동하도록 제한합니다.
+    let formatted = text.replace(/([\.?!,])(?=[가-힣])/g, "$1 ").trim();
+
+    // [보정] 태그 내부의 URL에 대괄호([, ])나 공백이 포함되어 렌더링이 깨지는 현상 방지
+    // 렌더링 정규식 매칭 전, 태그 내부의 URL을 미리 안전하게 인코딩합니다.
+    formatted = formatted.replace(/\[(ATTACH_(?:SVG|IMG)):([\s\S]+?)\](?=\s|<br>|$)/g, (match, tag, url) => {
+        const safeUrl = url.trim().replace(/ /g, '%20').replace(/\[/g, '%5B').replace(/\]/g, '%5D');
+        return `[${tag}:${safeUrl}]`;
+    });
+
+    // 줄바꿈 변환
+    formatted = formatted.replace(/\n/g, "<br>");
+
+    // [추가] AI가 보낸 시각 자료 태그(SVG/IMG)를 실제 HTML로 변환
+    // SVG (표) 렌더링
+    formatted = formatted.replace(/\[ATTACH_SVG:([^\]]+)\]/g, (match, content) => {
+        const [url, id] = content.split('|');
+        const isAdmin = state.currentUser === 'jeonhongchan';
+        const delBtn = (isAdmin && id) ? `<button onclick="event.stopPropagation(); window.deleteKnowledgeAsset('${url}', 'svg', '${id}')" style="position:absolute; top:5px; right:5px; padding:2px 5px; font-size:10px; background:#e03131; color:white; border:none; border-radius:3px; cursor:pointer; opacity:0.8; z-index:10;">삭제</button>` : '';
+        
+        return `<div class="ai-attached-container svg" style="margin:20px 0; text-align:center; background:#fcfcfc; padding:15px; border:1px solid #eee; border-radius:8px; position:relative;">
+            ${delBtn}
+            <img src="${url}" onerror="this.closest('.ai-attached-container').style.display='none'" style="display:block; margin:0 auto; max-width:100%; height:auto; background:#fff; border-radius:4px; cursor:pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.05);" onclick="window.open(this.src, '_blank')">
+            <div style="font-size:11px; color:#228be6; margin-top:10px; font-weight:bold;">▲ [참조 표] 클릭 시 원본 크게보기</div>
+        </div>`;
+    });
+
+    // WebP (그림) 렌더링
+    formatted = formatted.replace(/\[ATTACH_IMG:([^\]]+)\]/g, (match, content) => {
+        const [url, id] = content.split('|');
+        const isAdmin = state.currentUser === 'jeonhongchan';
+        const delBtn = (isAdmin && id) ? `<button onclick="event.stopPropagation(); window.deleteKnowledgeAsset('${url}', 'img', '${id}')" style="position:absolute; top:5px; right:5px; padding:2px 5px; font-size:10px; background:#e03131; color:white; border:none; border-radius:3px; cursor:pointer; opacity:0.8; z-index:10;">삭제</button>` : '';
+
+        return `<div class="ai-attached-container img" style="margin:20px 0; text-align:center; position:relative;">
+            ${delBtn}
+            <img src="${url}" onerror="this.closest('.ai-attached-container').style.display='none'" style="display:block; margin:0 auto; max-width:100%; height:auto; border-radius:8px; box-shadow:0 4px 15px rgba(0,0,0,0.15); cursor:pointer;" onclick="window.open(this.src, '_blank')">
+            <div style="font-size:11px; color:#228be6; margin-top:10px; font-weight:bold;">▲ [참조 그림] 클릭 시 원본 크게보기</div>
+        </div>`;
+    });
 
     // 5. 주요 단어 강조 및 밑줄 (마크다운 -> HTML 변환)
     formatted = formatted
@@ -81,6 +122,48 @@ export function showModalMessage(title, message, type = 'error') {
     `;
 }
 
+/** [추가] DB에서 지침서 본문을 검색하는 공통 로직 (데이터만 반환) */
+export async function fetchDbSearchResults(query) {
+    if (!query || !query.trim()) return [];
+
+    const firstKeyword = query.split(/[&! ]/).filter(k => k.trim().length > 0)[0];
+    let supabaseQuery = `pdf_knowledge?select=id,file_name,content,metadata,table_svg_urls,image_urls&order=created_at.asc`;
+    if (firstKeyword) {
+        supabaseQuery += `&content=ilike.*${encodeURIComponent(firstKeyword)}*`;
+    }
+
+    const allKnowledge = await callSupabaseDirect(supabaseQuery);
+    if (!allKnowledge || allKnowledge.length === 0) return [];
+
+    const searchInList = async (list) => {
+        const promises = list.map(async (item) => {
+            try {
+                const content = item.content;
+                if (!content) return null;
+                const score = matchComplexQuery(content, query);
+                if (score > 0) {
+                    return { ...item, content: content, score: score + (item.file_name === 'AI_Confirmed_Knowledge' ? 1.0 : 0) };
+                }
+            } catch (e) { console.warn(`검색 처리 실패: ${item.file_name}`, e); }
+            return null;
+        });
+        return (await Promise.all(promises)).filter(r => r !== null).sort((a, b) => b.score - a.score);
+    };
+
+    const allFoundResults = [];
+    // 1. 검증된 지식 DB
+    const confirmedList = allKnowledge.filter(k => k.file_name === 'AI_Confirmed_Knowledge');
+    const confirmedMatches = await searchInList(confirmedList);
+    if (confirmedMatches.length > 0) allFoundResults.push(...confirmedMatches);
+
+    // 2. 전체 지침서 본문 (목차 제외)
+    const otherList = allKnowledge.filter(k => k.file_name !== 'AI_Confirmed_Knowledge' && k.metadata?.is_index !== true);
+    const deepMatches = await searchInList(otherList);
+    if (deepMatches.length > 0) allFoundResults.push(...deepMatches);
+
+    return allFoundResults.sort((a, b) => b.score - a.score);
+}
+
 /** [1순위 후순위] AI 없이 DB에서 지침서 키워드 검색 */
 export async function handleDatabaseSearch(query) {
     // [추가] 즉시 모달 열기 및 로딩 표시 (UI 멈춤 인지 방지)
@@ -94,62 +177,7 @@ export async function handleDatabaseSearch(query) {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     try {
-        if (!query || !query.trim()) { closeAiResponseModal(); return false; }
-
-        const allFoundResults = [];
-
-        // 1. DB 목록 및 본문 검색 헬퍼
-        // [최적화] 서버에서 검색어가 포함된 데이터만 골라오도록 필터 추가 (네트워크 전송량 감소)
-        // 복합 문법 중 첫 번째 단어를 기준으로 서버 측에서 1차 필터링을 수행합니다.
-        const firstKeyword = query.split(/[&! ]/).filter(k => k.trim().length > 0)[0];
-        let supabaseQuery = `pdf_knowledge?select=id,file_name,content,metadata`;
-        if (firstKeyword) {
-            supabaseQuery += `&content=ilike.*${encodeURIComponent(firstKeyword)}*`;
-        }
-        
-        const allKnowledge = await callSupabaseDirect(supabaseQuery);
-        if (!allKnowledge || allKnowledge.length === 0) return false;
-
-        const searchInList = async (list) => {
-            const promises = list.map(async (item) => {
-                try {
-                    const content = item.content; // DB에서 가져온 텍스트 바로 사용
-                    if (!content) return null;
-
-                    // [통합] 중앙화된 복합 검색 엔진 사용
-                    const score = matchComplexQuery(content, query);
-
-                    if (score > 0) {
-                        let displayContent = content;
-                        if (content.length > 1500) {
-                            const start = Math.max(0, content.length / 2 - 750);
-                            const end = Math.min(content.length, start + 1500);
-                            displayContent = `... (검색 내용 포함 구간 발췌) ...\n\n${content.substring(start, end)}\n\n... (중략) ...`;
-                        }
-                        return { ...item, content: displayContent, score: score + (item.file_name === 'AI_Confirmed_Knowledge' ? 1.0 : 0) };
-                    }
-                } catch (e) { console.warn(`로드 실패: ${item.file_name}`, e); }
-                return null;
-            });
-            return (await Promise.all(promises)).filter(r => r !== null).sort((a, b) => b.score - a.score);
-        };
-
-        // [Step 1] 검증된 AI 지식 DB 검색
-        console.log("🔍 [Step 1] 검증된 지식 탐색 중...");
-        const confirmedList = allKnowledge.filter(k => k.file_name === 'AI_Confirmed_Knowledge');
-        const confirmedMatches = await searchInList(confirmedList);
-        if (confirmedMatches.length > 0) allFoundResults.push(...confirmedMatches);
-
-        // [Step 2] 전체 지침서 본문 실시간 탐색 (R2 Deep Search)
-        // 업로더를 통해 추가된 모든 PDF 데이터가 여기서 자동으로 검색됩니다.
-        // 별도의 코드 수정 없이 DB/R2에 데이터가 존재하면 바로 탐색 대상이 됩니다.
-        if (allFoundResults.length < 10) {
-            console.log("🔍 [Step 3] 본문 정밀 탐색 시작...");
-            // [수정] 메타데이터의 is_index 플래그를 확인하여 목차 페이지는 검색 결과에서 원천 제외
-            const otherList = allKnowledge.filter(k => k.file_name !== 'AI_Confirmed_Knowledge' && k.metadata?.is_index !== true);
-            const deepMatches = await searchInList(otherList);
-            if (deepMatches.length > 0) allFoundResults.push(...deepMatches);
-        }
+        const allFoundResults = await fetchDbSearchResults(query);
 
         if (allFoundResults.length > 0) {
             // 점수순 정렬 (검증된 지식 -> 로컬 -> 본문 순으로 가중치 반영됨)
@@ -197,7 +225,18 @@ function displayCombinedResults(matches, query, sourceLabel) {
                 deleteBtn = ` <span onclick="window.deleteConfirmedKnowledge('${match.id}')" style="color:#e03131; cursor:pointer; font-size:11px; margin-left:8px; border:1px solid #ffa8a8; padding:2px 5px; border-radius:4px; background:#fff; vertical-align:middle; font-weight:normal;">🗑️ 오답삭제</span>`;
             }
         }
-        combinedAnswer += `**[검색결과 ${idx + 1}] ${match.file_name}${pageInfo}**${deleteBtn}\n${content}\n\n`;
+
+        // [추가] 시각 자료 URL이 있다면 컨텐츠 하단에 태그 형식으로 강제 삽입 (formatResponseText에서 처리됨)
+        let attachments = "";
+        if (match.table_svg_urls && Array.isArray(match.table_svg_urls)) {
+            // [개선] 파일명에 [ ] 가 포함된 경우 태그 정규식 충돌 방지를 위해 대괄호만 치환
+            match.table_svg_urls.forEach(url => { if(url) attachments += `\n[ATTACH_SVG:${url.trim().replace(/\[/g, '%5B').replace(/\]/g, '%5D')}|${match.id}]`; });
+        }
+        if (match.image_urls && Array.isArray(match.image_urls)) {
+            match.image_urls.forEach(url => { if(url) attachments += `\n[ATTACH_IMG:${url.trim().replace(/\[/g, '%5B').replace(/\]/g, '%5D')}|${match.id}]`; });
+        }
+
+        combinedAnswer += `**[검색결과 ${idx + 1}] ${match.file_name}${pageInfo}**${deleteBtn}\n${content}${attachments}\n\n`;
         if (idx < topResults.length - 1) combinedAnswer += "---\n\n";
     });
     showAiResponseModal(query, combinedAnswer.trim(), sourceLabel);

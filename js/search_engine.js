@@ -3,7 +3,7 @@
  * 프로젝트 선택 여부와 상관없이 공통으로 사용되는 검색 문법(&, 공백, ! 제외)을 처리합니다.
  */
 import { state, callSupabaseDirect, showAlert } from './core.js';
-import { handleAiSearch, handleDatabaseSearch, showModalMessage, showAiResponseModal, closeAiResponseModal } from './ai.js';
+import { handleAiSearch, handleDatabaseSearch, showModalMessage, showAiResponseModal, closeAiResponseModal, fetchDbSearchResults } from './ai.js';
 import { cadMap, cadLayers, renderSearchResults, showPointLocation, displayMatchesOnMap, clearSearchMarkers } from './viewers.js';
 
 /** [통합] 포인트 찾기 진입점 (viewers.js에서 이관) */
@@ -148,13 +148,26 @@ async function executeGisSearch(searchTerm) {
         const cleanQuery = searchTerm.replace(/[📍?]/g, '').trim();
         if (!cleanQuery) return;
         
-        // [수정] '아신' 키워드가 있으면 AI 분석 우선 실행 (DB 탐색 -> 요약)
-        if (cleanQuery.includes("아신")) {
-            handleAiSearch(cleanQuery, null);
-        } else {
+        const hasAsin = cleanQuery.includes("아신");
+
+        if (!hasAsin) {
+            // [Case 1] '아신' 없음 -> 오직 웹 기반 DB 검색만 실행
             const foundInDb = await handleDatabaseSearch(cleanQuery);
             if (!foundInDb) {
-                showModalMessage("🔍 검색 결과가 없습니다.", "지침 DB에서 내용을 찾을 수 없습니다. AI 분석이 필요하면 질문에 <strong>에이전트명</strong>을 포함하세요.", 'info');
+                showModalMessage("🔍 검색 결과가 없습니다.", "지침 DB에서 내용을 찾을 수 없습니다. AI 요약이나 일반 지식이 필요하면 질문에 <strong>'아신'</strong> 키워드를 포함하세요.", 'info');
+            }
+        } else {
+            // [Case 2] '아신' 있음 -> 웹에서 DB 검색 우선 수행 후 AI 전달
+            const dbQuery = cleanQuery.replace(/아신/g, "").trim();
+            const dbResults = await fetchDbSearchResults(dbQuery);
+
+            if (dbResults && dbResults.length > 0) {
+                // DB 결과 있음 -> 해당 내용을 컨텍스트로 전달하여 AI가 정리
+                const context = dbResults.map(r => r.content).join("\n\n");
+                handleAiSearch(cleanQuery, null, context);
+            } else {
+                // DB 결과 없음 -> AI가 일반 지식으로 답변
+                handleAiSearch(cleanQuery, null, null);
             }
         }
         return;
