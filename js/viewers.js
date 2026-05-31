@@ -1085,7 +1085,8 @@ export function toggleBackgroundMap(isVisible) {
 export function showPointLocation(lon, lat, label, handle) {
     if (!cadMap) return;
     clearSearchMarkers();
-    const marker = new maplibregl.Marker({ color: '#FF0000' }).setLngLat([lon, lat]).addTo(cadMap);
+    // [수정] 마커가 좌표 위로 뜨는 현상을 방지하기 위해 anchor를 'center'로 변경하여 포인트와 정확히 겹치게 수정
+    const marker = new maplibregl.Marker({ color: '#FF0000', anchor: 'center' }).setLngLat([lon, lat]).addTo(cadMap);
     state.searchMarkers.push({ marker: marker, handle: handle });
     cadMap.flyTo({ center: [lon, lat], zoom: 20, speed: 1.2, essential: true });
     document.getElementById('btnResetSearch').style.display = 'block';
@@ -1117,7 +1118,8 @@ export function renderSearchResults(matches) {
 export function displayMatchesOnMap(uniqueMatches) {
     const bounds = new maplibregl.LngLatBounds();
     uniqueMatches.forEach(m => {
-        const marker = new maplibregl.Marker().setLngLat([m.lon, m.lat]).addTo(cadMap);
+        // [수정] 검색 결과 마커들도 좌표 중심에 정확히 일치하도록 anchor 설정 변경
+        const marker = new maplibregl.Marker({ anchor: 'center' }).setLngLat([m.lon, m.lat]).addTo(cadMap);
         marker.getElement().style.pointerEvents = 'none';
         // Snap 기능을 위해 handle과 마커 객체를 함께 저장
         state.searchMarkers.push({ marker: marker, handle: m.handle });
@@ -1818,28 +1820,30 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
         
         // [추가] 지도에 마커 표시
         projectMemos.forEach(memo => {
-            const isMine = memo.username === state.currentUser;
+            if (memo.lon === 0 || memo.lat === 0) return; // [추가] 위치 정보가 없는 메모는 지도 표시 제외
+
             const isHighlighted = memo.id === state.highlightedMemoId; // [추가] 강조 여부 확인
             
-            // [수정] 커스텀 HTML 엘리먼트 생성
-            const el = document.createElement('div');
-            el.className = 'custom-memo-pin';
+            // [수정] 커스텀 물방울 핀 대신 기본 북마크(핀) 마커 사용 및 색상 구분
+            // 조사메모: 파란색(#2196F3), 일반메모(CAD 지점): 빨간색(#F44336)
+            const markerColor = memo.is_survey ? '#2196F3' : '#F44336';
             
-            // 상태별 클래스 부여
-            if (memo.is_survey) el.classList.add('survey');
-            if (!isMine && memo.is_public) el.classList.add('public');
-            if (isHighlighted) el.classList.add('highlighted');
-            
-            const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+            const marker = new maplibregl.Marker({ 
+                color: markerColor, 
+                anchor: 'center', // [수정] 핀 마커가 좌표보다 위로 뜨지 않도록 중심점으로 anchor 변경
+                scale: isHighlighted ? 1.3 : 1.0 // 강조 시 크기 확대
+            })
                 .setLngLat([memo.lon, memo.lat]);
 
             // [수정] 마커 클릭 시 조회 팝업 대신 편집(작성) 팝업을 열도록 변경
-            // 사용자가 "북마크를 눌러도 메모 작성 팝업 안으로 사진이 들어가게 해달라"고 요청함.
             marker.getElement().addEventListener('click', (e) => {
                 e.stopPropagation(); // 지도 클릭 이벤트 전파 방지
                 const feature = {
                     geometry: { coordinates: [memo.lon, memo.lat] },
-                    properties: { layer: memo.layer || 'unknown' }
+                    properties: { 
+                        layer: memo.layer || 'unknown',
+                        text: memo.content // 메모 내용을 텍스트 속성으로 전달하여 사진 자동 매칭 연동
+                    }
                 };
                 openMemoPopup(feature);
             });
@@ -2131,7 +2135,13 @@ function openMemoPopup(feature) {
     `;
 
     // [수정] closeButton: false 설정을 통해 상단 X 버튼을 제거하고 실수로 닫히는 현상 방지
-    const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false })
+    // [수정] anchor: 'center' 설정을 추가하여 메모창의 중앙이 정확히 해당 좌표에 오도록 수정
+    const popup = new maplibregl.Popup({ 
+        closeButton: false, 
+        closeOnClick: false,
+        anchor: 'center',
+        offset: 0 // [추가] 오프셋을 제거하여 화살표 공간 없이 좌표 중앙에 밀착
+    })
         .setLngLat(coords)
         .setDOMContent(popupContent)
         .addTo(cadMap);
@@ -2273,7 +2283,8 @@ async function handleDistanceClick(coords) {
         state.distanceStartPoint = { lon, lat };
         
         // 시작점 마커 표시
-        const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8 })
+        // [수정] 거리 측정 마커도 좌표 중심과 일치하도록 anchor 변경
+        const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8, anchor: 'center' })
             .setLngLat([lon, lat])
             .addTo(cadMap);
         state.distanceMarkers.push(startMarker);
@@ -2284,7 +2295,8 @@ async function handleDistanceClick(coords) {
         const end = { lon, lat };
         
         // 끝점 마커 표시
-        const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8 })
+        // [수정] 거리 측정 마커도 좌표 중심과 일치하도록 anchor 변경
+        const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8, anchor: 'center' })
             .setLngLat([lon, lat])
             .addTo(cadMap);
         state.distanceMarkers.push(endMarker);
@@ -2324,7 +2336,13 @@ async function handleDistanceClick(coords) {
         
         popupContent.appendChild(closeBtn);
 
-        const popup = new maplibregl.Popup({ closeOnClick: false, closeButton: false, offset: 10 })
+        // [수정] 거리 측정 팝업도 좌표 중앙에 오도록 anchor 설정 변경 및 offset 제거
+        const popup = new maplibregl.Popup({ 
+            closeOnClick: false, 
+            closeButton: false, 
+            anchor: 'center',
+            offset: 0 // [추가] 불필요한 간격 제거
+        })
             .setLngLat([end.lon, end.lat])
             .setDOMContent(popupContent)
             .addTo(cadMap);
