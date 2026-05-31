@@ -126,10 +126,21 @@ export function showModalMessage(title, message, type = 'error') {
 export async function fetchDbSearchResults(query) {
     if (!query || !query.trim()) return [];
 
-    const firstKeyword = query.split(/[&! ]/).filter(k => k.trim().length > 0)[0];
-    let supabaseQuery = `pdf_knowledge?select=id,file_name,content,metadata,table_svg_urls,image_urls&order=created_at.asc`;
-    if (firstKeyword) {
-        supabaseQuery += `&content=ilike.*${encodeURIComponent(firstKeyword)}*`;
+    // [수정] 검색어 정제: '!' 이전의 포함 검색 부분만 추출
+    const includePart = query.split('!')[0].trim();    
+
+    // [핵심] '&'로 구분된 그룹 중 가장 긴 그룹을 선택하여 1차 검색 기준으로 삼음 (Phrase 처리)
+    const groups = includePart.split('&').map(g => g.trim()).filter(g => g.length > 0);
+    const primaryGroup = groups.sort((a, b) => b.length - a.length)[0] || "";    
+
+    // [핵심] 띄어쓰기 무관 검색을 위해 그룹 내의 모든 공백을 제거하고 각 글자 사이에 와일드카드(*) 삽입
+    // 예: "교량 레이어" -> "교*량*레*이*어" (DB에 "교량 레이어", "교량레이어" 모두 매칭 가능)
+    const dbFuzzyToken = primaryGroup.replace(/\s+/g, '').split('').join('*');
+
+    // [수정] fuzzyKeyword(dbFuzzyToken)를 실제 쿼리에 적용하여 유연하게 DB 검색 수행
+    let supabaseQuery = `pdf_knowledge?select=id,file_name,content,metadata,table_svg_urls,image_urls&order=created_at.desc&limit=10000`;
+    if (dbFuzzyToken) {
+        supabaseQuery += `&or=(content.ilike.*${encodeURIComponent(dbFuzzyToken)}*,file_name.ilike.*${encodeURIComponent(dbFuzzyToken)}*)`;
     }
 
     const allKnowledge = await callSupabaseDirect(supabaseQuery);
@@ -156,8 +167,12 @@ export async function fetchDbSearchResults(query) {
     const confirmedMatches = await searchInList(confirmedList);
     if (confirmedMatches.length > 0) allFoundResults.push(...confirmedMatches);
 
-    // 2. 전체 지침서 본문 (목차 제외)
-    const otherList = allKnowledge.filter(k => k.file_name !== 'AI_Confirmed_Knowledge' && k.metadata?.is_index !== true);
+    // 2. 전체 지침서 본문 (수정: 1장짜리 지침서는 목차 필터에서 제외)
+    // 1장짜리 문서는 그 자체가 본문이므로 is_index 속성이 있더라도 검색 결과에 포함시킵니다.
+    const otherList = allKnowledge.filter(k => 
+        k.file_name !== 'AI_Confirmed_Knowledge' && 
+        (k.metadata?.is_index !== true || k.metadata?.total_pages === 1)
+    );
     const deepMatches = await searchInList(otherList);
     if (deepMatches.length > 0) allFoundResults.push(...deepMatches);
 
