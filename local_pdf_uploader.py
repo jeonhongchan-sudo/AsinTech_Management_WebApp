@@ -199,25 +199,30 @@ class PDFUploaderApp:
                                         table_data += "| " + " | ".join(["---"] * len(cells)) + " |\n"
                                 table_data += "\n"
 
-                                # [추가] 표 영역 SVG 추출 및 R2 업로드
+                                # [수정] 표 영역을 SVG가 아닌 WebP 썸네일로 추출하여 R2 업로드
                                 try:
-                                    t_bbox = table_obj.bbox # 동기화된 객체에서 즉시 bbox 획득
-                                    
-                                    # get_svg_image는 clip을 지원하지 않으므로 임시 페이지를 생성하여 해당 영역만 복제합니다.
+                                    t_bbox = table_obj.bbox
                                     temp_doc = fitz.open()
                                     width, height = t_bbox[2] - t_bbox[0], t_bbox[3] - t_bbox[1]
                                     temp_page = temp_doc.new_page(width=width, height=height)
-                                    
-                                    # 원본 페이지(doc[i])의 테이블 영역(clip)만 새 페이지(temp_page.rect)에 그리기
                                     temp_page.show_pdf_page(temp_page.rect, doc, i, clip=fitz.Rect(t_bbox))
-                                    svg_data = temp_page.get_svg_image()
+                                    
+                                    pix = temp_page.get_pixmap(dpi=150)
+                                    if pix.colorspace.n != 3 or pix.alpha:
+                                        pix = fitz.Pixmap(fitz.csRGB, pix)
+                                    
+                                    img_obj = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                                    img_obj.thumbnail((800, 800))
+                                    webp_io = io.BytesIO()
+                                    img_obj.save(webp_io, format="WEBP", quality=75)
+                                    webp_io.seek(0)
                                     temp_doc.close()
 
-                                    r2_key = f"knowledge_assets/{file_name}/p{i+1}_table_{t_idx}.svg"
-                                    svg_url = self.upload_to_r2(svg_data.encode('utf-8'), r2_key, "image/svg+xml")
-                                    table_urls.append(svg_url)
+                                    r2_key = f"knowledge_assets/{file_name}/p{i+1}_table_{t_idx}.webp"
+                                    webp_url = self.upload_to_r2(webp_io.getvalue(), r2_key, "image/webp")
+                                    table_urls.append(webp_url)
                                 except Exception as e:
-                                    self.log(f"  - 표 SVG 추출 실패 (p.{i+1}): {e}")
+                                    self.log(f"  - 표 WebP 변환 실패 (p.{i+1}): {e}")
 
                         # [추가] 이미지 객체 추출 및 WebP 썸네일 업로드
                         try:
