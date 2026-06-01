@@ -1837,7 +1837,8 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
             });
 
             const isHighlighted = memo.id === state.highlightedMemoId; // [추가] 강조 여부 확인
-            const markerColor = memo.is_survey ? '#2196F3' : '#FFC107';
+            // [수정] 강조된 마커(위치 찾기 시)는 빨간색(#F44336)으로 표시하여 시인성 확보
+            const markerColor = isHighlighted ? '#F44336' : (memo.is_survey ? '#2196F3' : '#FFC107');
             
             // [수정] 마커는 상호작용과 위치 표시용 "점(Dot)"으로만 생성
             // 번호(find_id)는 지도 레이어(memo-id-labels)가 담당하여 기존 텍스트와 자동으로 자리를 피합니다.
@@ -1860,7 +1861,9 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
                 openMemoPopup(feature);
             });
             marker.addTo(cadMap);
-            if (isHighlighted) marker.getElement().style.zIndex = '1000';
+            // [수정] z-index 1000은 지도 팝업(메모 입력창)을 가리는 원인이 되므로, 
+            // 다른 마커보다는 위에 오되 팝업보다는 아래에 있도록 값을 낮춤
+            if (isHighlighted) marker.getElement().style.zIndex = '5';
             memoMarkers.push(marker);
         });
 
