@@ -975,13 +975,6 @@ export async function loadCadMap(projectId) {
             renderWorldCopies: false, maxZoom: 28, localIdeographFontFamily: "'Noto Sans KR', sans-serif",
             validateStyle: false, boxZoom: false, dragRotate: false, doubleClickZoom: false,
         transformRequest: (url, resourceType) => {
-            // [추가] PMTiles(Range Request) 요청 시 브라우저 캐시 충돌 에러 방지
-            if (url.includes('.pmtiles')) {
-                return {
-                    url: url,
-                    cache: 'no-store' // 캐시 저장소 사용을 건너뛰어 에러 발생 차단
-                };
-            }
             return { url: url };
         },
             style: {
@@ -1033,6 +1026,9 @@ export async function loadCadMap(projectId) {
 
             const chkLineLabels = document.getElementById('chkLineLabels');
             if (chkLineLabels) toggleLineLabels(chkLineLabels.checked);
+            
+            const chkMemoId = document.getElementById('chkMemoId');
+            if (chkMemoId) toggleMemoIds(chkMemoId.checked);
             
             // [추가] 메모 데이터 로드 (지도 표시용)
             loadMapMemos();
@@ -1168,6 +1164,15 @@ export function clearSearchMarkers() {
     state.searchMarkers = [];
 }
 
+// [추가] 메모 ID 표시 토글 기능
+export function toggleMemoIds(isVisible) {
+    state.isMemoIdVisible = isVisible;
+    // [수정] 마커 전체를 재생성하는 대신, 지도 레이어의 가시성만 제어하여 텍스트 겹침 방지(Collision) 적용
+    if (cadMap && cadMap.getLayer('memo-id-labels')) {
+        cadMap.setLayoutProperty('memo-id-labels', 'visibility', isVisible ? 'visible' : 'none');
+    }
+}
+window.toggleMemoIds = toggleMemoIds;
 
 // [추가] 지도 제공자 전환 기능 (OSM <-> VWorld)
 export function switchMapProvider(useVWorld) {
@@ -1770,6 +1775,7 @@ export function cleanupCadViewer() {
     state.r2Config = null; cadLayers.clear(); cadLayerColors = {}; cadHiddenLayers.clear();
     state.currentCadProjectId = null; // [추가] 초기화
     state.vworldFailed = false; // [추가] 실패 플래그 초기화
+    state.isMemoIdVisible = false; // [추가] 초기화
     state.highlightedMemoId = null; // [추가] 강조 메모 초기화
     state.currentProjectGeoJSON = null; // [추가] 데이터 초기화
     clearSearchMarkers(); // [추가] 초기화
@@ -1800,39 +1806,45 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
     memoMarkers.forEach(m => m.remove());
     memoMarkers = [];
 
+    // [추가] 지도 레이어용 피처 리스트 (텍스트 겹침 방지용)
+    const memoFeatures = [];
+
     try {
         // [수정] 내 메모 또는(OR) 공개된 메모만 조회
         const user = state.currentUser ? encodeURIComponent(state.currentUser) : 'anonymous';
         
         let query = `memos?project_id=eq.${state.currentCadProjectId}&or=(is_public.eq.true,username.eq.${user})&select=*`;
-
         const data = await callSupabaseDirect(query);
         
-        // [수정] state.memos 전체를 덮어쓰지 않고 현재 프로젝트 데이터만 업데이트하거나 병합
         const projectMemos = data || [];
+
+        // state.memos 업데이트 로직 (기존 유지)
         if (state.memos && state.memos.length > 0) {
-            // 기존 메모 목록에서 현재 프로젝트 것만 교체
             const otherMemos = state.memos.filter(m => m.project_id !== state.currentCadProjectId);
             state.memos = [...projectMemos, ...otherMemos];
         } else {
             state.memos = projectMemos;
         }
         
-        // [추가] 지도에 마커 표시
         projectMemos.forEach(memo => {
-            if (memo.lon === 0 || memo.lat === 0) return; // [추가] 위치 정보가 없는 메모는 지도 표시 제외
+            if (memo.lon === 0 || memo.lat === 0) return;
+
+            // [추가] 겹침 방지 레이어용 데이터 구성
+            memoFeatures.push({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [memo.lon, memo.lat] },
+                properties: { find_id: String(memo.find_id || ''), id: memo.id }
+            });
 
             const isHighlighted = memo.id === state.highlightedMemoId; // [추가] 강조 여부 확인
-            
-            // [수정] 메모 유형별 색상 구분
-            // 조사메모: 파란색(#2196F3), 일반메모: 노란색(#FFC107)
             const markerColor = memo.is_survey ? '#2196F3' : '#FFC107';
             
-            const marker = new maplibregl.Marker({ 
-                color: markerColor, 
-                anchor: 'center', // [수정] 핀 마커가 좌표보다 위로 뜨지 않도록 중심점으로 anchor 변경
-                scale: isHighlighted ? 1.3 : 1.0 // 강조 시 크기 확대
-            })
+            // [수정] 마커는 상호작용과 위치 표시용 "점(Dot)"으로만 생성
+            // 번호(find_id)는 지도 레이어(memo-id-labels)가 담당하여 기존 텍스트와 자동으로 자리를 피합니다.
+            const el = document.createElement('div');
+            el.style.cssText = `width:12px; height:12px; background:${markerColor}; border:2px solid white; border-radius:50%; box-shadow:0 0 3px rgba(0,0,0,0.5); transform: scale(${isHighlighted ? 1.4 : 1.0}); cursor:pointer;`;
+
+            const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
                 .setLngLat([memo.lon, memo.lat]);
 
             // [수정] 마커 클릭 시 조회 팝업 대신 편집(작성) 팝업을 열도록 변경
@@ -1847,15 +1859,41 @@ export async function loadMapMemos() { // [수정] export 추가 및 마커 표�
                 };
                 openMemoPopup(feature);
             });
-            
             marker.addTo(cadMap);
-            
-            // [추가] 강조된 마커는 z-index를 높여서 맨 위로 표시
-            if (isHighlighted) {
-                marker.getElement().style.zIndex = '1000';
-            }
+            if (isHighlighted) marker.getElement().style.zIndex = '1000';
             memoMarkers.push(marker);
         });
+
+        // [추가] 메모 번호(find_id)용 심볼 레이어 업데이트
+        const memoSource = cadMap.getSource('memo_source');
+        if (!memoSource) {
+            cadMap.addSource('memo_source', { type: 'geojson', data: { type: 'FeatureCollection', features: memoFeatures } });
+            cadMap.addLayer({
+                id: 'memo-id-labels',
+                type: 'symbol',
+                source: 'memo_source',
+                layout: {
+                    'text-field': ['get', 'find_id'],
+                    'text-size': 11,
+                    'text-font': ['Open Sans Bold'],
+                    'text-variable-anchor': ['bottom', 'top', 'left', 'right'], // 마커(점) 주변 4방향 중 빈 곳을 자동으로 찾음
+                    'text-radial-offset': 0.8,
+                    'text-justify': 'auto',
+                    'text-allow-overlap': false, // [핵심] CAD 텍스트나 다른 번호와 겹치면 숨기거나 피함
+                    'text-ignore-placement': false,
+                    'visibility': state.isMemoIdVisible ? 'visible' : 'none'
+                },
+                paint: {
+                    'text-color': '#2196F3',
+                    'text-halo-color': 'rgba(255,255,255,0.95)',
+                    'text-halo-width': 2
+                }
+            });
+        } else {
+            memoSource.setData({ type: 'FeatureCollection', features: memoFeatures });
+            cadMap.setLayoutProperty('memo-id-labels', 'visibility', state.isMemoIdVisible ? 'visible' : 'none');
+        }
+
     } catch (e) {
         console.warn("메모 로드 실패 (테이블이 없을 수 있음):", e);
         state.memos = [];

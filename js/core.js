@@ -35,6 +35,7 @@ export const state = {
     distanceStartPoint: null, // [추가] 거리 측정 시작점 {lon, lat}
     distanceMarkers: [],     // [추가] 거리 측정용 마커/팝업 관리 배열
     isSurveyMode: false,      // [추가] 조사 모드 활성화 여부
+    isMemoIdVisible: false,   // [추가] 지도 메모 ID 표시 여부
     memoFilterProjectId: null, // [추가] 메모 필터링용 프로젝트 ID
     vworldFailed: false,       // [추가] 브이월드 로드 실패 여부 (자동 Fallback용)
     isDynamicText: true,       // [수정] 텍스트 동적 위치 기본 활성화
@@ -91,7 +92,6 @@ export async function callSupabaseDirect(endpoint, method = 'GET', body = null, 
             'Content-Type': 'application/json',
             ...extraHeaders
         },
-        cache: 'no-store', // [추가] 모바일 브라우저 등에서 API 응답 캐싱 방지 (항상 최신 데이터 조회)
         ...fetchOptions
     };
     if (body) options.body = JSON.stringify(body);

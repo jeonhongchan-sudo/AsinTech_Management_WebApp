@@ -1528,7 +1528,19 @@ function renderMemoListUI() {
         return;
     }
 
-    let html = '<table class="list-view-table"><thead><tr><th>프로젝트</th><th>내용</th><th>날짜</th><th>작성자</th><th>관리</th></tr></thead><tbody>';
+    // [수정] PC 화면에서 No(ID) 칸을 최소화하고 내용 칸을 최대화하도록 너비 설정 추가
+    let html = `<table class="list-view-table">
+        <thead>
+            <tr>
+                <th style="width: 40px; text-align: center;">No</th>
+                <th style="width: 130px;">프로젝트</th>
+                <th style="text-align: left;">메모 내용</th>
+                <th style="width: 160px;">날짜</th>
+                <th style="width: 80px;">작성자</th>
+                <th style="width: 100px;">관리</th>
+            </tr>
+        </thead>
+        <tbody>`;
     filteredMemos.forEach(m => {
         const isManagementMemo = m.lon === 0 && m.lat === 0; // [수정] lon, lat이 0인 메모를 관리용 메모로 간주
         const isMine = m.username === state.currentUser;
@@ -1571,6 +1583,7 @@ function renderMemoListUI() {
         }
 
         html += `<tr class="${isManagementMemo ? 'general-memo-row' : ''}">
+            <td data-label="No" style="font-weight:bold; color:#2196F3; text-align:center;">${m.find_id || '-'}</td>
             <td data-label="프로젝트">${m.projectName}</td>
             <td data-label="내용" class="memo-content">${publicIcon} ${surveyBadge}${fileIcon}${m.content}</td>
             <td data-label="날짜">${new Date(m.created_at).toLocaleString()}</td>
@@ -2266,12 +2279,13 @@ export function downloadMemosCSV() {
     }
 
     let csvContent = "\uFEFF"; // BOM (한글 깨짐 방지)
-    csvContent += "프로젝트,lon,lat,tm_x,tm_y,메모내용,Chainage,작성자,공개여부,날짜,첨부파일\n";
+    csvContent += "No,프로젝트,lon,lat,tm_x,tm_y,메모내용,Chainage,작성자,공개여부,날짜,첨부파일\n";
 
     targetMemos.forEach(m => {
         const content = (m.content || '').replace(/"/g, '""'); // 따옴표 이스케이프
         const imageUrls = (m.image_url || '').split(',').filter(url => url.trim() !== '').join(';'); // 여러 URL은 세미콜론으로 구분
         const row = [
+            `"${m.find_id || ''}"`,
             `"${m.projectName}"`,
             `"${m.lon || ''}"`,
             `"${m.lat || ''}"`,
