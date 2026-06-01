@@ -1028,8 +1028,8 @@ setTimeout(() => {
             if (!file || !state.uploadingProjectId) return;
             
             const fileName = file.name.toLowerCase();
-            if (!fileName.endsWith('.dxf')) {
-                return alert("DXF 파일만 선택 가능합니다. (DWG 변환은 지원하지 않습니다)");
+            if (!fileName.endsWith('.dxf') && !fileName.endsWith('.zip')) {
+                return alert("DXF 또는 SHP 압축파일(ZIP)만 선택 가능합니다.");
             }
             
             processCadUpload(file, state.uploadingProjectId);
@@ -1069,15 +1069,20 @@ function startProgressSimulation(targetPercent, durationMs) {
 /** [추가] 2단계: CAD 파일 업로드 및 분석 트리거 */
 async function processCadUpload(file, projectId) {
     try {
-        // 0. 브라우저에서 즉시 레이어 분석 실행
-        const extractedLayers = await extractDxfLayers(file);
-
         // 1. R2 업로드 경로 설정
         const ext = file.name.split('.').pop().toLowerCase();
+        const isZip = ext === 'zip';
+        
+        // 0. 브라우저 레이어 분석 (DXF만 실행)
+        let extractedLayers = [];
+        if (!isZip) {
+            extractedLayers = await extractDxfLayers(file);
+        }
+
         // [수정] 사용자의 요청에 따라 경로를 cad_data/CAD_{id}.{ext} 형식으로 통일
         const fileName = `CAD_${projectId}.${ext}`;
         const r2Path = `cad_data/${fileName}`;
-        const contentType = 'application/dxf';
+        const contentType = isZip ? 'application/zip' : 'application/dxf';
 
         // 2. Presigned URL 획득 및 업로드
         const presignRes = await fetch(`${WORKER_URL}/presign?file=${encodeURIComponent(r2Path)}&type=${encodeURIComponent(contentType)}`, {
@@ -1085,7 +1090,6 @@ async function processCadUpload(file, projectId) {
         });
         const { url: uploadUrl } = await presignRes.json();
         
-        // [수정] 클라우드 스토리지(Google Drive 등) 파일의 동기화 오류 방지를 위해 데이터를 미리 읽음
         const fileBuffer = await file.arrayBuffer();
         
         await fetch(uploadUrl, { 
@@ -1115,7 +1119,7 @@ async function processCadUpload(file, projectId) {
         // [수정] on_conflict=file_path 파라미터를 추가하여 동일 경로 파일 업로드 시 정보를 갱신하도록 설정
         await callSupabaseDirect('cad_files?on_conflict=file_path', 'POST', {
             project_id: parseInt(projectId),
-            file_type: 'dxf',
+            file_type: isZip ? 'zip' : 'dxf',
             file_path: r2Path,
             file_size: file.size,
             cache_expiry: expiryDate,
@@ -1146,7 +1150,8 @@ export async function openCadConfigUI(projectId) {
     
     try {
         // 1. Supabase에서 프로젝트 최신 상태 조회
-        const [p] = await callSupabaseDirect(`cad_projects?id=eq.${projectId}&select=*`);
+        // [수정] 파일 타입 확인을 위해 cad_files도 함께 조회
+        const [p] = await callSupabaseDirect(`cad_projects?id=eq.${projectId}&select=*,cad_files(file_type)`);
         
         if (p.status === 'ANALYZING') {
             return showAlert("아직 분석이 진행 중입니다. 잠시 후 다시 시도해주세요.", "info");
@@ -1157,6 +1162,9 @@ export async function openCadConfigUI(projectId) {
         if (p.status !== 'ANALYZED' && p.status !== 'COMPLETED') {
             return showAlert("분석된 데이터가 없습니다.", "error");
         }
+
+        const sourceFile = p.cad_files?.find(f => f.file_type === 'dxf' || f.file_type === 'zip');
+        const isZip = sourceFile?.file_type === 'zip';
 
         // 2. UI 전환
         const statusModal = document.getElementById('cadProcessModal');
@@ -1172,7 +1180,13 @@ export async function openCadConfigUI(projectId) {
 
         const layers = p.available_layers || [];
         
+        // 모든 설정 항목을 파일 타입에 관계없이 노출하도록 통합
         let html = `
+            ${isZip ? `
+                <div style="background:#e7f5ff; padding:10px; border-radius:8px; border:1px solid #a5d8ff; margin-bottom:15px; color:#1864ab; font-size:12px;">
+                    <strong>📦 SHP(ZIP) 모드</strong>: SHP 파일은 압축 내 모든 객체를 변환하는 것을 권장합니다.
+                </div>` : ''}
+
             <div style="margin-bottom:15px;">
                 <label style="font-weight:bold; display:block; margin-bottom:5px;">1. 변환할 레이어 선택 (${layers.length}개)</label>
                 <div style="display:flex; gap:5px; margin-bottom:8px;">
@@ -1180,20 +1194,20 @@ export async function openCadConfigUI(projectId) {
                     <button class="btn btn-outline" style="padding:2px 8px; font-size:11px;" onclick="document.querySelectorAll('.layer-chk').forEach(c=>c.checked=false)">전체해제</button>
                 </div>
                 <div style="max-height:150px; overflow-y:auto; border:1px solid #ddd; padding:10px; border-radius:4px; background:#fdfdfd;">
-                    ${layers.map(layer => `
+                    ${layers.length > 0 ? layers.map(layer => `
                         <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:4px; cursor:pointer;">
                             <input type="checkbox" class="layer-chk" value="${layer}" checked> ${layer}
                         </label>
-                    `).join('')}
+                    `).join('') : '<div style="color:#999; font-size:12px; text-align:center; padding:10px;">분석된 레이어가 없습니다.</div>'}
                 </div>
             </div>
 
             <div style="margin-bottom:15px;">
                 <label style="font-weight:bold; display:block; margin-bottom:5px;">2. 좌표계 설정</label>
                 <select id="cadCrsSelect" style="width:100%; padding:8px;">
-                    <option value="EPSG:5187">EPSG:5187</option>
-                    <option value="EPSG:5186">EPSG:5186</option>
-                    <option value="EPSG:5179">EPSG:5179</option>
+                    <option value="EPSG:5187">EPSG:5187 (동부원점)</option>
+                    <option value="EPSG:5186">EPSG:5186 (중부원점)</option>
+                    <option value="EPSG:5179">EPSG:5179 (UTM-K)</option>
                 </select>
             </div>
 
@@ -1204,12 +1218,12 @@ export async function openCadConfigUI(projectId) {
                 <div id="centerlineArea" style="display:none; margin-top:8px; padding-left:20px;">
                     <label style="font-size:12px; color:#666;">도로 중심선 레이어 선택:</label>
                     <select id="centerlineLayerSelect" style="width:100%; padding:5px; margin-top:4px;">
-                        ${layers.map(l => `<option value="${l}">${l}</option>`).join('')}
+                        ${layers.length > 0 ? layers.map(l => `<option value="${l}">${l}</option>`).join('') : '<option value="">(레이어 없음)</option>'}
                     </select>
                 </div>
             </div>
 
-            <button class="btn btn-primary" style="width:100%; padding:12px; font-weight:bold;" onclick="window.executeCadConversion('${projectId}')">지도 변환 시작 (R2 업로드)</button>
+            <button class="btn btn-primary" style="width:100%; padding:12px; font-weight:bold;" onclick="window.executeCadConversion('${projectId}', ${isZip})">지도 변환 시작 (R2 업로드)</button>
         `;
         
         configArea.innerHTML = html;
@@ -1220,13 +1234,13 @@ export async function openCadConfigUI(projectId) {
 }
 
 /** [추가] 최종 변환 트리거 (convert_r2.py 호출) */
-export async function executeCadConversion(projectId) {
+export async function executeCadConversion(projectId, isZip = false) {
     const selectedLayers = Array.from(document.querySelectorAll('.layer-chk:checked')).map(c => c.value);
-    if (selectedLayers.length === 0) return alert("최소 하나 이상의 레이어를 선택해야 합니다.");
+    if (!isZip && selectedLayers.length === 0) return alert("최소 하나 이상의 레이어를 선택해야 합니다.");
 
     const crs = document.getElementById('cadCrsSelect').value;
-    const useChainage = document.getElementById('chkChainage').checked;
-    const centerlineLayer = useChainage ? document.getElementById('centerlineLayerSelect').value : null;
+    const useChainage = document.getElementById('chkChainage')?.checked || false;
+    const centerlineLayer = useChainage ? document.getElementById('centerlineLayerSelect')?.value : null;
 
     const configArea = document.getElementById('cadProcessConfig');
     const statusContent = document.getElementById('cadProcessStatus');
@@ -1255,7 +1269,7 @@ export async function executeCadConversion(projectId) {
                 centerline_layer: centerlineLayer,
                 reverse_chainage: false,
                 cache_control: "public, max-age=31536000", // 365일 캐시
-                input_type: "dxf",
+                input_type: isZip ? "zip" : "dxf",
                 output_formats: ["pmtiles", "geojson"] // [수정] GeoJSON 결과 파일도 생성 및 업로드 요청
               }
             })
