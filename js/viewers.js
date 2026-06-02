@@ -1,18 +1,27 @@
 // e:\Program\SelfProgram\아신테크\js\viewers.js
 import { state, callApi, callSupabaseDirect, showAlert, R2_BASE_URL } from './core.js';
-import { UIS_DATA, ROAD_LEDGER_ITEMS, PDF_TOC_DATA, NETWORK_RTK_DATA, NON_CONFORMITY_CASES_DATA, NUMERIC_MAP_DATA, GNSS_NOTICE_DATA, PUBLIC_SURVEY_FAQ_DATA, REGULATION_REVISION_DATA, MATERIAL_ABBREVIATION_DATA, PUBLIC_SURVEY_REGULATIONS_DATA } from './data.js';
-import { handleAiSearch, handleDatabaseSearch, showModalMessage } from './ai.js';
-import { matchComplexQuery, updateSearchButtonUI } from './search_engine.js';
+import { updateSearchButtonUI } from './search_engine.js';
+
+// [수정] 중복 import/export 구문 정리 및 출처 명확화
+// 1. 프로젝트 정보 모달 관련
 export { showProjectInfo, switchProjectInfoTab } from './project_info.js';
 import { showProjectInfo, switchProjectInfoTab } from './project_info.js';
+
+// 2. 지침서 렌더링 관련
 export { selectGuideline, renderRoadLedgerTOC, renderUISTable, renderNetworkRtk, renderNonConformityCases, renderNumericMap, renderGnssNotice, renderPublicSurveyFaq, renderRegulationRevision, renderMaterialAbbr, renderPublicSurveyRegulations } from './guideline_renders.js';
-import { selectGuideline, renderRoadLedgerTOC, renderUISTable, renderNetworkRtk, renderNonConformityCases, renderNumericMap, renderGnssNotice, renderPublicSurveyFaq, renderRegulationRevision, renderMaterialAbbr, renderPublicSurveyRegulations } from './guideline_renders.js';
+import { selectGuideline } from './guideline_renders.js';
+
+// 3. 거리 측정 관련
 export { toggleDistanceMode, handleDistanceClick, clearDistanceMeasurement } from './map_measure.js';
-import { toggleDistanceMode, handleDistanceClick, clearDistanceMeasurement } from './map_measure.js';
+import { clearDistanceMeasurement } from './map_measure.js';
+
+// 4. 레이어 스타일 관련
 export { cadLayers, cadLayerColors, cadHiddenLayers, resetLayerStyles, updateLayerDiscovery, getRandomColor, renderLayerList, openLayerStyleModal, renderModalEditLists, closeLayerStyleModal, switchStyleTab, toggleDynamicText, updateIndividualStyle, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, changeLineLabelSize, changeLineLabelColor, reloadLayerStylesFromSettings, saveUserStyles, updateMapFilter, updateMapStyle } from './map_styles.js';
-import { cadLayers, cadLayerColors, cadHiddenLayers, resetLayerStyles, updateLayerDiscovery, getRandomColor, renderLayerList, openLayerStyleModal, renderModalEditLists, closeLayerStyleModal, switchStyleTab, toggleDynamicText, updateIndividualStyle, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, changeLineLabelSize, changeLineLabelColor, reloadLayerStylesFromSettings, saveUserStyles, updateMapFilter, updateMapStyle } from './map_styles.js';
+import { resetLayerStyles, updateLayerDiscovery, renderLayerList, updateMapFilter, updateMapStyle } from './map_styles.js';
+
+// 5. 지도 인터랙션 및 메모 관련
 export { loadMapMemos, loadProjectPhotos, flyToLocation, setupMapInteraction, toggleSurveyMode, clearMemoMarkers, memoMarkers, currentPopup } from './map_interaction.js';
-import { loadMapMemos, loadProjectPhotos, flyToLocation, setupMapInteraction, toggleSurveyMode, clearMemoMarkers } from './map_interaction.js';
+import { loadMapMemos, loadProjectPhotos, setupMapInteraction, clearMemoMarkers } from './map_interaction.js';
 
 export function toggleFullScreen() {
     const mapContainer = document.getElementById('cad-map');

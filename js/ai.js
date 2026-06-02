@@ -1,6 +1,6 @@
 // e:\Program\SelfProgram\아신테크\js\ai.js
 import { state, callSupabaseDirect, showAlert, callAiEdge, WORKER_URL, WORKER_AUTH_KEY, R2_BASE_URL } from './core.js';
-import { matchComplexQuery } from './search_engine.js';
+import { matchComplexQuery } from './search_db.js';
 
 let isAiProcessing = false; // [추가] 중복 요청 방지 변수
 let lastAiRequestTime = 0;   // [추가] 물리적 쿨타임 체크용
@@ -133,9 +133,9 @@ export async function fetchDbSearchResults(query) {
     const groups = includePart.split('&').map(g => g.trim()).filter(g => g.length > 0);
     const primaryGroup = groups.sort((a, b) => b.length - a.length)[0] || "";    
 
-    // [개선] 띄어쓰기/조사가 섞여도 결과가 나오도록 핵심 단어들을 추출하여 OR 조건으로 필터링 후 JS에서 순위 결정
+    // [개선] 자연어 요청어(알려줘 등)와 조사를 제거하여 핵심 명사 토큰 추출 강화
     const tokens = primaryGroup
-        .replace(/(의|와|과|은|는|이|가|을|를|도|에|로|으로|에서|하고|에대한|관한|알려줘|찾아줘|방법|기준|분류)/g, ' ')
+        .replace(/(의|와|과|은|는|이|가|을|를|도|에|로|으로|에서|하고|에대한|관한|알려줘|알려|찾아줘|찾아|설명해줘|설명해|보여줘|확인해|방법|기준|분류)/g, ' ')
         .split(/\s+/)
         .filter(t => t.length >= 1)
         .sort((a, b) => b.length - a.length);
@@ -346,6 +346,10 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
             state.originalAiQuery = query;
             state.aiCorrectionHistory = [];
             combinedContext = `${systemContextPrefix}현재 도면 레이어: ${layerContext}`;
+
+            // [추가] 실시간 분석 시에도 외부 추론 금지 및 데이터 기반 답변 강조
+            apiQuery = `'${query}'에 대해 제공된 도면 레이어 정보와 지침 DB 검색 결과를 바탕으로만 답변하세요. 
+            절대 당신의 내부 지식을 활용한 외부 추론은 하지 말고, 근거가 없는 경우 정직하게 '정보가 없음'을 밝히세요.`;
         }
 
         // 프롬프트 의도 보강
