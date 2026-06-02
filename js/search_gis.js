@@ -143,7 +143,7 @@ function executePointSearch(searchTerm, useBookmark, isAudit) {
 
     const matches = features.filter(f => {
         const combinedValues = Object.values(f.properties).join(' ');
-        return matchComplexQuery(combinedValues, searchTerm) > 0;
+        return matchComplexQuery(combinedValues, searchTerm) >= 10.0;
     });
 
     if (matches.length === 0) return showAlert("일치하는 포인트가 없습니다.", "info");
@@ -160,7 +160,7 @@ async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit) {
     showAlert(`${targetLayer} 레이어 사진 매칭 분석 중...`, "info");
 
     const points = state.currentProjectGeoJSON.features.filter(f => 
-        f.geometry.type === 'Point' && matchComplexQuery(f.properties.layer, targetLayer) > 0
+        f.geometry.type === 'Point' && matchComplexQuery(f.properties.layer, targetLayer) >= 10.0
     );
 
     const photos = state.projectPhotos;
@@ -291,7 +291,7 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit) {
     const lineFeatures = state.currentProjectGeoJSON.features.filter(f => {
         if (!f.geometry || !f.properties.layer) return false;
         const isLineOrPoly = f.geometry.type.includes('LineString') || f.geometry.type.includes('Polygon');
-        return isLineOrPoly && matchComplexQuery(f.properties.layer, targetLayer) > 0;
+        return isLineOrPoly && matchComplexQuery(f.properties.layer, targetLayer) >= 10.0;
     });
 
     if (lineFeatures.length === 0) return showModalMessage("📏 분석 불가", `${targetLayer} 레이어에 선형 객체가 존재하지 않습니다.`, 'info');
@@ -337,7 +337,7 @@ async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit) 
     showAlert(`${targetLayer} 레이어 거리 분석 중...`, "info");
 
     const points = state.currentProjectGeoJSON.features.filter(f => 
-        f.geometry.type === 'Point' && matchComplexQuery(f.properties.layer, targetLayer) > 0
+        f.geometry.type === 'Point' && matchComplexQuery(f.properties.layer, targetLayer) >= 10.0
     );
 
     if (points.length < 2) return showModalMessage("📏 분석 불가", "해당 레이어에 포인트가 2개 이상 존재해야 분석이 가능합니다.", 'info');
