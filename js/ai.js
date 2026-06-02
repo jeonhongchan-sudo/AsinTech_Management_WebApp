@@ -133,14 +133,20 @@ export async function fetchDbSearchResults(query) {
     const groups = includePart.split('&').map(g => g.trim()).filter(g => g.length > 0);
     const primaryGroup = groups.sort((a, b) => b.length - a.length)[0] || "";    
 
-    // [핵심] 띄어쓰기 무관 검색을 위해 그룹 내의 모든 공백을 제거하고 각 글자 사이에 와일드카드(*) 삽입
-    // 예: "교량 레이어" -> "교*량*레*이*어" (DB에 "교량 레이어", "교량레이어" 모두 매칭 가능)
-    const dbFuzzyToken = primaryGroup.replace(/\s+/g, '').split('').join('*');
+    // [개선] 띄어쓰기/조사가 섞여도 결과가 나오도록 핵심 단어들을 추출하여 OR 조건으로 필터링 후 JS에서 순위 결정
+    const tokens = primaryGroup
+        .replace(/(의|와|과|은|는|이|가|을|를|도|에|로|으로|에서|하고|에대한|관한|알려줘|찾아줘|방법|기준|분류)/g, ' ')
+        .split(/\s+/)
+        .filter(t => t.length >= 1)
+        .sort((a, b) => b.length - a.length);
 
-    // [수정] fuzzyKeyword(dbFuzzyToken)를 실제 쿼리에 적용하여 유연하게 DB 검색 수행
     let supabaseQuery = `pdf_knowledge?select=id,file_name,content,metadata,table_svg_urls,image_urls&order=created_at.desc&limit=10000`;
-    if (dbFuzzyToken) {
-        supabaseQuery += `&or=(content.ilike.*${encodeURIComponent(dbFuzzyToken)}*,file_name.ilike.*${encodeURIComponent(dbFuzzyToken)}*)`;
+    
+    if (tokens.length > 0) {
+        // 상위 3개 토큰 중 하나라도 포함된 결과를 모두 가져와서 가중치 계산 준비
+        const filterTokens = tokens.slice(0, 3);
+        const orConditions = filterTokens.map(t => `content.ilike.*${encodeURIComponent(t)}*`).join(',');
+        supabaseQuery += `&or=(${orConditions})`;
     }
 
     const allKnowledge = await callSupabaseDirect(supabaseQuery);
@@ -345,8 +351,8 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         // 프롬프트 의도 보강
         let apiQuery = query;
         if (isSummary) {
-            // [개선] 근거 제시 및 가독성 강조 프롬프트
-            apiQuery = `'${query}'에 대해 검색된 지침 내용을 항목별로 가독성 좋게 재구성해서 정리해줘. 반드시 각 정보가 어떤 문서(출처)에서 발췌되었는지 명확하게 근거를 제시해줘. 만약 지침 내용에 충분한 정보가 없다면 너의 지식을 활용하되 출처가 없는 내용은 '추론'임을 밝혀줘.`;
+            // [엄격] 외부 지식 및 추론 금지 프롬프트 강화
+            apiQuery = `'${query}'에 대해 검색된 아래 지침 내용을 시각적으로 아주 예쁘고 읽기 좋게 재구성해줘. 표(Table), 항목별 불렛포인트, 핵심 강조 등을 활용해서 가독성을 극대화하는 '포맷터' 역할에만 충실해야 해. 출처가 표시된 경우 누락하지 말고, 너의 의견이나 외부 추론은 절대 덧붙이지 마.`;
         } else if (isFollowUp) {
             apiQuery = `지금까지의 대화와 사용자 요청('${query}')을 종합하여 가장 정확한 답변을 1500자 이내로 요약하고 정리해줘.`;
         }

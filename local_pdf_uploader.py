@@ -86,6 +86,9 @@ class PDFUploaderApp:
         self.btn_start = tk.Button(btn_frame, text="2. 업로드 및 갱신", command=self.start_upload_thread, width=20, bg="#4CAF50", fg="white", state=tk.DISABLED, font=("Malgun Gothic", 10, "bold"))
         self.btn_start.grid(row=0, column=1, padx=5)
 
+        self.btn_delete = tk.Button(btn_frame, text="3. 기존 데이터 삭제", command=self.show_delete_dialog, width=20, bg="#f44336", fg="white", font=("Malgun Gothic", 10, "bold"))
+        self.btn_delete.grid(row=0, column=2, padx=5)
+
         # 로그 출력 영역
         self.log_area = scrolledtext.ScrolledText(self.root, width=90, height=30, font=("Malgun Gothic", 10))
         self.log_area.pack(padx=15, pady=10)
@@ -118,17 +121,22 @@ class PDFUploaderApp:
         """R2에서 특정 접두사(폴더)를 가진 모든 파일을 삭제합니다."""
         try:
             bucket_name = self.r2_config["R2_BUCKET_NAME"]
-            # 삭제할 오브젝트 목록 조회
-            objects_to_delete = self.s3_client.list_objects_v2(Bucket=bucket_name, Prefix=folder_prefix)
+            # 대량의 파일을 안전하게 삭제하기 위해 페이지네이터 사용
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=bucket_name, Prefix=folder_prefix)
+
+            total_deleted = 0
+            for page in pages:
+                if 'Contents' in page:
+                    delete_keys = [{'Key': obj['Key']} for obj in page['Contents']]
+                    self.s3_client.delete_objects(
+                        Bucket=bucket_name,
+                        Delete={'Objects': delete_keys}
+                    )
+                    total_deleted += len(delete_keys)
             
-            if 'Contents' in objects_to_delete:
-                delete_keys = [{'Key': obj['Key']} for obj in objects_to_delete['Contents']]
-                # 일괄 삭제 실행
-                self.s3_client.delete_objects(
-                    Bucket=bucket_name,
-                    Delete={'Objects': delete_keys}
-                )
-                self.log(f"[*] R2 기존 자원 정리 완료 ({len(delete_keys)}개 파일 삭제)")
+            if total_deleted > 0:
+                self.log(f"[*] R2 자원 정리 완료 ({total_deleted}개 파일 삭제)")
             else:
                 self.log("[*] R2에 삭제할 기존 자원이 없습니다.")
         except Exception as e:
@@ -152,7 +160,122 @@ class PDFUploaderApp:
             
         self.btn_start.config(state=tk.DISABLED)
         self.btn_select.config(state=tk.DISABLED)
+        self.btn_delete.config(state=tk.DISABLED)
         threading.Thread(target=self.process_uploads, daemon=True).start()
+
+    def fetch_existing_filenames(self):
+        """Supabase 'pdf_knowledge' 테이블에서 이미 업로드된 고유한 파일명 목록을 가져옵니다 (전체 조회를 위한 페이지네이션 적용)."""
+        if not self.supabase_client: return []
+        all_filenames = set()
+        limit = 1000
+        offset = 0
+        try:
+            self.log("[*] Supabase DB 레코드 검색 중...")
+            while True:
+                # PostgREST는 한 번에 가져오는 양에 제한이 있으므로 range를 사용하여 전체를 읽음
+                res = self.supabase_client.table("pdf_knowledge") \
+                    .select("file_name") \
+                    .range(offset, offset + limit - 1) \
+                    .execute()
+                
+                if not res.data:
+                    break
+                
+                for item in res.data:
+                    all_filenames.add(item['file_name'])
+                
+                # 가져온 데이터가 limit보다 작으면 마지막 페이지임
+                if len(res.data) < limit:
+                    break
+                    
+                offset += limit
+                self.log(f"  - {offset}개 레코드 확인 중...")
+
+            return sorted(list(all_filenames))
+        except Exception as e:
+            self.log(f"[❌] 파일 목록 조회 실패: {e}")
+            return []
+
+    def show_delete_dialog(self):
+        """삭제할 파일 목록을 보여주는 모달 창을 띄웁니다."""
+        self.log("\n🛰️ 서버에서 기존 파일 목록 조회 중...")
+        files = self.fetch_existing_filenames()
+        if not files:
+            self.log("[!] 삭제할 수 있는 데이터가 없습니다.")
+            return messagebox.showinfo("정보", "삭제할 데이터가 없습니다.")
+
+        delete_win = tk.Toplevel(self.root)
+        delete_win.title("기존 데이터 삭제")
+        delete_win.geometry("450x550")
+        delete_win.grab_set() # 모달 동작 (메인 창 조작 방지)
+
+        tk.Label(delete_win, text="삭제할 파일을 선택하세요 (다중 선택 가능)", font=("Malgun Gothic", 10, "bold")).pack(pady=10)
+
+        # 스크롤 가능한 영역 구성
+        container = tk.Frame(delete_win)
+        container.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
+        
+        canvas = tk.Canvas(container)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        vars_dict = {}
+        for f in files:
+            var = tk.BooleanVar()
+            cb = tk.Checkbutton(scrollable_frame, text=f, variable=var, font=("Malgun Gothic", 9), anchor="w", justify=tk.LEFT)
+            cb.pack(fill=tk.X, padx=5, pady=2)
+            vars_dict[f] = var
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def on_confirm():
+            selected = [f for f, v in vars_dict.items() if v.get()]
+            if not selected:
+                return messagebox.showwarning("경고", "삭제할 파일을 하나 이상 선택해주세요.")
+            
+            if messagebox.askyesno("최종 확인", f"선택한 {len(selected)}개의 파일 정보를 Supabase와 R2에서 영구 삭제합니다.\n정말 진행하시겠습니까?"):
+                delete_win.destroy()
+                threading.Thread(target=self.execute_deletion, args=(selected,), daemon=True).start()
+
+        btn_confirm = tk.Button(delete_win, text="데이터 삭제 실행", command=on_confirm, bg="#f44336", fg="white", font=("Malgun Gothic", 10, "bold"), height=2)
+        btn_confirm.pack(fill=tk.X, padx=15, pady=15)
+
+    def execute_deletion(self, file_names):
+        """실제 삭제 로직을 실행합니다."""
+        self.btn_start.config(state=tk.DISABLED)
+        self.btn_select.config(state=tk.DISABLED)
+        self.btn_delete.config(state=tk.DISABLED)
+        
+        try:
+            for name in file_names:
+                self.log(f"\n🗑️ '{name}' 데이터 제거 시작...")
+                
+                # 1. R2 자원(이미지, 표 WebP) 폴더 삭제
+                self.delete_r2_folder(f"knowledge_assets/{name}/")
+                
+                # 2. Supabase DB 레코드 삭제
+                self.supabase_client.table("pdf_knowledge").delete().eq("file_name", name).execute()
+                
+                self.log(f"[✅] '{name}' 관련 모든 데이터 제거 완료")
+            
+            self.log("\n[✨] 요청하신 모든 삭제 작업이 완료되었습니다.")
+            messagebox.showinfo("삭제 완료", f"{len(file_names)}개의 파일 데이터가 정상적으로 제거되었습니다.")
+        except Exception as e:
+            self.log(f"[❌] 삭제 중 오류 발생: {e}")
+        finally:
+            self.btn_select.config(state=tk.NORMAL)
+            self.btn_delete.config(state=tk.NORMAL)
+            # 업로드할 파일이 선택된 상태면 시작 버튼 활성화
+            self.btn_start.config(state=tk.NORMAL if self.selected_files else tk.DISABLED)
 
     def process_uploads(self):
         for file_path in self.selected_files:
@@ -300,6 +423,7 @@ class PDFUploaderApp:
         messagebox.showinfo("완료", "지침서 업데이트가 성공적으로 완료되었습니다.")
         
         self.btn_select.config(state=tk.NORMAL)
+        self.btn_delete.config(state=tk.NORMAL)
         self.selected_files = []
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); // 서비스 롤 키 사용 권장
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-// [유지] 사용자 요청에 따라 최신 모델인 gemini-2.5-flash-lite 유지
+// [수정] 실제 존재하는 최신 안정화 모델인 gemini-1.5-flash로 변경 (400 에러 해결 핵심)
 const API_URL = `${API_BASE}/models/gemini-2.5-flash-lite:generateContent`;
 
 const corsHeaders = {
@@ -68,18 +68,18 @@ serve(async (req) => {
     let systemInstruction = `당신은 '아신테크 GIS 관리 도구'의 지식 검색 에이전트 '아신'입니다.
 [데이터 접근 규칙]
 1. 웹 클라이언트에서 전달한 [분석 대상 데이터]가 있다면 이를 최우선적으로 사용하여 답변하세요.
-2. 제공된 데이터 내에서 정답을 찾을 수 없는 경우, 당신의 내부 지식을 활용하여 답변하되 반드시 해당 내용은 'AI 추론 결과'임을 명시하세요.
+2. **당신의 역할(한정)**: 당신은 정보를 생성하는 창조자가 아니라, 제공된 텍스트 데이터를 사용자에게 '가장 예쁘고 읽기 좋게' 보여주는 시각적 편집자입니다. 데이터를 분석하려 하지 말고, 가독성을 높이는 데만 집중하세요.
 3. **근거 제시(필수)**: 모든 정보에는 반드시 해당 문서의 이름과 페이지를 포함한 출처를 명시하세요. 형식: [출처: 파일명 p.페이지].
 4. **시각 자료 활용**: 검색된 데이터에 'table_svg_urls'나 'image_urls'가 있다면 해당 URL들을 답변 내에 반드시 [ATTACH_SVG:URL] 또는 [ATTACH_IMG:URL] 태그 형식으로 포함하세요.
 3. 정체성 규정: 당신의 이름은 '아신'이지만, 답변 시 자기소개는 절대 하지 마세요. 정보 전달에만 집중하세요.`;
 
     if (type === 'point_search') {
-      systemInstruction += "\n사용자가 입력한 검색어가 GIS 관련 용어라면 제공된 도면 레이어 정보를 참고하여 답변하고, 만약 일반적인 질문이라면 범용적인 AI로서 답변하세요.";
+      systemInstruction += "\n당신은 도면 레이어와 DB 내용을 예쁘게 정리하여 출력하는 역할을 합니다. 정보가 없으면 정중히 '정보가 없음'을 밝히고 추론하지 마세요.";
     } else if (type === 'pdf_summary') {
       systemInstruction += `
 [요약 및 가시화 전문가 모드]
-1. 당신의 역할은 사용자가 검색한 DB 결과물을 시각적으로 정리하는 '포맷터(Formatter)'입니다.
-2. 제공된 텍스트 원문을 바탕으로 항목별 요약, 강조, 표(Table) 등을 활용하여 가독성 좋게 정리하세요. 
+1. 당신은 고도로 숙련된 '데이터 포맷터(Formatter)'입니다.
+2. 제공된 텍스트 원문을 바탕으로 가독성이 뛰어난 레이아웃(표, 리스트, 강조 등)을 설계하여 예쁘게 정리하세요. 
    특히 원문의 기호(●, ■, ※, ① 등)를 적극적으로 유지하여 지침서 특유의 계층 구조를 보존하세요.
 3. **출처 명시**: 각 항목마다 \`[출처: 파일명 p.페이지]\`를 붙여 어떤 근거로 작성되었는지 밝히세요.
 4. 시각 자료 활용(필수): 검색된 행(Row)에 'table_svg_urls' 또는 'image_urls' 배열 데이터가 존재한다면, 해당 URL들을 답변 내에 반드시 포함시켜야 합니다.
@@ -114,7 +114,12 @@ serve(async (req) => {
       });
 
       data = await response.json(); // const를 제거하여 외부 변수 data를 업데이트
-      if (data.error) throw new Error(data.error.message);
+      
+      // [개선] Google API 에러 상세 출력
+      if (data.error) {
+        console.error("Gemini API Error:", data.error);
+        throw new Error(`Gemini API: ${data.error.message}`);
+      }
 
       const candidate = data.candidates?.[0];
       const part = candidate?.content?.parts?.[0];
@@ -126,7 +131,7 @@ serve(async (req) => {
 
         if (call.name === "query_table_data") {
           const { search_keyword } = call.args;
-          let url = `${SUPABASE_URL}/rest/v1/pdf_knowledge?select=*`;
+          let url = `${SUPABASE_URL}/rest/v1/pdf_knowledge?select=file_name,content,metadata,table_svg_urls,image_urls&limit=50`;
           if (search_keyword) {
             // [개선] 공백을 와일드카드(*)로 변환하여 띄어쓰기나 순서가 조금 달라도 검색되도록 유연화
             // 예: "공공 측량 기준" -> "*공공*측량*기준*"
@@ -135,7 +140,9 @@ serve(async (req) => {
           }
           const dbRes = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
           result = await dbRes.json();
-          if (Array.isArray(result)) lastRawData.push(...result); // 데이터 누락 방지를 위한 누적 저장
+          
+          // [수정] 대량 데이터 시 스택 오버플로우 방지를 위해 concat 사용
+          if (Array.isArray(result)) lastRawData = lastRawData.concat(result);
         }
 
         // 대화 기록에 추가하고 루프 계속

@@ -598,16 +598,19 @@ function checkPhotoMatch(pointText, photoFileName) {
 export function sanitizeSearchText(str, isQuery = false) {
     if (str === null || str === undefined) return '';
     
-    let clean = str.toString().toLowerCase()
-        .replace(/\s+/g, '')             // 모든 공백 제거
-        .replace(/%%[cdp]/gi, '')        // CAD 제어코드 제거 (%%c:Φ, %%d:°, %%p:±)
-        .replace(/[/\\-_.]/g, '');       // 일반 구분 기호(/, \, -, _, .) 제거
+    let clean = str.toString().toLowerCase().trim();
 
-    // 검색어(Query)인 경우 조사를 제거하여 검색 의도 강화
     if (isQuery) {
-        clean = clean.replace(/(에서|으로|의|은|는|이|가|을|를|도|에|기준|안내|방법|작성|대한|관한|사항|정리|요청|알려|어떻게|알아|확인|검색|분석|설명|보여|보여줘|알려줘|찾아|찾아줘|해줘)$/, '');
+        // [개선] 요청성 접미어 및 조사 제거 (순서 중요: 긴 것부터)
+        clean = clean.replace(/(알려줘|찾아줘|검색해줘|보여줘|요청해|어떻게|알아봐|알려|확인|검색|분석|설명|보여|찾아|해줘|알려|정리|방법|기준|사항)$/, '');
+        clean = clean.replace(/(에서|으로|의|은|는|이|가|을|를|도|에|와|과|하고)$/, '');
     }
-    
+
+    // 모든 공백 제거 및 CAD 특수기호/구분자 제거
+    clean = clean.replace(/\s+/g, '')
+                 .replace(/%%[cdp]/gi, '')
+                 .replace(/[/\\-_.]/g, '');
+
     return clean;
 }
 
@@ -632,12 +635,29 @@ export function matchComplexQuery(targetText, query) {
 
     let maxScore = 0;
     orGroups.forEach(group => {
-        const andTerms = group.trim().split(/\s+/).map(t => sanitizeSearchText(t, true)).filter(t => t.length >= 1);
+        // [개선] 띄어쓰기뿐만 아니라 조사(의, 와, 과 등)를 기준으로도 키워드를 분리하여 자연어 대응
+        const andTerms = group.trim()
+            .replace(/(의|와|과|은|는|이|가|을|를|도|에|로|으로|에서|하고|에대한|관한)/g, ' ')
+            .split(/\s+/)
+            .map(t => sanitizeSearchText(t, true))
+            .filter(t => t.length >= 1);
+
         if (andTerms.length === 0) return;
 
-        // 모든 AND 단어가 포함되어야 함
-        const isMatch = andTerms.every(term => cleanTarget.includes(term));
-        if (isMatch) maxScore = Math.max(maxScore, 1.0 + (andTerms.length * 0.1));
+        // [핵심] AND/OR 하이브리드 가중치 로직: 전체 매칭(AND)은 10점대, 부분 매칭(OR)은 0.1점대 부여
+        const matchCount = andTerms.filter(term => cleanTarget.includes(term)).length;
+        
+        if (matchCount > 0) {
+            let score = 0;
+            if (matchCount === andTerms.length) {
+                // 모든 키워드 포함 시 높은 점수 (상단 노출)
+                score = 10.0 + andTerms.length;
+            } else {
+                // 일부 키워드만 포함 시 낮은 점수 (하단 노출)
+                score = matchCount * 0.1;
+            }
+            maxScore = Math.max(maxScore, score);
+        }
     });
 
     return maxScore;
