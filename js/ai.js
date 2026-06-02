@@ -140,7 +140,8 @@ export async function fetchDbSearchResults(query) {
         .filter(t => t.length >= 1)
         .sort((a, b) => b.length - a.length);
 
-    let supabaseQuery = `pdf_knowledge?select=id,file_name,content,metadata,table_svg_urls,image_urls&order=created_at.desc&limit=10000`;
+    // [비용 최적화] limit을 10,000 -> 100으로 축소하여 Egress 비용 및 브라우저 부하 방어
+    let supabaseQuery = `pdf_knowledge?select=id,file_name,content,metadata,table_svg_urls,image_urls&order=created_at.desc&limit=100`;
     
     if (tokens.length > 0) {
         // 상위 3개 토큰 중 하나라도 포함된 결과를 모두 가져와서 가중치 계산 준비
