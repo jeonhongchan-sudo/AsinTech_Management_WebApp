@@ -45,36 +45,17 @@ serve(async (req) => {
       );
     }
 
-    // [추가] AI가 사용할 수 있는 도구(함수) 정의
-    const tools = [
-      {
-        function_declarations: [
-          {
-            name: "query_table_data",
-            description: "지침서 및 매뉴얼(pdf_knowledge) 정보를 조회합니다. 검색어는 문장 형태가 아닌 핵심 명사 위주로 띄어쓰기를 포함하여 입력하세요. (예: '네트워크RTK 기준' 등)",
-            parameters: {
-              type: "OBJECT",
-              properties: {
-                search_keyword: { type: "STRING", description: "검색 키워드 (예: 네트워크RTK, 도로대장 등)" }
-              },
-              required: ["search_keyword"]
-            }
-          }
-        ]
-      }
-    ];
-
     // 시스템 프롬프트 설정 (학습형 AI의 정체성 부여)
     let systemInstruction = `당신은 '아신테크 GIS 관리 도구'의 지식 검색 에이전트 '아신'입니다.
 [데이터 접근 규칙]
-1. 웹 클라이언트에서 전달한 [분석 대상 데이터]가 있다면 이를 최우선적으로 사용하여 답변하세요.
-2. **당신의 역할(한정)**: 당신은 정보를 생성하는 창조자가 아니라, 제공된 텍스트 데이터를 사용자에게 '가장 예쁘고 읽기 좋게' 보여주는 시각적 편집자입니다. 데이터를 분석하려 하지 말고, 가독성을 높이는 데만 집중하세요.
-3. **근거 제시(필수)**: 모든 정보에는 반드시 해당 문서의 이름과 페이지를 포함한 출처를 명시하세요. 형식: [출처: 파일명 p.페이지].
-4. **시각 자료 활용**: 검색된 데이터에 'table_svg_urls'나 'image_urls'가 있다면 해당 URL들을 답변 내에 반드시 [ATTACH_SVG:URL] 또는 [ATTACH_IMG:URL] 태그 형식으로 포함하세요.
-3. 정체성 규정: 당신의 이름은 '아신'이지만, 답변 시 자기소개는 절대 하지 마세요. 정보 전달에만 집중하세요.`;
+1. 웹 클라이언트에서 전달한 [분석 대상 데이터]가 질문의 의도와 부합하는지 먼저 분석하세요.
+2. **데이터 활용**: 검색된 내용이 질문과 연관성이 높다면 이를 요약하여 답변하세요. 만약 데이터가 질문의 의도와 너무 다르거나 정보가 부족하다면, 당신의 전문적인 지식을 활용하여 답변을 보완하거나 대안을 제시하세요.
+3. **상태 알림**: 당신의 일반 지식을 활용해 답변을 보완한 경우, 답변 하단에 "지침 DB 내 관련 정보가 부족하여 AI의 일반 지식을 바탕으로 설명해 드립니다."라고 명시하세요.
+4. **근거 제시**: DB에서 발췌한 정보에는 반드시 출처를 명시하세요. 형식: [출처: 파일명 p.페이지].
+5. **시각 자료**: 데이터에 URL이 포함되어 있다면 [ATTACH_SVG:URL] 또는 [ATTACH_IMG:URL] 태그를 반드시 유지하세요.`;
 
     if (type === 'point_search') {
-      systemInstruction += "\n당신은 도면 레이어와 DB 내용을 예쁘게 정리하여 출력하는 역할을 합니다. 정보가 없으면 정중히 '정보가 없음'을 밝히고 추론하지 마세요.";
+      systemInstruction += "\n당신은 도면 레이어와 DB 내용을 분석하여 사용자에게 최적의 답변을 제공합니다. DB에 근거가 없더라도 가능한 전문적인 조언을 제공하되 출처가 없는 정보임을 밝히세요.";
     } else if (type === 'pdf_summary') {
       systemInstruction += `
 [요약 및 가시화 전문가 모드]
@@ -91,77 +72,29 @@ serve(async (req) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-    // [핵심] 에이전틱 루프 구현: AI가 도구를 다 쓸 때까지 최대 5회 반복
-    let contents = [{
+    const contents = [{
       role: "user",
       parts: [{ text: `${systemInstruction}\n\n[도면 레이어 맥락]\n${context || ""}\n\n[User Query]\n${prompt}` }]
     }];
-    let finalAnswer = "";
-    let lastRawData = [];
-    let loopCount = 0;
-    let data = null; // data 변수를 loop 외부에서 접근 가능하도록 상단에 선언
 
-    while (loopCount < 5) {
-      const response = await fetch(`${API_URL}?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: contents,
-          tools: tools,
-          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
-        }),
-      });
+    // [수정] 에이전트 루프 제거, 단일 호출 방식으로 변경
+    const response = await fetch(`${API_URL}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: contents,
+        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
+      }),
+    });
 
-      data = await response.json(); // const를 제거하여 외부 변수 data를 업데이트
-      
-      // [개선] Google API 에러 상세 출력
-      if (data.error) {
-        console.error("Gemini API Error:", data.error);
-        throw new Error(`Gemini API: ${data.error.message}`);
-      }
-
-      const candidate = data.candidates?.[0];
-      const part = candidate?.content?.parts?.[0];
-
-      // 1. 함수 호출 요청이 있는 경우
-      if (part?.functionCall) {
-        const call = part.functionCall;
-        let result = [];
-
-        if (call.name === "query_table_data") {
-          const { search_keyword } = call.args;
-          let url = `${SUPABASE_URL}/rest/v1/pdf_knowledge?select=file_name,content,metadata,table_svg_urls,image_urls&limit=50`;
-          if (search_keyword) {
-            // [개선] 공백을 와일드카드(*)로 변환하여 띄어쓰기나 순서가 조금 달라도 검색되도록 유연화
-            // 예: "공공 측량 기준" -> "*공공*측량*기준*"
-            const fuzzyKeyword = search_keyword.trim().split(/\s+/).join('*');
-            url += `&content=ilike.*${encodeURIComponent(fuzzyKeyword)}*`;
-          }
-          const dbRes = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
-          result = await dbRes.json();
-          
-          // [수정] 대량 데이터 시 스택 오버플로우 방지를 위해 concat 사용
-          if (Array.isArray(result)) lastRawData = lastRawData.concat(result);
-        }
-
-        // 대화 기록에 추가하고 루프 계속
-        contents.push(candidate.content); // 모델의 function_call 추가
-        contents.push({
-          role: "function",
-          parts: [{ functionResponse: { name: call.name, response: { content: result } } }]
-        });
-        loopCount++;
-      } 
-      // 2. 최종 텍스트 답변이 온 경우
-      else if (part?.text) {
-        finalAnswer = part.text;
-        break;
-      } 
-      else {
-        break;
-      }
+    const data = await response.json();
+    if (data.error) {
+      console.error("Gemini API Error:", data.error);
+      throw new Error(`Gemini API: ${data.error.message}`);
     }
+
+    const finalAnswer = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
     clearTimeout(timeoutId);
 
@@ -169,7 +102,6 @@ serve(async (req) => {
       JSON.stringify({ 
         success: true, 
         answer: finalAnswer || "답변을 생성할 수 없습니다.",
-        rawData: JSON.stringify(lastRawData),
         model: data.model_version || "gemini-2.5-flash-lite"
       }),
       { 

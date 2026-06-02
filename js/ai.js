@@ -348,17 +348,18 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
             combinedContext = `${systemContextPrefix}현재 도면 레이어: ${layerContext}`;
 
             // [추가] 실시간 분석 시에도 외부 추론 금지 및 데이터 기반 답변 강조
-            apiQuery = `'${query}'에 대해 제공된 도면 레이어 정보와 지침 DB 검색 결과를 바탕으로만 답변하세요. 
-            절대 당신의 내부 지식을 활용한 외부 추론은 하지 말고, 근거가 없는 경우 정직하게 '정보가 없음'을 밝히세요.`;
         }
 
         // 프롬프트 의도 보강
         let apiQuery = query;
         if (isSummary) {
-            // [엄격] 외부 지식 및 추론 금지 프롬프트 강화
-            apiQuery = `'${query}'에 대해 검색된 아래 지침 내용을 시각적으로 아주 예쁘고 읽기 좋게 재구성해줘. 표(Table), 항목별 불렛포인트, 핵심 강조 등을 활용해서 가독성을 극대화하는 '포맷터' 역할에만 충실해야 해. 출처가 표시된 경우 누락하지 말고, 너의 의견이나 외부 추론은 절대 덧붙이지 마.`;
+            // [수정] DB 내용과 질문의 의도를 비교 분석하도록 유도
+            apiQuery = `'${query}'에 대해 검색된 아래 데이터를 분석하여 답변해줘. 질문의 의도와 관련이 깊은 내용을 우선적으로 정리하되, 만약 데이터가 질문과 상이하거나 부족하다면 너의 전문적인 지식을 더해서 보완해줘.`;
         } else if (isFollowUp) {
             apiQuery = `지금까지의 대화와 사용자 요청('${query}')을 종합하여 가장 정확한 답변을 1500자 이내로 요약하고 정리해줘.`;
+        } else {
+            // 일반 질문 시에도 데이터 기반 보완 허용
+            apiQuery = `'${query}'에 대해 제공된 도면 레이어 정보와 지침 데이터를 분석하여 답변해줘.`;
         }
         
         const res = await callAiEdge(apiQuery, combinedContext, requestType);
@@ -369,24 +370,8 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
                 handleAiCommand(res.command);
             }
             
-            // [개선] DB 조회 결과(rawData)가 포함된 경우 답변 가독성 보강
-            let displayAnswer = res.answer;
-            if (res.rawData) {
-                try {
-                    const data = JSON.parse(res.rawData);
-                    const dataCount = Array.isArray(data) ? data.length : (data ? 1 : 0);
-                    if (dataCount > 0) {
-                        // AI 답변 내에 이미 숫자가 포함되어 있을 것이므로, 헤더에만 참조 건수 표시
-                        displayAnswer = `✅ **실시간 DB 데이터 분석 결과 (최종 ${dataCount}건 확인)**\n\n${res.answer}`;
-                    } else if (displayAnswer.includes("찾을 수 없") || displayAnswer.includes("없습니다")) {
-                        displayAnswer = `🔍 **조회 결과 알림**\n\n${res.answer}\n\n> 프로젝트 명칭(한글)이 정확한지 확인해 주세요.`;
-                    }
-                } catch (e) {
-                    console.warn("RawData Parsing 실패", e);
-                }
-            }
-
-            showAiResponseModal(query, displayAnswer, "실시간 AI 분석");
+            // [수정] 이제 AI가 스스로 DB를 검색하지 않으므로 rawData 관련 보정 로직 제거
+            showAiResponseModal(query, res.answer, "실시간 AI 분석");
             
             lastAiRequestTime = Date.now();
         } else {

@@ -139,8 +139,21 @@ export function toggleMapMenu(event) {
 export async function loadCadMap(projectId) {
     if (!projectId) return;
     state.currentCadProjectId = projectId; // [수정] 전역 상태에 프로젝트 ID 저장
+
+    // [추가] 프로젝트 전환 시 이전 프로젝트의 GIS 검색 데이터 및 UI 상태 완전 초기화
+    clearSearchMarkers(); 
+    state.currentProjectSourceCrs = null;
+    state.currentProjectBounds = null;
+    state.currentProjectGeoJSON = null;
+    
+    const btnResetSearch = document.getElementById('btnResetSearch');
+    if (btnResetSearch) btnResetSearch.style.display = 'none';
+
+    // [추가] GIS 검색 결과창이나 리스트가 있다면 초기화 (필요 시 해당 엘리먼트 ID 확인)
+    const gisResultArea = document.getElementById('gisSearchResultArea'); // 예시 ID
+    if (gisResultArea) gisResultArea.innerHTML = '';
+
     if (state.cadMap) { state.cadMap.remove(); state.cadMap = null; }
-    clearSearchMarkers(); // [추가] 새 지도 로드 시 이전 검색 결과 초기화
     resetLayerStyles();
     document.getElementById('cadLayerList').innerHTML = '';
     document.getElementById('cadLayerPanel').style.display = 'none';
