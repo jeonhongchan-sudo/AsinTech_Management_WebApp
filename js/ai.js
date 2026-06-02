@@ -203,6 +203,8 @@ export async function handleDatabaseSearch(query) {
             return true;
         }
 
+        // [수정] 검색 결과가 없더라도 직접 내용을 입력하여 저장할 수 있도록 안내 문구와 함께 모달 유지
+        showAiResponseModal(query, "지침 DB에서 해당 내용을 찾을 수 없습니다. 직접 답변을 정리하여 저장하시거나, AI의 도움이 필요하면 질문에 <strong>'아신'</strong> 키워드를 포함해 보세요.", "📚 통합 DB 검색");
         return false;
     } catch (e) { console.error("DB 검색 오류:", e); showModalMessage("⚠️ DB 검색 중 오류가 발생했습니다.", e.message, 'error'); return false; }
 }
@@ -259,7 +261,7 @@ function displayCombinedResults(matches, query, sourceLabel) {
 
 
 /** AI 포인트 분석 및 답변 처리 */
-export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, isFollowUp = false) {
+export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, isFollowUp = false, fallbackDbResults = null) {
     const now = Date.now();
 
     // 1. 이미 요청 중인 경우
@@ -315,19 +317,13 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
 
         // [핵심] 대화 맥락 유지 및 질문 히스토리 관리
         let combinedContext = "";
-        let finalQuery = query;
-        
-        // [추가] "아신" 키워드 포함 여부 확인 (전체 로직의 기준)
-        const hasAgentName = (state.originalAiQuery || "").includes("아신") || query.includes("아신");
+        let finalQuery = query;        
 
         if (isFollowUp) {
             // 추가 질문(교정)인 경우: 이전 답변을 컨텍스트에 포함하여 AI가 자기 오류를 수정하게 함
             state.aiCorrectionHistory.push(query);
             combinedContext = `${systemContextPrefix}[이전 대화 요약]\n${state.lastAiAnswer}\n\n[도면 맥락]\n${layerContext}\n\n위 답변과 사용자 히스토리를 종합하여 질문에 답하세요.`;
-            // [로직 1 반영] 아신 키워드가 없으면 외부 지식 차단 명시
-            if (!hasAgentName) {
-                combinedContext += "\n⚠️ 주의: 외부 지식을 활용한 추론은 절대 하지 말고, 오직 이전 답변에 포함된 DB 정보 내에서만 대답하세요.";
-            }
+            
             finalQuery = query;
         } else if (isSummary) {
             // DB 재요청(요약)인 경우: 새로운 대화로 간주
@@ -344,8 +340,8 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         // 프롬프트 의도 보강
         let apiQuery = query;
         if (isSummary) {
-            // [로직 1 반영] 아신 키워드가 없는 '요약' 요청은 외부 지식 절대 금지
-            apiQuery = `'${query}'에 대해 검색된 위 DB 지침 내용을 항목별로 가독성 좋게 재구성해서 아주 이쁘게 정리해줘. 외부 지식을 이용한 추론이나 일반 정보 답변은 절대 하지 말고 오직 주어진 내용으로만 작성해. 분량은 1500자 이내로 핵심만 담아줘.`;
+            // [개선] 근거 제시 및 가독성 강조 프롬프트
+            apiQuery = `'${query}'에 대해 검색된 지침 내용을 항목별로 가독성 좋게 재구성해서 정리해줘. 반드시 각 정보가 어떤 문서(출처)에서 발췌되었는지 명확하게 근거를 제시해줘. 만약 지침 내용에 충분한 정보가 없다면 너의 지식을 활용하되 출처가 없는 내용은 '추론'임을 밝혀줘.`;
         } else if (isFollowUp) {
             apiQuery = `지금까지의 대화와 사용자 요청('${query}')을 종합하여 가장 정확한 답변을 1500자 이내로 요약하고 정리해줘.`;
         }
@@ -384,30 +380,32 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
             
             // [추가] 분석 실패 시 모달 내부 메시지 창으로 안내 (DB 검색과 동일)
             const errorMsg = res.error || "응답 형식이 올바르지 않습니다.";
-            showModalMessage("⚠️ AI 분석 중 오류가 발생했습니다.", errorMsg, 'error');
 
             // [추가] limit: 0 에러에 대한 특수 처리
             if (res.error && res.error.includes("limit: 0")) {
-                showModalMessage("⚠️ API 할당량 소진", "구글 API 일일 할당량이 모두 소진되었습니다. 내일 다시 이용 가능합니다.", 'error');
                 console.error("🚨 Gemini API 할당량 소진 또는 차단 상태입니다. (limit: 0 확인)");
                 lastAiRequestTime = Date.now() + (3600 * 1000); // 1시간 동안 버튼 잠금
                 startAiCooldownUI(3600);
-                // [추가] 429/할당량 초과 시 DB 키워드 검색으로 전환
-                const fallbackQuery = query.replace(/아신/g, "").trim();
-                return handleDatabaseSearch(fallbackQuery);
+                
+                // [Priority 3] AI 불능 시 DB 검색 원문 출력으로 폴백
+                if (fallbackDbResults) {
+                    return displayCombinedResults(fallbackDbResults, query, "📚 통합 DB 검색 (AI 과부하로 원문 출력)");
+                }
+                showModalMessage("⚠️ API 할당량 소진", "구글 API 일일 할당량이 모두 소진되었습니다. 내일 다시 이용 가능합니다.", 'error');
             }
 
-            if (res.error && (res.error.includes("quota") || res.error.includes("429") || res.error.includes("limit") || res.error.includes("Requests") || res.error.includes("demand"))) {
+            else if (res.error && (res.error.includes("quota") || res.error.includes("429") || res.error.includes("limit") || res.error.includes("Requests") || res.error.includes("demand"))) {
                 const retryMatch = res.error.match(/retry in ([\d.]+)s/);
                 const waitSeconds = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) + 5 : 60; // 징벌적 차단 방지를 위해 더 넉넉히 대기
                 
-                showModalMessage("⚠️ AI 접속량이 너무 많습니다.", `${waitSeconds}초간 중단됩니다. 잠시 후 다시 시도해 주세요.`, 'error');
                 lastAiRequestTime = Date.now() + (waitSeconds * 1000); 
                 startAiCooldownUI(waitSeconds);
                 
-                // [추가] 429 에러 발생 시 DB 키워드 검색으로 전환
-                const fallbackQuery = query.replace(/아신/g, "").trim();
-                handleDatabaseSearch(fallbackQuery);
+                // [Priority 3] AI 불능 시 DB 검색 원문 출력으로 폴백
+                if (fallbackDbResults) {
+                    return displayCombinedResults(fallbackDbResults, query, "📚 통합 DB 검색 (AI 접속량 초과로 원문 출력)");
+                }
+                showModalMessage("⚠️ AI 접속량이 너무 많습니다.", `${waitSeconds}초간 중단됩니다. 잠시 후 다시 시도해 주세요.`, 'error');
             } else {
                 showModalMessage("⚠️ AI 분석 실패", res.error || "응답값이 없습니다.", 'error');
                 lastAiRequestTime = Date.now();
@@ -652,12 +650,13 @@ export async function saveAiKnowledge() {
     const saveBtn = document.getElementById('btnAiSave');
     
     if (isAiProcessing || (now < lastAiRequestTime)) {
-        showAlert("AI가 아직 처리 중이거나 휴식 중입니다. 잠시 후 저장하세요.", "info");
-        return;
+        // AI가 처리 중이더라도 '직접 입력'한 내용을 저장하고 싶을 수 있으므로 경고만 하고 진행 허용
+        console.log("AI is busy, but proceeding with knowledge save.");
     }
 
-    if (!state.lastAiQuery || !state.lastAiAnswer) {
-        showAlert("저장할 AI 답변이 없습니다.", "error");
+    // [수정] 질문(Query)만 있다면 답변(Answer)이 없거나 검색 실패 메시지여도 저장이 가능하도록 함
+    if (!state.lastAiQuery) {
+        showAlert("저장할 질문 정보가 없습니다.", "error");
         return;
     }
     
