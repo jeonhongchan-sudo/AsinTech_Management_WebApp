@@ -8,7 +8,7 @@ import pdfplumber
 import fitz  # PyMuPDF
 import boto3
 from botocore.config import Config
-from PIL import Image
+from PIL import Image, ImageTk
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox
 from supabase import create_client
@@ -30,6 +30,7 @@ class PDFUploaderApp:
         self.supabase_client = None
         self.s3_client = None
         self.r2_config = {}
+        self.page_selections = {} # {file_path: [bool, bool, ...]}
 
         self.setup_ui()
         self.load_remote_config()
@@ -104,7 +105,72 @@ class PDFUploaderApp:
         if self.selected_files:
             self.log(f"\n--- {len(self.selected_files)}개의 파일 선택됨 ---")
             for f in self.selected_files: self.log(f" > {os.path.basename(f)}")
-            self.btn_start.config(state=tk.NORMAL)
+            self.btn_start.config(state=tk.NORMAL, text="2. 페이지 선택 및 업로드")
+
+    def show_page_selection_dialog(self, file_path):
+        """PDF의 각 페이지 썸네일을 보여주고 업로드할 페이지를 선택하게 합니다."""
+        file_name = os.path.basename(file_path)
+        sel_win = tk.Toplevel(self.root)
+        sel_win.title(f"페이지 선택: {file_name}")
+        sel_win.geometry("800x700")
+        sel_win.grab_set()
+
+        tk.Label(sel_win, text=f"업로드할 페이지를 선택하세요 (기본 전체 선택)", font=("Malgun Gothic", 10, "bold")).pack(pady=10)
+
+        container = tk.Frame(sel_win)
+        container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        canvas = tk.Canvas(container)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # 썸네일 생성 및 표시
+        doc = fitz.open(file_path)
+        total_pages = len(doc)
+        vars_list = []
+        self.thumbnails = [] # 가비지 컬렉션 방지
+
+        # 4열 그리드로 표시
+        cols = 4
+        for i in range(total_pages):
+            page = doc[i]
+            # 썸네일용 낮은 해상도 렌더링
+            pix = page.get_pixmap(matrix=fitz.Matrix(0.15, 0.15)) 
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            photo = ImageTk.PhotoImage(img)
+            self.thumbnails.append(photo)
+
+            frame = tk.Frame(scrollable_frame, bd=1, relief=tk.RIDGE, padx=5, pady=5)
+            frame.grid(row=i // cols, column=i % cols, padx=10, pady=10)
+
+            img_label = tk.Label(frame, image=photo)
+            img_label.pack()
+
+            var = tk.BooleanVar(value=True)
+            chk = tk.Checkbutton(frame, text=f"{i+1} 페이지", variable=var, font=("Malgun Gothic", 8))
+            chk.pack()
+            vars_list.append(var)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        is_confirmed = tk.BooleanVar(value=False)
+
+        def on_confirm():
+            self.page_selections[file_path] = [v.get() for v in vars_list]
+            is_confirmed.set(True)
+            sel_win.destroy()
+            doc.close()
+
+        btn_confirm = tk.Button(sel_win, text="선택 완료 및 다음 단계", command=on_confirm, bg="#4CAF50", fg="white", font=("Malgun Gothic", 10, "bold"), height=2)
+        btn_confirm.pack(fill=tk.X, padx=20, pady=15)
+
+        self.root.wait_window(sel_win)
+        return is_confirmed.get()
 
     def upload_to_r2(self, body, key, content_type):
         """R2에 파일을 업로드하고 접근 가능한 Public URL을 반환합니다."""
@@ -279,22 +345,30 @@ class PDFUploaderApp:
 
     def process_uploads(self):
         for file_path in self.selected_files:
+            # 1. 페이지 선택 창 표시
+            if not self.show_page_selection_dialog(file_path):
+                self.log(f"[!] '{os.path.basename(file_path)}' 업로드가 취소되었습니다.")
+                continue
+
+            selections = self.page_selections.get(file_path, [])
             file_name = os.path.basename(file_path)
             self.log(f"\n🚀 '{file_name}' 작업 시작...")
 
             try:
-                # [핵심] 1. 해당 파일명의 기존 데이터만 삭제
                 self.log(f"[*] 기존 데이터 정리 중 ('{file_name}')...")
                 delete_res = self.supabase_client.table("pdf_knowledge").delete().eq("file_name", file_name).execute()
                 
                 # [추가] R2 저장소의 기존 이미지/표 폴더 정리
                 self.delete_r2_folder(f"knowledge_assets/{file_name}/")
                 
-                # 2. PDF 분석 (pdfplumber + fitz 혼합 사용)
                 all_chunks = []
                 doc = fitz.open(file_path)
                 with pdfplumber.open(file_path) as pdf_plumb:
                     for i, page in enumerate(pdf_plumb.pages):
+                        # [추가] 사용자가 체크 해제한 페이지는 건너뜀
+                        if i < len(selections) and not selections[i]:
+                            continue
+                        
                         raw_text = page.extract_text() or ""
                         fitz_page = doc[i]
                         
@@ -305,12 +379,30 @@ class PDFUploaderApp:
                         is_index = False
                         first_lines = raw_text.strip().split('\n')[:5]
                         header_check = "".join(first_lines).replace(" ", "").upper()
-                        if any(kw in header_check for kw in ["목차", "CONTENTS", "INDEX"]):
+                        if any(kw in header_check for kw in ["목차", "CONTENTS", "INDEX", "PART"]):
                             is_index = True
 
+                        # [개선] 레이아웃 분석: 본문과 측면 해설 분리 시도 (좌우 7:3 비율 가이드)
+                        width = float(page.width)
+                        left_area = page.within_bbox((0, 0, width * 0.7, page.height)).extract_text() or ""
+                        right_area = page.within_bbox((width * 0.7, 0, width, page.height)).extract_text() or ""
+                        
+                        if len(right_area.strip()) > 5:
+                            raw_text = f"[본문]\n{left_area}\n\n[측면 해설/보충]\n{right_area}"
+
                         table_data = ""
-                        # [개선] find_tables()를 주력으로 사용하여 표 데이터와 영역(bbox)을 동기화합니다.
-                        found_tables = page.find_tables()
+                        # [개선] 표 검출 설정 극대화: 연한 선 및 스캔본 대응
+                        table_settings = {
+                            "vertical_strategy": "lines", 
+                            "horizontal_strategy": "lines",
+                            "snap_tolerance": 5,      # 선이 약간 떨어져 있어도 붙여서 인식
+                            "join_tolerance": 5,
+                            "edge_min_length": 10,
+                            "intersection_tolerance": 10,
+                            "text_tolerance": 3,
+                            "edge_min_length": 15
+                        }
+                        found_tables = page.find_tables(table_settings)
                         if found_tables:
                             for t_idx, table_obj in enumerate(found_tables):
                                 table = table_obj.extract()
@@ -347,16 +439,43 @@ class PDFUploaderApp:
                                 except Exception as e:
                                     self.log(f"  - 표 WebP 변환 실패 (p.{i+1}): {e}")
 
-                        # [추가] 이미지 객체 추출 및 WebP 썸네일 업로드
+                        # [개선] 이미지 및 '그림(Vector Drawing)' 추출 로직 강화
                         try:
+                            # 1. 일반 비트맵 이미지 추출
                             images = fitz_page.get_images()
+                            
+                            # 2. 벡터 도면(도형) 감지: 측량 도면이나 선으로 된 그림 대응
+                            drawings = fitz_page.get_drawings()
+                            if drawings and len(drawings) > 5: # 선이 어느 정도 있는 경우만 그림으로 간주
+                                r2_key = f"knowledge_assets/{file_name}/p{i+1}_drawing.webp"
+                                # 페이지 전체를 고해상도로 렌더링 후 저장
+                                pix = fitz_page.get_pixmap(dpi=200)
+                                
+                                # [안전] 픽스맵 생성 실패 또는 색상 공간 부재 시 보정
+                                if not pix or pix.colorspace is None or pix.colorspace.n != 3 or pix.alpha:
+                                    pix = fitz.Pixmap(fitz.csRGB, pix)
+                                img_obj = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                                # 너무 연한 경우 대비하여 대비(Contrast) 살짝 증가 처리 가능
+                                webp_io = io.BytesIO()
+                                img_obj.save(webp_io, format="WEBP", quality=85)
+                                webp_io.seek(0)
+                                img_url = self.upload_to_r2(webp_io.getvalue(), r2_key, "image/webp")
+                                image_urls.append(img_url)
+                                self.log(f"  - [🎨] p.{i+1} 페이지 도면/그래프 감지 및 추출 완료")
+
                             for img_idx, img in enumerate(images):
                                 xref = img[0]
                                 pix = fitz.Pixmap(doc, xref)
                                 
-                                # [수정] 색상 영역이 RGB가 아니거나(그레이스케일, CMYK 등) 투명도(Alpha)가 있는 경우 
-                                # Pillow 호환을 위해 강제로 표준 RGB로 변환합니다.
-                                if pix.colorspace.n != 3 or pix.alpha:
+                                if not pix: continue # [안전] 이미지 로드 실패 시 건너뜀
+                                
+                                # 너무 작은 이미지(아이콘 등)는 무시 (예: 40x40 미만)
+                                if pix.width < 40 or pix.height < 40:
+                                    pix = None
+                                    continue
+
+                                # [수정] colorspace가 None인 경우(스텐실 마스크 등) 대비 로직 강화
+                                if pix.colorspace is None or pix.colorspace.n != 3 or pix.alpha:
                                     pix = fitz.Pixmap(fitz.csRGB, pix)
                                 
                                 # Pillow를 이용해 WebP 썸네일 생성
@@ -374,8 +493,12 @@ class PDFUploaderApp:
                         except Exception as e:
                             self.log(f"  - 이미지 추출 실패 (p.{i+1}): {e}")        
                         
-                        text_content = self.clean_text_quality(raw_text)
+                        # [개선] 문제/정답 영역 분리 특화 처리 (오른쪽/하단 정답 패턴 감지)
+                        text_content = self.clean_text_quality(raw_text) or "내용 없음 (이미지 위주)"
                         
+                        if len(text_content.strip()) < 10 and not table_data:
+                            self.log(f"  - [⚠️] p.{i+1} 페이지는 텍스트를 읽기 어렵습니다. (그림 위주 또는 저품질 스캔)")
+
                         # 데이터 구조화
                         combined = f"#### 출처: {file_name} (p.{i+1}) ####\n\n"
                         if table_data.strip():
