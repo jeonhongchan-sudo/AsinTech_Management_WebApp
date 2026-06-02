@@ -148,18 +148,10 @@ async function executeGisSearch(searchTerm) {
         const cleanQuery = searchTerm.replace(/[📍?]/g, '').trim();
         if (!cleanQuery) return;
         
-        // [수정] '아신' 키워드 제약 제거 및 통합 우선순위 로직 적용
-        // 1단계: 먼저 지침 DB 검색 수행
-        const dbResults = await fetchDbSearchResults(cleanQuery);
-
-        if (dbResults && dbResults.length > 0) {
-            // [Priority 1] DB 결과 있음 -> AI에게 전달하여 요약/정리 요청
-            const context = dbResults.map(r => `[출처: ${r.file_name}${r.metadata?.page ? ' p.'+r.metadata.page : ''}]\n${r.content}`).join("\n\n");
-            handleAiSearch(cleanQuery, null, context, false, dbResults);
-        } else {
-            // [Priority 2] DB 결과 없음 -> AI가 일반 지식으로 추론 답변
-            handleAiSearch(cleanQuery, null, null);
-        }
+        // [수정] 로직 단순화: 무조건 DB 검색을 먼저 수행함.
+        // AI는 검색 결과 모달에서 사용자가 버튼을 눌렀을 때만 작동함.
+        // '아신' 키워드 여부와 상관없이 모든 질문에 대해 DB 검색을 우선함.
+        await handleDatabaseSearch(cleanQuery);
         return;
     }
 

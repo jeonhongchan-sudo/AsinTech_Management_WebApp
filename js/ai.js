@@ -181,6 +181,10 @@ export async function fetchDbSearchResults(query) {
 
 /** [1순위 후순위] AI 없이 DB에서 지침서 키워드 검색 */
 export async function handleDatabaseSearch(query) {
+    // [추가] 저장 기능을 위해 질문 상태 동기화 (TypeError 방지)
+    state.originalAiQuery = query;
+    state.aiCorrectionHistory = [];
+
     // [추가] 즉시 모달 열기 및 로딩 표시 (UI 멈춤 인지 방지)
     showAiResponseModal(query, "", "📚 통합 DB 검색");
     const contentEl = document.getElementById('aiAnswerContent');
@@ -203,8 +207,8 @@ export async function handleDatabaseSearch(query) {
             return true;
         }
 
-        // [수정] 검색 결과가 없더라도 직접 내용을 입력하여 저장할 수 있도록 안내 문구와 함께 모달 유지
-        showAiResponseModal(query, "지침 DB에서 해당 내용을 찾을 수 없습니다. 직접 답변을 정리하여 저장하시거나, AI의 도움이 필요하면 질문에 <strong>'아신'</strong> 키워드를 포함해 보세요.", "📚 통합 DB 검색");
+        // [수정] 검색 결과가 없을 때 직접 입력 안내 문구에서 '아신' 키워드 언급 삭제
+        showAiResponseModal(query, "지침 DB에서 해당 내용을 찾을 수 없습니다. 외부에서 발췌한 내용을 직접 입력(✍️)하여 저장하시거나, AI의 추론 답변이 필요하다면 하단의 <strong>[🤖 AI 재요청]</strong> 버튼을 눌러보세요.", "📚 통합 DB 검색");
         return false;
     } catch (e) { console.error("DB 검색 오류:", e); showModalMessage("⚠️ DB 검색 중 오류가 발생했습니다.", e.message, 'error'); return false; }
 }
@@ -256,7 +260,8 @@ function displayCombinedResults(matches, query, sourceLabel) {
         combinedAnswer += `**[검색결과 ${idx + 1}] ${match.file_name}${pageInfo}**${deleteBtn}\n${content}${attachments}\n\n`;
         if (idx < topResults.length - 1) combinedAnswer += "---\n\n";
     });
-    showAiResponseModal(query, combinedAnswer.trim(), sourceLabel);
+    // [수정] 재요청 시 원문 복구를 위해 matches 데이터를 함께 전달
+    showAiResponseModal(query, combinedAnswer.trim(), sourceLabel, matches);
 }
 
 
@@ -549,7 +554,7 @@ function updateAiButtonState(isLoading) {
 }
 
 /** AI 답변 모달 출력 */
-export function showAiResponseModal(query, answer, source) {
+export function showAiResponseModal(query, answer, source, matches = null) {
     const modal = document.getElementById('aiResponseModal');
     const content = document.getElementById('aiAnswerContent');
     const sourceEl = document.getElementById('aiAnswerSource');
@@ -618,10 +623,8 @@ export function showAiResponseModal(query, answer, source) {
     if (reRequestBtn) {
         reRequestBtn.style.display = (isFromDatabase && !isProjectMode) ? "inline-flex" : "none";
         reRequestBtn.onclick = () => {
-            // [수정] 현재 모달에 표시된 'answer'(DB 원문)를 AI에게 전달하여 재정리 요청
-            // AI 재요청 시에는 현재 모달의 content.innerText를 rawDbContext로 사용
-            const currentModalContent = document.getElementById('aiAnswerContent').innerText;
-            handleAiSearch(query, state.lastCadLayersSet, answer);
+            // [수정] 현재 모달에 표시된 'answer'(DB 원문)와 원본 검색 결과(matches)를 AI에게 전달
+            handleAiSearch(query, state.lastCadLayersSet, answer, false, matches);
         };
     }
 
@@ -679,7 +682,9 @@ export async function saveAiKnowledge() {
         showAlert("지식을 DB에 업로드 중...", "info");
 
         // [개선] 전체 대화 맥락을 포함한 질문 생성
-        let fullStoredQuery = state.originalAiQuery;
+        // [수정] originalAiQuery가 null인 경우 lastAiQuery를 백업으로 사용 (TypeError 방어)
+        let fullStoredQuery = state.originalAiQuery || state.lastAiQuery || "알 수 없는 질문";
+        
         if (state.aiCorrectionHistory && state.aiCorrectionHistory.length > 0) {
             fullStoredQuery += ` (검토/교정: ${state.aiCorrectionHistory.join(' -> ')})`;
         }
