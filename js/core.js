@@ -13,6 +13,8 @@ export const SUPABASE_FUNCTIONS_URL = `https://${PROJECT_ID}.supabase.co/functio
 
 // 전역 상태 관리
 export const state = {
+    cadMap: null,           // [이관] 전역 지도 객체
+    cadProtocol: null,      // [이관] PMTiles 프로토콜
     allProjects: [],
     currentProjectId: null,
     supabaseConfig: null,

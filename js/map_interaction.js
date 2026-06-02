@@ -1,5 +1,4 @@
 import { state, callSupabaseDirect, showAlert } from './core.js';
-import { cadMap } from './viewers.js';
 import { handleDistanceClick } from './map_measure.js';
 
 export let memoMarkers = [];
@@ -7,7 +6,7 @@ export let currentPopup = null;
 
 /** 메모 데이터 로드 및 지도 표시 */
 export async function loadMapMemos() {
-    if (!state.currentCadProjectId || !state.supabaseConfig || !cadMap) return;
+    if (!state.currentCadProjectId || !state.supabaseConfig || !state.cadMap) return;
     
     memoMarkers.forEach(m => m.remove());
     memoMarkers = [];
@@ -56,15 +55,15 @@ export async function loadMapMemos() {
                 };
                 openMemoPopup(feature);
             });
-            marker.addTo(cadMap);
+            marker.addTo(state.cadMap);
             if (isHighlighted) marker.getElement().style.zIndex = '5';
             memoMarkers.push(marker);
         });
 
-        const memoSource = cadMap.getSource('memo_source');
+        const memoSource = state.cadMap.getSource('memo_source');
         if (!memoSource) {
-            cadMap.addSource('memo_source', { type: 'geojson', data: { type: 'FeatureCollection', features: memoFeatures } });
-            cadMap.addLayer({
+            state.cadMap.addSource('memo_source', { type: 'geojson', data: { type: 'FeatureCollection', features: memoFeatures } });
+            state.cadMap.addLayer({
                 id: 'memo-id-labels',
                 type: 'symbol',
                 source: 'memo_source',
@@ -87,7 +86,7 @@ export async function loadMapMemos() {
             });
         } else {
             memoSource.setData({ type: 'FeatureCollection', features: memoFeatures });
-            cadMap.setLayoutProperty('memo-id-labels', 'visibility', state.isMemoIdVisible ? 'visible' : 'none');
+            state.cadMap.setLayoutProperty('memo-id-labels', 'visibility', state.isMemoIdVisible ? 'visible' : 'none');
         }
     } catch (e) {
         console.warn("메모 로드 실패:", e);
@@ -110,13 +109,13 @@ export async function loadProjectPhotos() {
 
 /** 특정 위치로 지도 이동 */
 export function flyToLocation(lon, lat) {
-    if (cadMap) cadMap.flyTo({ center: [lon, lat], zoom: 18, essential: true });
+    if (state.cadMap) state.cadMap.flyTo({ center: [lon, lat], zoom: 18, essential: true });
 }
 
 /** 지도 인터랙션 설정 */
 export function setupMapInteraction() {
-    if(!cadMap) return;
-    cadMap.on('click', handleMapClick);
+    if(!state.cadMap) return;
+    state.cadMap.on('click', handleMapClick);
 }
 
 /** 지도 클릭 핸들러 (스냅 기능 포함) */
@@ -125,13 +124,13 @@ async function handleMapClick(e) {
 
     const snapRadius = 8;
     const bbox = [[e.point.x - snapRadius, e.point.y - snapRadius], [e.point.x + snapRadius, e.point.y + snapRadius]];
-    const features = cadMap.queryRenderedFeatures(bbox, { layers: ['cad-points'] });
+    const features = state.cadMap.queryRenderedFeatures(bbox, { layers: ['cad-points'] });
     let targetFeature = null;
     
     if (features.length > 0) {
         let minDistance = Infinity;
         features.forEach(f => {
-            const p = cadMap.project(f.geometry.coordinates);
+            const p = state.cadMap.project(f.geometry.coordinates);
             const dist = Math.hypot(p.x - e.point.x, p.y - e.point.y);
             if (dist < minDistance) { minDistance = dist; targetFeature = f; }
         });
@@ -154,7 +153,7 @@ async function handleMapClick(e) {
 }
 
 /** 메모 팝업 열기 */
-export function openMemoPopup(feature) {
+export async function openMemoPopup(feature) {
     if (currentPopup) return;
 
     const coords = feature.geometry.coordinates;
@@ -168,6 +167,11 @@ export function openMemoPopup(feature) {
     const isPublic = existingMemo ? existingMemo.is_public : true;
     const chainage = existingMemo ? existingMemo.chainage : (feature.properties.chainage || '');
     const existingImgUrls = existingMemo && existingMemo.image_url ? existingMemo.image_url.split(',') : [];
+
+    // [최적화] 포인트 클릭 시점에 사진 목록이 없다면 로드 (Lazy Loading)
+    if (state.projectPhotos.length === 0 && state.currentCadProjectId) {
+        await loadProjectPhotos();
+    }
 
     let matchedPhotosHtml = '';
     const pointText = (feature.properties.text || '').trim();
@@ -225,7 +229,7 @@ export function openMemoPopup(feature) {
     `;
 
     const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, anchor: 'center', offset: 0 })
-        .setLngLat(coords).setDOMContent(popupContent).addTo(cadMap);
+        .setLngLat(coords).setDOMContent(popupContent).addTo(state.cadMap);
 
     const uiBlockers = document.querySelectorAll('.header, .sidebar, .tab-nav, .map-menu-bar');
     uiBlockers.forEach(el => el.style.pointerEvents = 'none');

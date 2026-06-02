@@ -1,6 +1,5 @@
 // e:\Program\SelfProgram\아신테크\js\manager_admin.js
 import { state, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
-import { loadProjects } from './managers.js';
 
 // --- Admin Manager ---
 export function openAdminPage() {

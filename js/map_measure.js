@@ -1,5 +1,4 @@
 import { state, callSupabaseDirect, showAlert } from './core.js';
-import { cadMap } from './viewers.js';
 
 /** 거리 측정 모드 토글 */
 export function toggleDistanceMode(forceValue) {
@@ -10,9 +9,9 @@ export function toggleDistanceMode(forceValue) {
     
     if (state.isDistanceMode) {
         showAlert('거리 측정 모드: 지도에서 첫 번째 지점을 선택하세요.', 'info');
-        if (cadMap) cadMap.getCanvas().style.cursor = 'crosshair';
+        if (state.cadMap) state.cadMap.getCanvas().style.cursor = 'crosshair';
     } else {
-        if (cadMap) cadMap.getCanvas().style.cursor = '';
+        if (state.cadMap) state.cadMap.getCanvas().style.cursor = '';
         clearDistanceMeasurement();
     }
 }
@@ -26,7 +25,7 @@ export async function handleDistanceClick(coords) {
         state.distanceStartPoint = { lon, lat };
         const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8, anchor: 'center' })
             .setLngLat([lon, lat])
-            .addTo(cadMap);
+            .addTo(state.cadMap);
         state.distanceMarkers.push(startMarker);
     } 
     else {
@@ -35,11 +34,11 @@ export async function handleDistanceClick(coords) {
         
         const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8, anchor: 'center' })
             .setLngLat([lon, lat])
-            .addTo(cadMap);
+            .addTo(state.cadMap);
         state.distanceMarkers.push(endMarker);
 
         const lineId = `dist-line-${Date.now()}`;
-        cadMap.addSource(lineId, {
+        state.cadMap.addSource(lineId, {
             'type': 'geojson',
             'data': {
                 'type': 'Feature',
@@ -47,7 +46,7 @@ export async function handleDistanceClick(coords) {
                 'geometry': { 'type': 'LineString', 'coordinates': [[start.lon, start.lat], [end.lon, end.lat]] }
             }
         });
-        cadMap.addLayer({
+        state.cadMap.addLayer({
             'id': lineId,
             'type': 'line',
             'source': lineId,
@@ -73,7 +72,7 @@ export async function handleDistanceClick(coords) {
         const popup = new maplibregl.Popup({ closeOnClick: false, closeButton: false, anchor: 'bottom', offset: 15 })
             .setLngLat([midLon, midLat])
             .setDOMContent(popupContent)
-            .addTo(cadMap);
+            .addTo(state.cadMap);
         
         closeBtn.onclick = (e) => { e.stopPropagation(); clearDistanceMeasurement(); };
         state.distanceMarkers.push(popup);
@@ -108,8 +107,8 @@ export function clearDistanceMeasurement() {
             if (item.remove) {
                 item.remove();
             } else if (item.type === 'layer') {
-                if (cadMap && cadMap.getLayer(item.id)) cadMap.removeLayer(item.id);
-                if (cadMap && cadMap.getSource(item.id)) cadMap.removeSource(item.id);
+                if (state.cadMap && state.cadMap.getLayer(item.id)) state.cadMap.removeLayer(item.id);
+                if (state.cadMap && state.cadMap.getSource(item.id)) state.cadMap.removeSource(item.id);
             }
         });
     }

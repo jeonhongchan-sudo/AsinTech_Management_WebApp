@@ -1,5 +1,4 @@
 import { state, showAlert } from './core.js';
-import { cadMap } from './viewers.js';
 import { executeGuidelinesSearch } from './search_db.js';
 import { openGisSearchModal, executeGisSearch } from './search_gis.js';
 
@@ -10,7 +9,7 @@ export async function searchPoints() {
     const isProjectSelected = !!state.currentCadProjectId;
     
     if (isProjectSelected) {
-        if (!cadMap) return showAlert("지도가 로드되지 않았습니다.", "info");
+        if (!state.cadMap) return showAlert("지도가 로드되지 않았습니다.", "info");
         openGisSearchModal(); // GIS 문법 모달 열기
     } else {
         // 프로젝트 미선택 시 심플한 검색창 제공

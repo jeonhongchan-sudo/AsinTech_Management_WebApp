@@ -1,7 +1,7 @@
 // e:\Program\SelfProgram\아신테크\js\managers.js
-import { state, callApi, callSupabaseDirect, showAlert, generateUUID, R2_BASE_URL, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
+import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
+import { downloadPhotoFile, cleanupR2Orphans, downloadAllPhotos, syncBrokenKnowledgeAssets } from './manager_photos.js';
 import { roomCreateProject, roomDeleteProject, roomUploadCad } from './manager_admin.js';
-import { openPhotoManager, closePhotoManager, openLightbox, closeLightbox, navigateLightbox, downloadPhotoFile, cleanupR2Orphans, downloadAllPhotos, togglePhotoMenu, syncBrokenKnowledgeAssets, deleteR2PhotoVersions } from './manager_photos.js';
 export * from './manager_photos.js';
 export * from './manager_memos.js';
 export * from './manager_admin.js';
@@ -212,8 +212,8 @@ async function processCadUpload(file, projectId) {
         await fetch(uploadUrl, { 
             method: 'PUT', 
             body: fileBuffer,
+            credentials: 'omit', // 업로드 데이터가 조회 캐시에 영향을 주지 않도록 설정
             headers: { 
-                'Cache-Control': 'public, max-age=31536000',
                 'Content-Type': contentType 
             } // 365일 캐시 및 타입 설정
         });
@@ -233,15 +233,16 @@ async function processCadUpload(file, projectId) {
         };
 
         const expiryDate = formatPostgresTz(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000));
-        // [수정] on_conflict=file_path 파라미터를 추가하여 동일 경로 파일 업로드 시 정보를 갱신하도록 설정
-        await callSupabaseDirect('cad_files?on_conflict=file_path', 'POST', {
+        // [수정] 중복 레코드 방지를 위해 기존 프로젝트/타입 레코드 삭제 후 삽입
+        await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.${isZip ? 'zip' : 'dxf'}`, 'DELETE');
+        await callSupabaseDirect('cad_files', 'POST', {
             project_id: parseInt(projectId),
             file_type: isZip ? 'zip' : 'dxf',
             file_path: r2Path,
             file_size: file.size,
             cache_expiry: expiryDate,
             updated_at: formatPostgresTz(new Date())
-        }, { 'Prefer': 'resolution=merge-duplicates' });
+        });
 
         // 4. Supabase 프로젝트 상태 업데이트 (Action을 거치지 않고 바로 ANALYZED 상태로)
         await callSupabaseDirect(`cad_projects?id=eq.${projectId}`, 'PATCH', {

@@ -1,27 +1,17 @@
 // e:\Program\SelfProgram\아신테크\js\viewers.js
 import { state, callApi, callSupabaseDirect, showAlert, R2_BASE_URL } from './core.js';
 import { updateSearchButtonUI } from './search_engine.js';
-
-// [수정] 중복 import/export 구문 정리 및 출처 명확화
-// 1. 프로젝트 정보 모달 관련
-export { showProjectInfo, switchProjectInfoTab } from './project_info.js';
+import { resetLayerStyles, updateLayerDiscovery, renderLayerList, updateMapFilter, updateMapStyle } from './map_styles.js';
+import { setupMapInteraction, clearMemoMarkers, loadProjectPhotos, loadMapMemos } from './map_interaction.js';
+import { clearDistanceMeasurement } from './map_measure.js';
 import { showProjectInfo, switchProjectInfoTab } from './project_info.js';
 
-// 2. 지침서 렌더링 관련
-export { selectGuideline, renderRoadLedgerTOC, renderUISTable, renderNetworkRtk, renderNonConformityCases, renderNumericMap, renderGnssNotice, renderPublicSurveyFaq, renderRegulationRevision, renderMaterialAbbr, renderPublicSurveyRegulations } from './guideline_renders.js';
-import { selectGuideline } from './guideline_renders.js';
-
-// 3. 거리 측정 관련
-export { toggleDistanceMode, handleDistanceClick, clearDistanceMeasurement } from './map_measure.js';
-import { clearDistanceMeasurement } from './map_measure.js';
-
-// 4. 레이어 스타일 관련
-export { cadLayers, cadLayerColors, cadHiddenLayers, resetLayerStyles, updateLayerDiscovery, getRandomColor, renderLayerList, openLayerStyleModal, renderModalEditLists, closeLayerStyleModal, switchStyleTab, toggleDynamicText, updateIndividualStyle, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, changeLineLabelSize, changeLineLabelColor, reloadLayerStylesFromSettings, saveUserStyles, updateMapFilter, updateMapStyle } from './map_styles.js';
-import { resetLayerStyles, updateLayerDiscovery, renderLayerList, updateMapFilter, updateMapStyle } from './map_styles.js';
-
-// 5. 지도 인터랙션 및 메모 관련
-export { loadMapMemos, loadProjectPhotos, flyToLocation, setupMapInteraction, toggleSurveyMode, clearMemoMarkers, memoMarkers, currentPopup } from './map_interaction.js';
-import { loadMapMemos, loadProjectPhotos, setupMapInteraction, clearMemoMarkers } from './map_interaction.js';
+// [최적화] 외부 모듈 재수출 (Barrel Role)
+export { showProjectInfo, switchProjectInfoTab };
+export * from './guideline_renders.js';
+export * from './map_measure.js';
+export * from './map_styles.js';
+export * from './map_interaction.js';
 
 export function toggleFullScreen() {
     const mapContainer = document.getElementById('cad-map');
@@ -40,9 +30,6 @@ export function toggleFullScreen() {
     }
 }
 
-// --- CAD Viewer Logic ---
-export let cadMap = null;
-let cadProtocol = null;
 export async function initCadViewer() {
     const select = document.getElementById('cadProjectSelect');
     if (select) select.innerHTML = '<option value="">서버 설정 로드 중...</option>';
@@ -56,9 +43,9 @@ export async function initCadViewer() {
             const r2Res = await callApi('getR2Config');
             if (r2Res.success) state.r2Config = { bucket: r2Res.R2_BUCKET_NAME, publicUrl: r2Res.R2_Public_Url || r2Res.R2_Endpoints };
         }
-        if (!cadProtocol && typeof pmtiles !== 'undefined') {
-            cadProtocol = new pmtiles.Protocol();
-            maplibregl.addProtocol("pmtiles", cadProtocol.tile);
+        if (!state.cadProtocol && typeof pmtiles !== 'undefined') {
+            state.cadProtocol = new pmtiles.Protocol();
+            maplibregl.addProtocol("pmtiles", state.cadProtocol.tile);
         }
         await loadCadProjects();
         resetLayerStyles();
@@ -68,12 +55,6 @@ export async function initCadViewer() {
         updateSearchButtonUI(); // 초기화 시점에 버튼 명칭 업데이트
     } catch (e) { console.error(e); if (select) select.innerHTML = '<option value="">초기화 실패</option>'; }
 }
-
-window.loadCadProjects = loadCadProjects; // [추가] 외부 호출을 위해 전역 연결
-window.resetSearchUI = resetSearchUI;
-window.selectGuideline = selectGuideline;
-window.showProjectInfo = showProjectInfo;
-window.switchProjectInfoTab = switchProjectInfoTab;
 
 export async function loadCadProjects() {
     const select = document.getElementById('cadProjectSelect');
@@ -158,7 +139,7 @@ export function toggleMapMenu(event) {
 export async function loadCadMap(projectId) {
     if (!projectId) return;
     state.currentCadProjectId = projectId; // [수정] 전역 상태에 프로젝트 ID 저장
-    if (cadMap) { cadMap.remove(); cadMap = null; }
+    if (state.cadMap) { state.cadMap.remove(); state.cadMap = null; }
     clearSearchMarkers(); // [추가] 새 지도 로드 시 이전 검색 결과 초기화
     resetLayerStyles();
     document.getElementById('cadLayerList').innerHTML = '';
@@ -166,24 +147,30 @@ export async function loadCadMap(projectId) {
 
     try {
         // [수정] 프로젝트 로드 시 DB(cad_files)에서 설정된 실제 좌표계(source_crs)를 정확히 가져옴
-        const files = await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.pmtiles&select=file_path,source_crs,updated_at&limit=1`);
+        const files = await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.pmtiles&select=file_path,source_crs,updated_at&order=updated_at.desc&limit=1`);
         if (!files || files.length === 0) { showAlert('이 프로젝트에는 변환된 지도 데이터(PMTiles)가 없습니다.', 'error'); return; }
         
         const fileData = files[0];
         // [수정] DB에 저장된 좌표계를 전역 상태에 저장 (검색 기능에서 이 값을 사용)
         state.currentProjectSourceCrs = fileData.source_crs;
         const filePath = fileData.file_path;
-        // [수정] 캐시 무시를 위한 버전 쿼리 스트링 추가 (updated_at 시간값 사용)
-        const version = fileData.updated_at ? new Date(fileData.updated_at).getTime() : Date.now();
-        
+        // [최종 해결] 브라우저 캐시 엔진의 고질적인 버그(ERR_CACHE_OPERATION_NOT_SUPPORTED)를 우회하기 위해
+        // 파일 버전(v)과 현재 로드 시점의 세션 타임스탬프(s)를 결합하여 매번 유니크한 URL을 생성합니다.
+        const fileVersion = fileData.updated_at ? new Date(fileData.updated_at).getTime() : '0';
+        const sessionBust = Date.now();
+
         const baseUrl = state.r2Config.publicUrl.replace(/\/$/, '');
-        const fileUrl = `${baseUrl}/${filePath}?v=${version}`;
+        const fileUrl = `${baseUrl}/${filePath}?v=${fileVersion}&s=${sessionBust}`;
         const pmtilesUrl = `pmtiles://${fileUrl}`;
         const p = new pmtiles.PMTiles(fileUrl);
+
         let bounds = [[124, 33], [132, 43]];
         let maxDataZoom = 28;
         const labelStyleKey = `${projectId}__LINE_LABEL_STYLE__`;
         const savedLabelStyle = state.userSettings?.layer_styles?.[labelStyleKey] || { size: 12, color: '#000000' };
+        // [추가] 초기 로딩 시 동적 위치(GIS 모드) 여부 확인
+        const isDynamic = state.userSettings?.layer_styles?.[`${projectId}__DYNAMIC_TEXT__`]?.enabled !== false;
+
         try {
             const header = await p.getHeader();
             if (header) { 
@@ -197,30 +184,20 @@ export async function loadCadMap(projectId) {
                 renderLayerList();
                 document.getElementById('cadLayerToggleBtn').style.display = 'block';
             }
-
-            // [추가] 전역 검색용 GeoJSON 백그라운드 로드 (handle ID 기반)
-            const geojsonKey = `cad_data/CAD_${projectId}.geojson`;
-            const geojsonUrl = `${baseUrl}/${geojsonKey}?v=${version}`;
-            state.currentProjectGeoJSON = null; 
-            fetch(geojsonUrl)
-                .then(res => res.ok ? res.json() : null)
-                .then(data => {
-                    if (data) {
-                        state.currentProjectGeoJSON = data;
-                        console.log(`[Search] Global GeoJSON loaded for project ${projectId}`);
-                    }
-                })
-                .catch(err => console.warn("Global GeoJSON load failed:", err));
-
         } catch (e) { console.warn("PMTiles Metadata Warning:", e); }
 
-        cadMap = new maplibregl.Map({
+        state.cadMap = new maplibregl.Map({
             container: 'cad-map', fadeDuration: 0, bounds: bounds, fitBoundsOptions: { padding: 40, animate: false },
             renderWorldCopies: false, maxZoom: 28, localIdeographFontFamily: "'Noto Sans KR', sans-serif",
             validateStyle: false, boxZoom: false, dragRotate: false, doubleClickZoom: false,
-        transformRequest: (url, resourceType) => {
-            return { url: url };
-        },
+            transformRequest: (url, resourceType) => {
+                // [복원] 과거 성공 사례에 기반하여 cache: 'no-store'를 다시 추가합니다.
+                // 서버(R2)의 365일 캐시 설정(비용 절감)과 브라우저의 Range 요청 엔진 충돌을 방지하는 유일한 조합입니다.
+                if (url.includes('.pmtiles')) {
+                    return { url: url, cache: 'no-store' };
+                }
+                return { url: url };
+            },
             style: {
                 version: 8, glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
                 sources: {
@@ -245,15 +222,29 @@ export async function loadCadMap(projectId) {
                     { id: 'cad-lines-dashed', source: 'cad_source', 'source-layer': 'line', type: 'line', paint: { 'line-color': '#555555', 'line-width': 1.5, 'line-dasharray': [3, 2] } },
                     
                     { id: 'cad-points', source: 'cad_source', 'source-layer': 'point', type: 'circle', paint: { 'circle-color': '#FF0000', 'circle-radius': 3, 'circle-stroke-width': 1, 'circle-stroke-color': '#333333' } },
-                    { id: 'cad-text', type: 'symbol', source: 'cad_source', 'source-layer': 'point', filter: ['has', 'text'], layout: { 'text-field': ['get', 'text'], 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-anchor': 'bottom-left', 'text-offset': [0, 0], 'text-font': ['Open Sans Regular'], 'text-rotate': ['get', 'rotation'], 'text-rotation-alignment': 'map' }, paint: { 'text-color': '#000000' } },
+                    { 
+                        id: 'cad-text', 
+                        type: 'symbol', 
+                        source: 'cad_source', 
+                        'source-layer': 'point', 
+                        filter: ['has', 'text'], 
+                        // [수정] 초기 생성 시점부터 GIS 모드(Dynamic) 속성을 기본으로 적용하여 깜빡임 방지
+                        layout: { 
+                            'text-field': ['get', 'text'], 'text-size': 12, 'text-font': ['Open Sans Regular'],
+                            'text-variable-anchor': isDynamic ? ['bottom-left', 'bottom-right', 'top-left', 'top-right'] : ['bottom-left'],
+                            'text-padding': isDynamic ? 1 : 0, 'text-allow-overlap': isDynamic ? false : true, 'text-ignore-placement': isDynamic ? false : true,
+                            'text-rotate': isDynamic ? 0 : ['get', 'rotation'], 'text-rotation-alignment': isDynamic ? 'viewport' : 'map', 'text-justify': isDynamic ? 'auto' : 'left'
+                        }, 
+                        paint: { 'text-color': '#000000' } 
+                    },
                     { id: 'cad-line-labels', type: 'symbol', source: 'cad_source', 'source-layer': 'line', layout: { 'symbol-placement': 'line', 'text-field': ['get', 'layer'], 'text-size': savedLabelStyle.size || 12, 'text-rotation-alignment': 'map', 'text-anchor': 'center', 'text-justify': 'center', 'text-font': ['Open Sans Regular'], 'text-offset': [0, -1], 'text-allow-overlap': false, 'text-writing-mode': ['vertical'] }, paint: { 'text-color': savedLabelStyle.color || '#000000' } }
                 ]
             },
         });
-        cadMap.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showUserHeading: true }), 'top-right');
-        cadMap.addControl(new maplibregl.FullscreenControl(), 'top-right');
-        cadMap.addControl(new maplibregl.NavigationControl(), 'top-right');
-        cadMap.on('load', () => { 
+        state.cadMap.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showUserHeading: true }), 'top-right');
+        state.cadMap.addControl(new maplibregl.FullscreenControl(), 'top-right');
+        state.cadMap.addControl(new maplibregl.NavigationControl(), 'top-right');
+        state.cadMap.on('load', () => { 
             updateMapStyle(); 
             updateMapFilter(); 
             
@@ -276,14 +267,13 @@ export async function loadCadMap(projectId) {
             
             // [추가] 메모 데이터 로드 (지도 표시용)
             loadMapMemos();
-
-            // [추가] 사진 목록 로드 및 인터랙션 설정 통합
-            loadProjectPhotos();
+            
+            // [수정] 사진 목록은 클릭 시점에 로드하도록 변경 (Lazy Load)
             setupMapInteraction();
         });
         
         // [추가] 자동 배경지도 Fallback 로직 (브이월드 실패 시 OSM 전환)
-        cadMap.on('error', (e) => {
+        state.cadMap.on('error', (e) => {
             const chkVWorld = document.getElementById('chkVWorld');
             if (chkVWorld && chkVWorld.checked && !state.vworldFailed) {
                 const isVWorldError = (e.error && e.error.message && e.error.message.includes('vworld')) || 
@@ -297,7 +287,7 @@ export async function loadCadMap(projectId) {
             }
         });
 
-        cadMap.on('idle', () => {
+        state.cadMap.on('idle', () => {
             updateLayerDiscovery();
             snapMarkersToRenderedFeatures(); // [추가] 지도가 멈출 때마다 마커 위치 보정
         });
@@ -307,28 +297,28 @@ export async function loadCadMap(projectId) {
 
 // [추가] 배경지도 토글 기능
 export function toggleBackgroundMap(isVisible) {
-    if (!cadMap) return;
+    if (!state.cadMap) return;
     const useVWorld = document.getElementById('chkVWorld')?.checked;
 
     if (!isVisible) {
-        if (cadMap.getLayer('osm-layer')) cadMap.setLayoutProperty('osm-layer', 'visibility', 'none');
-        if (cadMap.getLayer('vworld-layer')) cadMap.setLayoutProperty('vworld-layer', 'visibility', 'none');
+        if (state.cadMap.getLayer('osm-layer')) state.cadMap.setLayoutProperty('osm-layer', 'visibility', 'none');
+        if (state.cadMap.getLayer('vworld-layer')) state.cadMap.setLayoutProperty('vworld-layer', 'visibility', 'none');
     } else {
         // 지도 켜기가 활성화되면 현재 선택된 맵 종류만 활성화
-        if (cadMap.getLayer('osm-layer')) cadMap.setLayoutProperty('osm-layer', 'visibility', useVWorld ? 'none' : 'visible');
-        if (cadMap.getLayer('vworld-layer')) cadMap.setLayoutProperty('vworld-layer', 'visibility', useVWorld ? 'visible' : 'none');
+        if (state.cadMap.getLayer('osm-layer')) state.cadMap.setLayoutProperty('osm-layer', 'visibility', useVWorld ? 'none' : 'visible');
+        if (state.cadMap.getLayer('vworld-layer')) state.cadMap.setLayoutProperty('vworld-layer', 'visibility', useVWorld ? 'visible' : 'none');
     }
     updateCadStyle();
 }
 
 /** [추가] 개별 포인트 위치 강조 표시 (분석 결과물 연동용) */
 export function showPointLocation(lon, lat, label, handle) {
-    if (!cadMap) return;
+    if (!state.cadMap) return;
     clearSearchMarkers();
     // [수정] 검색/문법 북마크 마커는 빨간색(#F44336)으로 표시
-    const marker = new maplibregl.Marker({ color: '#F44336', anchor: 'center' }).setLngLat([lon, lat]).addTo(cadMap);
+    const marker = new maplibregl.Marker({ color: '#F44336', anchor: 'center' }).setLngLat([lon, lat]).addTo(state.cadMap);
     state.searchMarkers.push({ marker: marker, handle: handle });
-    cadMap.flyTo({ center: [lon, lat], zoom: 20, speed: 1.2, essential: true });
+    state.cadMap.flyTo({ center: [lon, lat], zoom: 20, speed: 1.2, essential: true });
     document.getElementById('btnResetSearch').style.display = 'block';
 }
 
@@ -359,16 +349,16 @@ export function displayMatchesOnMap(uniqueMatches) {
     const bounds = new maplibregl.LngLatBounds();
     uniqueMatches.forEach(m => {
         // [수정] 검색/문법 북마크 마커는 빨간색(#F44336)으로 표시
-        const marker = new maplibregl.Marker({ color: '#F44336', anchor: 'center' }).setLngLat([m.lon, m.lat]).addTo(cadMap);
+        const marker = new maplibregl.Marker({ color: '#F44336', anchor: 'center' }).setLngLat([m.lon, m.lat]).addTo(state.cadMap);
         marker.getElement().style.pointerEvents = 'none';
         // Snap 기능을 위해 handle과 마커 객체를 함께 저장
         state.searchMarkers.push({ marker: marker, handle: m.handle });
         bounds.extend([m.lon, m.lat]);
     });
     if (uniqueMatches.length === 1) {
-        cadMap.flyTo({ center: [uniqueMatches[0].lon, uniqueMatches[0].lat], zoom: 20, speed: 1.2, essential: true });
+        state.cadMap.flyTo({ center: [uniqueMatches[0].lon, uniqueMatches[0].lat], zoom: 20, speed: 1.2, essential: true });
     } else {
-        cadMap.fitBounds(bounds, { padding: 80, maxZoom: 20 });
+        state.cadMap.fitBounds(bounds, { padding: 80, maxZoom: 20 });
     }
     showAlert(`총 ${uniqueMatches.length}개를 찾았습니다.`, 'success');
     document.getElementById('btnResetSearch').style.display = 'block';
@@ -376,11 +366,11 @@ export function displayMatchesOnMap(uniqueMatches) {
 
 /** [추가] handle ID를 이용해 마커를 지도 위의 실제 포인트에 시각적으로 붙임 */
 export function snapMarkersToRenderedFeatures() {
-    if (!cadMap || state.searchMarkers.length === 0) return;
+    if (!state.cadMap || state.searchMarkers.length === 0) return;
     state.searchMarkers.forEach(obj => {
         if (!obj.handle || !obj.marker) return;
         // 현재 화면에 렌더링된 피처 중 같은 handle 검색
-        const rendered = cadMap.queryRenderedFeatures({ layers: ['cad-points'], filter: ['==', 'handle', obj.handle] });
+        const rendered = state.cadMap.queryRenderedFeatures({ layers: ['cad-points'], filter: ['==', 'handle', obj.handle] });
         if (rendered.length > 0) {
             // PMTiles가 실제로 그린 좌표로 마커 위치 보정
             obj.marker.setLngLat(rendered[0].geometry.coordinates);
@@ -391,8 +381,8 @@ export function snapMarkersToRenderedFeatures() {
 // [추가] 검색 결과 초기화 및 지도를 프로젝트 전체 영역으로 원복
 export function resetSearchUI() {
     clearSearchMarkers();
-    if (cadMap && state.currentProjectBounds) {
-        cadMap.fitBounds(state.currentProjectBounds, { padding: 40, duration: 1200, essential: true });
+    if (state.cadMap && state.currentProjectBounds) {
+        state.cadMap.fitBounds(state.currentProjectBounds, { padding: 40, duration: 1200, essential: true });
     }
     document.getElementById('btnResetSearch').style.display = 'none';
 }
@@ -411,25 +401,23 @@ export function clearSearchMarkers() {
 // [추가] 메모 ID 표시 토글 기능
 export function toggleMemoIds(isVisible) {
     state.isMemoIdVisible = isVisible;
-    // [수정] 마커 전체를 재생성하는 대신, 지도 레이어의 가시성만 제어하여 텍스트 겹침 방지(Collision) 적용
-    if (cadMap && cadMap.getLayer('memo-id-labels')) {
-        cadMap.setLayoutProperty('memo-id-labels', 'visibility', isVisible ? 'visible' : 'none');
+    if (state.cadMap && state.cadMap.getLayer('memo-id-labels')) {
+        state.cadMap.setLayoutProperty('memo-id-labels', 'visibility', isVisible ? 'visible' : 'none');
     }
 }
-window.toggleMemoIds = toggleMemoIds;
 
 // [추가] 지도 제공자 전환 기능 (OSM <-> VWorld)
 export function switchMapProvider(useVWorld) {
-    if (!cadMap) return;
+    if (!state.cadMap) return;
     const isMapOn = document.getElementById('chkMap')?.checked;
     
     // 마스터 지도 스위치가 켜져 있을 때만 실제 레이어 전환 수행
     if (isMapOn) {
-        if (cadMap.getLayer('osm-layer')) {
-            cadMap.setLayoutProperty('osm-layer', 'visibility', useVWorld ? 'none' : 'visible');
+        if (state.cadMap.getLayer('osm-layer')) {
+            state.cadMap.setLayoutProperty('osm-layer', 'visibility', useVWorld ? 'none' : 'visible');
         }
-        if (cadMap.getLayer('vworld-layer')) {
-            cadMap.setLayoutProperty('vworld-layer', 'visibility', useVWorld ? 'visible' : 'none');
+        if (state.cadMap.getLayer('vworld-layer')) {
+            state.cadMap.setLayoutProperty('vworld-layer', 'visibility', useVWorld ? 'visible' : 'none');
         }
     }
     updateCadStyle();
@@ -437,35 +425,31 @@ export function switchMapProvider(useVWorld) {
 
 // [추가] 마커 토글 및 텍스트 위치 조정 기능
 export function toggleMarkers(isVisible) {
-    if (!cadMap) return;
-    
+    if (!state.cadMap) return;
     // 1. 마커(Point) 레이어 토글
-    if (cadMap.getLayer('cad-points')) {
-        cadMap.setLayoutProperty('cad-points', 'visibility', isVisible ? 'visible' : 'none');
+    if (state.cadMap.getLayer('cad-points')) {
+        state.cadMap.setLayoutProperty('cad-points', 'visibility', isVisible ? 'visible' : 'none');
     }
 }
 
 // [추가] 선 레이어 명 토글 기능
 export function toggleLineLabels(isVisible) {
-    if (!cadMap || !cadMap.getLayer('cad-line-labels')) return;
-    cadMap.setLayoutProperty('cad-line-labels', 'visibility', isVisible ? 'visible' : 'none');
+    if (!state.cadMap || !state.cadMap.getLayer('cad-line-labels')) return;
+    state.cadMap.setLayoutProperty('cad-line-labels', 'visibility', isVisible ? 'visible' : 'none');
 }
-
-// [추가] 전역 함수 등록 (HTML에서 호출 가능하도록)
-window.toggleLineLabels = toggleLineLabels;
 
 /**
  * 배경지도 유무와 전체화면 상태에 따른 스타일 업데이트
  */
 function updateCadStyle() {
-    if (!cadMap) return;
+    if (!state.cadMap) return;
 
-    const osmVisible = cadMap.getLayer('osm-layer') && cadMap.getLayoutProperty('osm-layer', 'visibility') === 'visible';
-    const vworldVisible = cadMap.getLayer('vworld-layer') && cadMap.getLayoutProperty('vworld-layer', 'visibility') === 'visible';
+    const osmVisible = state.cadMap.getLayer('osm-layer') && state.cadMap.getLayoutProperty('osm-layer', 'visibility') === 'visible';
+    const vworldVisible = state.cadMap.getLayer('vworld-layer') && state.cadMap.getLayoutProperty('vworld-layer', 'visibility') === 'visible';
     const isBgVisible = osmVisible || vworldVisible;
 
-    const canvasContainer = cadMap.getCanvasContainer();
-    const mapContainer = cadMap.getContainer();
+    const canvasContainer = state.cadMap.getCanvasContainer();
+    const mapContainer = state.cadMap.getContainer();
     let textColor = '#000000'; // 텍스트는 항상 검정색 유지
     // 배경지도가 보이면 투명(지도보임), 안 보이면 흰색 배경
     let bgColor = isBgVisible ? '' : '#ffffff';
@@ -473,16 +457,17 @@ function updateCadStyle() {
     canvasContainer.style.backgroundColor = bgColor;
     mapContainer.style.backgroundColor = bgColor;
 
-    if (cadMap.getLayer('cad-text')) {
-        cadMap.setPaintProperty('cad-text', 'text-color', textColor);
+    if (state.cadMap.getLayer('cad-text')) {
+        state.cadMap.setPaintProperty('cad-text', 'text-color', textColor);
     }
 }
 
 export function toggleLayerPanel() { const panel = document.getElementById('cadLayerPanel'); panel.style.display = (panel.style.display === 'none' || panel.style.display === '') ? 'block' : 'none'; }
 export function cleanupCadViewer() {
-    if (cadMap) { cadMap.remove(); cadMap = null; }
-    state.r2Config = null; resetLayerStyles();
-    state.currentCadProjectId = null; // [추가] 초기화
+    if (state.cadMap) { state.cadMap.remove(); state.cadMap = null; }
+    state.r2Config = null;
+    resetLayerStyles();
+    state.currentCadProjectId = null; 
     state.vworldFailed = false; // [추가] 실패 플래그 초기화
     state.isMemoIdVisible = false; // [추가] 초기화
     state.highlightedMemoId = null; // [추가] 강조 메모 초기화

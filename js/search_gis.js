@@ -4,8 +4,30 @@
  */
 import { state, callSupabaseDirect, showAlert } from './core.js';
 import { sanitizeSearchText, matchComplexQuery } from './search_db.js';
-import { cadMap, cadLayers, renderSearchResults, displayMatchesOnMap } from './viewers.js';
+import { cadLayers, renderSearchResults, displayMatchesOnMap } from './viewers.js';
 import { showAiResponseModal, showModalMessage, closeAiResponseModal } from './ai.js';
+
+/** [추가] 데이터 로드 보장 함수 */
+async function ensureGeoJSONLoaded() {
+    if (state.currentProjectGeoJSON || !state.currentCadProjectId) return;
+
+    showAlert("도면 분석용 데이터를 로드 중입니다. 잠시만 기다려주세요...", "info");
+    const baseUrl = state.r2Config.publicUrl.replace(/\/$/, '');
+    const geojsonUrl = `${baseUrl}/cad_data/CAD_${state.currentCadProjectId}.geojson?v=${Date.now()}`;
+
+    try {
+        // [최종 해결] ERR_CACHE_OPERATION_NOT_SUPPORTED 방지를 위해 credentials: 'omit' 적용
+        // 캐시 옵션 대신 자격 증명 생략을 통해 브라우저 캐시 엔진의 간섭을 피합니다.
+        const res = await fetch(geojsonUrl, { credentials: 'omit' });
+        if (!res.ok) throw new Error("분석 파일 접근 실패");
+        const data = await res.json();
+        state.currentProjectGeoJSON = data;
+        console.log("[Search] Global GeoJSON loaded for the first search.");
+    } catch (err) {
+        console.warn("Global GeoJSON load failed:", err);
+        throw err;
+    }
+}
 
 /** GIS 전용 검색 모달 UI 생성 */
 export function openGisSearchModal() {
@@ -112,6 +134,13 @@ export async function executeGisSearch(searchTerm) {
     
     if (!useBookmark && !isAudit) return showAlert("출력 형식을 선택하세요 (📍: 지도, ?: 리스트)", "info");
 
+    // [최적화] 사용자가 실행 버튼을 누른 이 시점에만 데이터를 로드합니다.
+    try {
+        await ensureGeoJSONLoaded();
+    } catch (e) {
+        return showAlert("분석 데이터를 로드할 수 없습니다. 관리자에게 문의하세요.", "error");
+    }
+
     let cleanInput = searchTerm.replace(/[📍?]/g, '').trim();
 
     if (cleanInput.includes('~') && cleanInput.includes('[거리]')) {
@@ -137,13 +166,14 @@ export async function executeGisSearch(searchTerm) {
 
 /** 포인트 검색 실행 */
 function executePointSearch(searchTerm, useBookmark, isAudit) {
-    let features = (state.currentProjectGeoJSON && state.currentProjectGeoJSON.features) 
+    // GeoJSON 데이터를 최우선으로 사용하며, 없을 경우에만 현재 화면(Map)의 피처를 검색합니다.
+    const features = (state.currentProjectGeoJSON && state.currentProjectGeoJSON.features) 
         ? state.currentProjectGeoJSON.features.filter(f => f.geometry && f.geometry.type === 'Point')
-        : cadMap.querySourceFeatures('cad_source', { sourceLayer: 'point' });
+        : (state.cadMap ? state.cadMap.querySourceFeatures('cad_source', { sourceLayer: 'point' }) : []);
 
     const matches = features.filter(f => {
         const combinedValues = Object.values(f.properties).join(' ');
-        return matchComplexQuery(combinedValues, searchTerm) >= 10.0;
+        return matchComplexQuery(combinedValues, searchTerm) >= 1.0; // [수정] 검색 감도 조절
     });
 
     if (matches.length === 0) return showAlert("일치하는 포인트가 없습니다.", "info");

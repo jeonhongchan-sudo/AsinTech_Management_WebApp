@@ -1,5 +1,4 @@
 import { state, callSupabaseDirect, showAlert } from './core.js';
-import { cadMap } from './viewers.js';
 
 export let cadLayers = new Set();
 export let cadLayerColors = {};
@@ -22,9 +21,14 @@ export function resetLayerStyles() {
 }
 
 /** 실제 캐드 레이어명을 감지하고 초기 스타일 설정 */
+let isDiscoveryScheduled = false;
 export function updateLayerDiscovery() {
-    if (!cadMap) return;
-    const features = cadMap.queryRenderedFeatures({ layers: ['cad-lines', 'cad-lines-dashed', 'cad-points', 'cad-polygons'] });
+    if (!state.cadMap || isDiscoveryScheduled) return;
+    
+    isDiscoveryScheduled = true;
+    // [백그라운드] 브라우저가 한가할 때 레이어 분석 수행
+    requestIdleCallback(() => {
+        const features = state.cadMap.queryRenderedFeatures({ layers: ['cad-lines', 'cad-lines-dashed', 'cad-points', 'cad-polygons'] });
     let updated = false;
 
     if (!state.cadLayerMetadata) state.cadLayerMetadata = {};
@@ -57,6 +61,8 @@ export function updateLayerDiscovery() {
     });
 
     if (updated) { renderLayerList(); updateMapStyle(); updateMapFilter(); }
+        isDiscoveryScheduled = false;
+    });
 }
 
 /** 사이드바 레이어 리스트 UI 렌더링 */
@@ -283,8 +289,8 @@ export function changeAllTextSizes(newSize) {
 }
 
 export function changeLineLabelSize(newSize) {
-    if (!cadMap || !cadMap.getLayer('cad-line-labels') || !state.currentCadProjectId) return;
-    cadMap.setLayoutProperty('cad-line-labels', 'text-size', newSize);
+    if (!state.cadMap || !state.cadMap.getLayer('cad-line-labels') || !state.currentCadProjectId) return;
+    state.cadMap.setLayoutProperty('cad-line-labels', 'text-size', newSize);
     const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
     if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
     const style = state.userSettings.layer_styles[labelStyleKey] || { size: 12, color: '#000000' };
@@ -294,8 +300,8 @@ export function changeLineLabelSize(newSize) {
 }
 
 export function changeLineLabelColor(newColor) {
-    if (!cadMap || !cadMap.getLayer('cad-line-labels') || !state.currentCadProjectId) return;
-    cadMap.setPaintProperty('cad-line-labels', 'text-color', newColor);
+    if (!state.cadMap || !state.cadMap.getLayer('cad-line-labels') || !state.currentCadProjectId) return;
+    state.cadMap.setPaintProperty('cad-line-labels', 'text-color', newColor);
     const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
     if (!state.userSettings.layer_styles) state.userSettings.layer_styles = {};
     const style = state.userSettings.layer_styles[labelStyleKey] || { size: 12, color: '#000000' };
@@ -305,7 +311,7 @@ export function changeLineLabelColor(newColor) {
 }
 
 export function reloadLayerStylesFromSettings() {
-    if (!cadMap || !state.currentCadProjectId) return;
+    if (!state.cadMap || !state.currentCadProjectId) return;
     let updated = false;
     cadLayers.forEach(layer => {
         const storageKey = `${state.currentCadProjectId}_${layer}`;
@@ -321,9 +327,9 @@ export function reloadLayerStylesFromSettings() {
     });
     const labelStyleKey = `${state.currentCadProjectId}__LINE_LABEL_STYLE__`;
     const savedLabelStyle = state.userSettings?.layer_styles?.[labelStyleKey];
-    if (savedLabelStyle && cadMap.getLayer('cad-line-labels')) {
-        if (savedLabelStyle.size) cadMap.setLayoutProperty('cad-line-labels', 'text-size', savedLabelStyle.size);
-        if (savedLabelStyle.color) cadMap.setPaintProperty('cad-line-labels', 'text-color', savedLabelStyle.color);
+    if (savedLabelStyle && state.cadMap.getLayer('cad-line-labels')) {
+        if (savedLabelStyle.size) state.cadMap.setLayoutProperty('cad-line-labels', 'text-size', savedLabelStyle.size);
+        if (savedLabelStyle.color) state.cadMap.setPaintProperty('cad-line-labels', 'text-color', savedLabelStyle.color);
     }
     const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled !== false;
     const chkDynamic = document.getElementById('chkDynamicText');
@@ -351,7 +357,7 @@ export async function saveUserStyles(layerName) {
 }
 
 export function updateMapFilter() {
-    if (!cadMap) return;
+    if (!state.cadMap) return;
     const hiddenLayersArray = Array.from(cadHiddenLayers);
     const commonFilter = hiddenLayersArray.length > 0 ? ['!in', 'layer', ...hiddenLayersArray] : null;
     const dashedLayers = [];
@@ -364,26 +370,26 @@ export function updateMapFilter() {
     }
     const dashedInFilter = dashedLayers.length > 0 ? ['in', 'layer', ...dashedLayers] : ['literal', false];
     const dashedNotInFilter = dashedLayers.length > 0 ? ['!in', 'layer', ...dashedLayers] : null;
-    if (cadMap.getLayer('cad-lines')) {
+    if (state.cadMap.getLayer('cad-lines')) {
         const solidFilter = commonFilter ? (dashedNotInFilter ? ['all', commonFilter, dashedNotInFilter] : commonFilter) : (dashedNotInFilter || null);
-        cadMap.setFilter('cad-lines', solidFilter);
+        state.cadMap.setFilter('cad-lines', solidFilter);
     }
-    if (cadMap.getLayer('cad-lines-dashed')) {
+    if (state.cadMap.getLayer('cad-lines-dashed')) {
         const dashFilter = commonFilter ? ['all', commonFilter, dashedInFilter] : dashedInFilter;
-        cadMap.setFilter('cad-lines-dashed', dashFilter);
+        state.cadMap.setFilter('cad-lines-dashed', dashFilter);
     }
-    if (cadMap.getLayer('cad-polygons')) cadMap.setFilter('cad-polygons', commonFilter);
-    if (cadMap.getLayer('cad-text')) {
+    if (state.cadMap.getLayer('cad-polygons')) state.cadMap.setFilter('cad-polygons', commonFilter);
+    if (state.cadMap.getLayer('cad-text')) {
         const textFilter = commonFilter ? ['all', ['has', 'text'], commonFilter] : ['has', 'text'];
-        cadMap.setFilter('cad-text', textFilter);
+        state.cadMap.setFilter('cad-text', textFilter);
     }
     const pointExclusionFilter = ['!=', 'layer', 'Text_to_Pline'];
     const finalPointFilter = commonFilter ? ['all', commonFilter, pointExclusionFilter] : pointExclusionFilter;
-    if (cadMap.getLayer('cad-points')) cadMap.setFilter('cad-points', finalPointFilter);
+    if (state.cadMap.getLayer('cad-points')) state.cadMap.setFilter('cad-points', finalPointFilter);
 }
 
 export function updateMapStyle() {
-    if (!cadMap) return;
+    if (!state.cadMap) return;
     const lineColorExpr = ['match', ['get', 'layer']];
     const lineWidthExpr = ['match', ['get', 'layer']];
     const pointColorExpr = ['match', ['get', 'layer']];
@@ -410,21 +416,21 @@ export function updateMapStyle() {
     pointColorExpr.push('#cccccc'); pointSizeExpr.push(3);
     textColorExpr.push('#000000'); textSizeExpr.push(12);
     radialOffsetExpr.push(0.25);
-    if (cadMap.getLayer('cad-lines')) { cadMap.setPaintProperty('cad-lines', 'line-color', lineColorExpr); cadMap.setPaintProperty('cad-lines', 'line-width', lineWidthExpr); }
-    if (cadMap.getLayer('cad-lines-dashed')) { cadMap.setPaintProperty('cad-lines-dashed', 'line-color', lineColorExpr); cadMap.setPaintProperty('cad-lines-dashed', 'line-width', lineWidthExpr); }
-    if (cadMap.getLayer('cad-text')) {
+    if (state.cadMap.getLayer('cad-lines')) { state.cadMap.setPaintProperty('cad-lines', 'line-color', lineColorExpr); state.cadMap.setPaintProperty('cad-lines', 'line-width', lineWidthExpr); }
+    if (state.cadMap.getLayer('cad-lines-dashed')) { state.cadMap.setPaintProperty('cad-lines-dashed', 'line-color', lineColorExpr); state.cadMap.setPaintProperty('cad-lines-dashed', 'line-width', lineWidthExpr); }
+    if (state.cadMap.getLayer('cad-text')) {
         const isDynamic = state.userSettings?.layer_styles?.[`${state.currentCadProjectId}__DYNAMIC_TEXT__`]?.enabled !== false;
-        cadMap.setPaintProperty('cad-text', 'text-color', textColorExpr);
-        cadMap.setLayoutProperty('cad-text', 'text-size', textSizeExpr);
-        cadMap.setLayoutProperty('cad-text', 'text-variable-anchor', isDynamic ? ['bottom-left', 'bottom-right', 'top-left', 'top-right'] : ['bottom-left']); 
-        cadMap.setLayoutProperty('cad-text', 'text-radial-offset', radialOffsetExpr);
-        cadMap.setLayoutProperty('cad-text', 'text-padding', isDynamic ? 1 : 0);
-        cadMap.setLayoutProperty('cad-text', 'text-allow-overlap', isDynamic ? false : true);
-        cadMap.setLayoutProperty('cad-text', 'text-ignore-placement', isDynamic ? false : true);
-        cadMap.setLayoutProperty('cad-text', 'text-rotate', isDynamic ? 0 : ['get', 'rotation']);
-        cadMap.setLayoutProperty('cad-text', 'text-rotation-alignment', isDynamic ? 'viewport' : 'map');
-        cadMap.setLayoutProperty('cad-text', 'text-justify', isDynamic ? 'auto' : 'left');
+        state.cadMap.setPaintProperty('cad-text', 'text-color', textColorExpr);
+        state.cadMap.setLayoutProperty('cad-text', 'text-size', textSizeExpr);
+        state.cadMap.setLayoutProperty('cad-text', 'text-variable-anchor', isDynamic ? ['bottom-left', 'bottom-right', 'top-left', 'top-right'] : ['bottom-left']); 
+        state.cadMap.setLayoutProperty('cad-text', 'text-radial-offset', radialOffsetExpr);
+        state.cadMap.setLayoutProperty('cad-text', 'text-padding', isDynamic ? 1 : 0);
+        state.cadMap.setLayoutProperty('cad-text', 'text-allow-overlap', isDynamic ? false : true);
+        state.cadMap.setLayoutProperty('cad-text', 'text-ignore-placement', isDynamic ? false : true);
+        state.cadMap.setLayoutProperty('cad-text', 'text-rotate', isDynamic ? 0 : ['get', 'rotation']);
+        state.cadMap.setLayoutProperty('cad-text', 'text-rotation-alignment', isDynamic ? 'viewport' : 'map');
+        state.cadMap.setLayoutProperty('cad-text', 'text-justify', isDynamic ? 'auto' : 'left');
     }
-    if (cadMap.getLayer('cad-polygons')) cadMap.setPaintProperty('cad-polygons', 'fill-color', lineColorExpr);
-    if (cadMap.getLayer('cad-points')) { cadMap.setPaintProperty('cad-points', 'circle-color', pointColorExpr); cadMap.setPaintProperty('cad-points', 'circle-radius', pointSizeExpr); }
+    if (state.cadMap.getLayer('cad-polygons')) state.cadMap.setPaintProperty('cad-polygons', 'fill-color', lineColorExpr);
+    if (state.cadMap.getLayer('cad-points')) { state.cadMap.setPaintProperty('cad-points', 'circle-color', pointColorExpr); state.cadMap.setPaintProperty('cad-points', 'circle-radius', pointSizeExpr); }
 }
