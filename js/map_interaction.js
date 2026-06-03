@@ -1,5 +1,6 @@
 import { state, callSupabaseDirect, showAlert } from './core.js';
 import { handleDistanceClick } from './map_measure.js';
+import { checkPhotoMatch } from './search_gis.js';
 
 export let memoMarkers = [];
 export let currentPopup = null;
@@ -98,9 +99,29 @@ export async function loadMapMemos() {
 export async function loadProjectPhotos() {
     if (!state.currentCadProjectId || !state.supabaseConfig) return;
     try {
-        const data = await callSupabaseDirect(`photos?cad_project_id=eq.${state.currentCadProjectId}&select=file_name,file_url`);
-        state.projectPhotos = data || [];
-        console.log(`[AutoMatch] Loaded ${state.projectPhotos.length} photos.`);
+        // [수정] 사진 관리 DB뿐만 아니라 조사 메모에 첨부된 사진들도 모두 로드하여 매칭에 사용합니다.
+        const [photoData, memoData] = await Promise.all([
+            callSupabaseDirect(`photos?cad_project_id=eq.${state.currentCadProjectId}&select=file_name,file_url`),
+            callSupabaseDirect(`memos?project_id=eq.${state.currentCadProjectId}&image_url=not.is.null&select=image_url`)
+        ]);
+
+        const r2Photos = (photoData || []).map(row => ({ file_name: row.file_name, file_url: row.file_url }));
+        
+        const memoPhotos = [];
+        (memoData || []).forEach(row => {
+            if (row.image_url) {
+                row.image_url.split(',').forEach(url => {
+                    const trimmed = url.trim();
+                    if (!trimmed) return;
+                    // URL에서 순수 파일명만 추출하여 매칭 데이터로 변환
+                    const fileName = trimmed.split('?')[0].split('/').pop();
+                    memoPhotos.push({ file_name: fileName, file_url: trimmed });
+                });
+            }
+        });
+
+        state.projectPhotos = [...r2Photos, ...memoPhotos];
+        console.log(`[AutoMatch] Loaded ${state.projectPhotos.length} photos total (including memos).`);
     } catch (e) {
         console.warn("[AutoMatch] Failed to load photos:", e);
         state.projectPhotos = [];
@@ -176,12 +197,8 @@ export async function openMemoPopup(feature) {
     let matchedPhotosHtml = '';
     const pointText = (feature.properties.text || '').trim();
     if (pointText && state.projectPhotos.length > 0) {
-        const matched = state.projectPhotos.filter(p => {
-            const fBaseName = (p.file_name || '').split('.')[0];
-            const fParts = fBaseName.split('-');
-            const fId = (fParts.length >= 2) ? (fParts[0] + '-' + fParts[1]) : fBaseName;
-            return new RegExp(fId.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + "(?![0-9])").test(pointText);
-        });
+        // [통합] GIS 검색과 동일한 매칭 엔진을 사용하여 일관성을 유지합니다.
+        const matched = state.projectPhotos.filter(ph => checkPhotoMatch(pointText, ph.file_name));
         if (matched.length > 0) {
             window.currentMatchedPhotos = matched.map(p => ({ fileName: p.file_name, url: p.file_url }));
             matchedPhotosHtml = `<div style="margin-bottom:8px; padding:5px; background:#f8f9fa; border-radius:4px; border:1px solid #eee;"><div style="font-size:11px; font-weight:bold; color:#007bff; margin-bottom:4px;">📸 관련 사진 (${matched.length})</div><div style="display:flex; gap:4px; overflow-x:auto; padding-bottom:2px;">${matched.map((p, idx) => `<img src="${p.file_url}" onclick="window.openMatchedLightbox(${idx})" style="width:40px; height:40px; object-fit:cover; border-radius:3px; cursor:pointer; border:1px solid #ddd;" title="${p.file_name}">`).join('')}</div></div>`;

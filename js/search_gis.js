@@ -4,7 +4,7 @@
  */
 import { state, callSupabaseDirect, showAlert } from './core.js';
 import { sanitizeSearchText, matchComplexQuery } from './search_db.js';
-import { cadLayers, renderSearchResults, displayMatchesOnMap } from './viewers.js';
+import { cadLayers, renderSearchResults, displayMatchesOnMap, loadProjectPhotos } from './viewers.js';
 import { showAiResponseModal, showModalMessage, closeAiResponseModal } from './ai.js';
 
 /** [추가] 데이터 로드 보장 함수 */
@@ -91,7 +91,7 @@ export function openGisSearchModal() {
 
         modal.querySelector('#btnShortcutPhoto').onclick = () => {
             const input = document.getElementById('gisSearchInput');
-            input.value += '사진';
+            input.value += '^사진';
             input.focus();
         };
 
@@ -154,12 +154,13 @@ export async function executeGisSearch(searchTerm) {
     if (distMatch) return analyzeDistanceGap(distMatch[1].trim(), parseFloat(distMatch[2]), useBookmark, isAudit);
 
     if (cleanInput.includes('사진')) {
-        const targetLayer = cleanInput.split('사진')[0].replace(/\^$/, '').trim();
+        // [개선] ^ 기호가 포함된 경우(예: 레이어^사진) ^를 구분자로 인식하여 제거 후 레이어명만 추출
+        const targetLayer = cleanInput.split('사진')[0].replace(/\^/g, '').trim();
         if (targetLayer) return analyzePhotoMismatch(targetLayer, useBookmark, isAudit);
     }
 
     if (cleanInput.endsWith('[거리]')) {
-        const targetLayer = cleanInput.split('[')[0].replace(/\^$/, '').trim();
+        const targetLayer = cleanInput.split('[')[0].replace(/\^/g, '').trim();
         return analyzeTotalDistance(targetLayer, useBookmark, isAudit);
     }
 
@@ -168,6 +169,9 @@ export async function executeGisSearch(searchTerm) {
 
 /** 포인트 검색 실행 */
 function executePointSearch(searchTerm, useBookmark, isAudit) {
+    // [수정] 검색어에 포함된 시각적 구분자 ^ 제거 (가독성용 기호 무시)
+    const cleanSearch = searchTerm.replace(/\^/g, '').trim();
+
     // GeoJSON 데이터를 최우선으로 사용하며, 없을 경우에만 현재 화면(Map)의 피처를 검색합니다.
     const features = (state.currentProjectGeoJSON && state.currentProjectGeoJSON.features) 
         ? state.currentProjectGeoJSON.features.filter(f => f.geometry && f.geometry.type === 'Point')
@@ -175,7 +179,7 @@ function executePointSearch(searchTerm, useBookmark, isAudit) {
 
     const matches = features.filter(f => {
         const combinedValues = Object.values(f.properties).join(' ');
-        return matchComplexQuery(combinedValues, searchTerm) >= 1.0; // [수정] 검색 감도 조절
+        return matchComplexQuery(combinedValues, cleanSearch) >= 1.0; 
     });
 
     if (matches.length === 0) return showAlert("일치하는 포인트가 없습니다.", "info");
@@ -183,24 +187,33 @@ function executePointSearch(searchTerm, useBookmark, isAudit) {
     if (useBookmark) renderSearchResults(matches);
     if (!isAudit) return;
 
-    renderGisResultList(searchTerm, matches, useBookmark);
+    renderGisResultList(cleanSearch, matches, useBookmark);
 }
 
 /** 레이어 포인트와 사진 저장소 미스매칭 분석 */
 async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit) {
     if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
+    
+    // [개선] 분석 시작 전 클라우드의 최신 사진 목록을 강제로 다시 불러옵니다.
+    showAlert(`${targetLayer} 레이어 사진 데이터 동기화 중...`, "info");
+    await loadProjectPhotos();
+    
     showAlert(`${targetLayer} 레이어 사진 매칭 분석 중...`, "info");
 
     const points = state.currentProjectGeoJSON.features.filter(f => 
-        f.geometry.type === 'Point' && matchComplexQuery(f.properties.layer, targetLayer) >= 10.0
+        f.geometry && f.geometry.type === 'Point' && matchComplexQuery(f.properties.layer, targetLayer) >= 10.0
     );
 
     const photos = state.projectPhotos;
+    if (!photos || photos.length === 0) {
+        return showModalMessage("📸 분석 결과", "저장된 사진이 없습니다. [사진관리] 탭에서 사진을 먼저 등록하거나 조사 메모를 작성해주세요.", 'info');
+    }
+
     const unmatchedPoints = [];
     const matchedPhotoNames = new Set();
 
     points.forEach(p => {
-        const pointText = (p.properties.text || p.properties.handle || '').toString().trim();
+        const pointText = (p.properties.text || p.properties.TEXT || p.properties.label || p.properties.handle || '').toString().trim();
         const matches = photos.filter(ph => checkPhotoMatch(pointText, ph.file_name));
         if (matches.length === 0) unmatchedPoints.push(p);
         else matches.forEach(ph => matchedPhotoNames.add(ph.file_name));
@@ -466,12 +479,23 @@ function renderGisResultList(searchTerm, matches, useBookmark) {
 }
 
 /** 사진 파일명과 포인트 텍스트 매칭 규칙 */
-function checkPhotoMatch(pointText, photoFileName) {
+export function checkPhotoMatch(pointText, photoFileName) {
     if (!pointText || !photoFileName) return false;
-    const fBaseName = photoFileName.includes('.') ? photoFileName.substring(0, photoFileName.lastIndexOf('.')) : photoFileName;
+
+    // 1. CAD 특유의 제어코드(%%c 등)를 제거하여 텍스트를 깨끗하게 만듭니다.
+    const cleanPoint = pointText.toString().replace(/%%[cdp]/gi, '').trim();
+
+    // 2. 사진 파일명에서 핵심 ID(예: 260522-08)를 추출합니다.
+    const fBaseName = photoFileName.split('?')[0].split('.')[0];
     const fParts = fBaseName.split('-');
+    
+    // 하이픈으로 구분된 앞 두 파트를 매칭의 핵심 ID로 사용 (000000-00 형태)
     const fId = (fParts.length >= 2) ? (fParts[0] + '-' + fParts[1]) : fBaseName;
+    
+    // 3. 정규식을 사용하여 포인트 텍스트 내에 해당 ID가 정확히 존재하는지 확인합니다.
+    // (?![0-9])를 사용하여 '240424-01'이 '240424-011'에 매칭되는 것을 방지합니다.
     const escapedId = fId.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-    const regex = new RegExp(escapedId + "(?![0-9])"); 
-    return regex.test(pointText.toString());
+    const regex = new RegExp(escapedId + "(?![0-9])", "i"); 
+    
+    return regex.test(cleanPoint);
 }
