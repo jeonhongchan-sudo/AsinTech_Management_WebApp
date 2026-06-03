@@ -16,7 +16,6 @@ async function ensureGeoJSONLoaded() {
     const geojsonUrl = `${baseUrl}/cad_data/CAD_${state.currentCadProjectId}.geojson?v=${Date.now()}`;
 
     try {
-        // [최종 해결] ERR_CACHE_OPERATION_NOT_SUPPORTED 방지를 위해 credentials: 'omit' 적용
         // 캐시 옵션 대신 자격 증명 생략을 통해 브라우저 캐시 엔진의 간섭을 피합니다.
         const res = await fetch(geojsonUrl, { credentials: 'omit' });
         if (!res.ok) throw new Error("분석 파일 접근 실패");
@@ -54,7 +53,10 @@ export function openGisSearchModal() {
                         <span><b>📍</b> : 지도 마커 표시</span>
                     </div>
                     <div style="color:#2c5282; font-weight:bold; font-size:10.5px; background:#ebf8ff; padding:5px 8px; border-radius:4px;">
-                        • 예: A~B[거리]? | 레이어[거리]>10📍 | 레이어사진?
+                        • 예: A~B[거리]? (A지점~B지점 거리는?) | 레이어? (레이어 리스트 정리해줘)<br>
+                        • 예: 제수변100!하단📍 (제수변 100mm 전부 찾아줘 단, 하단은 제외)<br>
+                        • 예: 260530-01📍 (260530-01 지점에 북마커해줘)<br>
+                        • 정리: 마지막은 항상 📍 또는 ?가 들어가야 검색이 됩니다 
                     </div>
                 </div>
                 <div id="gisSearchShortcuts" style="margin-bottom:8px; display:flex; gap:6px;">
