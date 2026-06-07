@@ -207,5 +207,5 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:
 .ai-response-container { line-height: 1.6; font-size: 14px; color: #333; }
 .ai-answer-box { background: #f8f9fa; border-left: 4px solid #667eea; padding: 15px; border-radius: 4px; margin-bottom: 15px; white-space: pre-wrap; word-break: break-all; }
 .ai-source-hint { font-size: 12px; color: #888; font-style: italic; margin-bottom: 10px; }
-.ai-btn-group { display: flex; gap: 8px; justify-content: flex-end; margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px; }
+.ai-btn-group { display: flex; gap: 8px; justify-content: flex-end; margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px; flex-shrink: 0; }
 .ai-badge { background: #e7f5ff; color: #228be6; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; margin-right: 5px; }

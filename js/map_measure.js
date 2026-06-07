@@ -1,4 +1,5 @@
 import { state, callSupabaseDirect, showAlert } from './core.js';
+import { ensureGeoJSONLoaded } from './viewers.js';
 
 /** 거리 측정 모드 토글 */
 export function toggleDistanceMode(forceValue) {
@@ -10,6 +11,9 @@ export function toggleDistanceMode(forceValue) {
     if (state.isDistanceMode) {
         showAlert('거리 측정 모드: 지도에서 첫 번째 지점을 선택하세요.', 'info');
         if (state.cadMap) state.cadMap.getCanvas().style.cursor = 'crosshair';
+        
+        // [추가] 정밀 좌표 확보를 위해 원본 GeoJSON 로드 시작 (백그라운드)
+        if (state.currentCadProjectId) ensureGeoJSONLoaded();
     } else {
         if (state.cadMap) state.cadMap.getCanvas().style.cursor = '';
         clearDistanceMeasurement();

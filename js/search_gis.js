@@ -4,29 +4,8 @@
  */
 import { state, callSupabaseDirect, showAlert } from './core.js';
 import { sanitizeSearchText, matchComplexQuery } from './search_db.js';
-import { cadLayers, renderSearchResults, displayMatchesOnMap, loadProjectPhotos } from './viewers.js';
+import { cadLayers, renderSearchResults, displayMatchesOnMap, loadProjectPhotos, ensureGeoJSONLoaded } from './viewers.js';
 import { showAiResponseModal, showModalMessage, closeAiResponseModal } from './ai.js';
-
-/** [추가] 데이터 로드 보장 함수 */
-async function ensureGeoJSONLoaded() {
-    if (state.currentProjectGeoJSON || !state.currentCadProjectId) return;
-
-    showAlert("도면 분석용 데이터를 로드 중입니다. 잠시만 기다려주세요...", "info");
-    const baseUrl = state.r2Config.publicUrl.replace(/\/$/, '');
-    const geojsonUrl = `${baseUrl}/cad_data/CAD_${state.currentCadProjectId}.geojson?v=${Date.now()}`;
-
-    try {
-        // 캐시 옵션 대신 자격 증명 생략을 통해 브라우저 캐시 엔진의 간섭을 피합니다.
-        const res = await fetch(geojsonUrl, { credentials: 'omit' });
-        if (!res.ok) throw new Error("분석 파일 접근 실패");
-        const data = await res.json();
-        state.currentProjectGeoJSON = data;
-        console.log("[Search] Global GeoJSON loaded for the first search.");
-    } catch (err) {
-        console.warn("Global GeoJSON load failed:", err);
-        throw err;
-    }
-}
 
 /** GIS 전용 검색 모달 UI 생성 */
 export function openGisSearchModal() {
@@ -48,14 +27,14 @@ export function openGisSearchModal() {
                         <span><b>!</b> : 검색 제외 (NOT)</span>
                         <span><b>~</b> : ~에서 (지점연결)</span>
                         <span><b>[거리]</b> : 연장/거리 계산</span>
-                        <span><b>사진</b> : 사진 매칭 분석</span>
+                        <span><b>[사진]</b> : 사진 매칭 분석</span>
                         <span><b>?</b> : 분석 리포트 출력</span>
                         <span><b>📍</b> : 지도 마커 표시</span>
                     </div>
                     <div style="color:#2c5282; font-weight:bold; font-size:10.5px; background:#ebf8ff; padding:5px 8px; border-radius:4px;">
-                        • 예: A~B[거리]? (A지점~B지점 거리는?) | 레이어? (레이어 리스트 정리해줘)<br>
-                        • 예: 제수변100!하단📍 (제수변 100mm 전부 찾아줘 단, 하단은 제외)<br>
-                        • 예: 260530-01📍 (260530-01 지점에 북마커해줘)<br>
+                        • 예: A~B[거리]? | 레이어?<br>
+                        • 예: 제수변100!하단📍<br>
+                        • 예: 260530-01📍<br>
                         • 정리: 마지막은 항상 📍 또는 ?가 들어가야 검색이 됩니다 
                     </div>
                 </div>
@@ -91,7 +70,7 @@ export function openGisSearchModal() {
 
         modal.querySelector('#btnShortcutPhoto').onclick = () => {
             const input = document.getElementById('gisSearchInput');
-            input.value += '^사진';
+            input.value += '[사진]';
             input.focus();
         };
 
@@ -154,8 +133,8 @@ export async function executeGisSearch(searchTerm) {
     if (distMatch) return analyzeDistanceGap(distMatch[1].trim(), parseFloat(distMatch[2]), useBookmark, isAudit);
 
     if (cleanInput.includes('사진')) {
-        // [개선] ^ 기호가 포함된 경우(예: 레이어^사진) ^를 구분자로 인식하여 제거 후 레이어명만 추출
-        const targetLayer = cleanInput.split('사진')[0].replace(/\^/g, '').trim();
+        // [수정] [사진] 또는 ^사진 문법 모두를 지원하며, 레이어명에서 불필요한 기호([], ^)를 정제합니다.
+        const targetLayer = cleanInput.split('사진')[0].replace(/[\[\]^]/g, '').trim();
         if (targetLayer) return analyzePhotoMismatch(targetLayer, useBookmark, isAudit);
     }
 

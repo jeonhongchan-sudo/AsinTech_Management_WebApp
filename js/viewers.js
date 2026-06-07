@@ -13,6 +13,25 @@ export * from './map_measure.js';
 export * from './map_styles.js';
 export * from './map_interaction.js';
 
+/** [추가] 분석 및 정밀 측정을 위한 원본 데이터(GeoJSON) 로드 보장 함수 */
+export async function ensureGeoJSONLoaded() {
+    if (state.currentProjectGeoJSON || !state.currentCadProjectId || !state.r2Config) return;
+
+    console.log("[Data] 정밀 좌표 확보를 위해 GeoJSON 데이터를 로드합니다.");
+    const baseUrl = state.r2Config.publicUrl.replace(/\/$/, '');
+    const geojsonUrl = `${baseUrl}/cad_data/CAD_${state.currentCadProjectId}.geojson?v=${Date.now()}`;
+
+    try {
+        const res = await fetch(geojsonUrl, { credentials: 'omit' });
+        if (!res.ok) throw new Error("분석 파일 접근 실패");
+        const data = await res.json();
+        state.currentProjectGeoJSON = data;
+        console.log("[Data] High-precision GeoJSON loaded for exact measurement.");
+    } catch (err) {
+        console.warn("Global GeoJSON load failed:", err);
+    }
+}
+
 export function toggleFullScreen() {
     const mapContainer = document.getElementById('cad-map');
 
