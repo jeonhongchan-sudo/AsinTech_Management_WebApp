@@ -573,7 +573,7 @@ export function showAiResponseModal(query, answer, source, matches = null) {
     if (innerContent) {
         innerContent.style.width = '90vw'; // 화면 너비의 90%
         innerContent.style.maxWidth = '900px'; // 최대 900px
-        innerContent.style.maxHeight = '80vh'; // 화면 높이의 60% (노트북 가독성 최적화)
+        innerContent.style.maxHeight = '90vh'; // 화면 높이의 90% (노트북 가독성 최적화)
         innerContent.style.minHeight = 'auto'; // style.css의 800px 최소 높이 설정 해제
     }
 
