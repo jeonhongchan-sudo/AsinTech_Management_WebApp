@@ -67,10 +67,17 @@ export async function initCadViewer() {
             maplibregl.addProtocol("pmtiles", state.cadProtocol.tile);
         }
         await loadCadProjects();
-        resetLayerStyles();
-        document.getElementById('cadLayerPanel').style.display = 'none';
-        const toggleBtn = document.getElementById('cadLayerToggleBtn');
-        if (toggleBtn) toggleBtn.style.display = 'none';
+
+        // [수정] 기존에 선택된 프로젝트가 있다면 자동으로 다시 로드 (탭 전환 시 유지)
+        if (state.currentCadProjectId && select) {
+            select.value = state.currentCadProjectId;
+            await loadCadMap(state.currentCadProjectId);
+        } else {
+            resetLayerStyles();
+            document.getElementById('cadLayerPanel').style.display = 'none';
+            const toggleBtn = document.getElementById('cadLayerToggleBtn');
+            if (toggleBtn) toggleBtn.style.display = 'none';
+        }
         updateSearchButtonUI(); // 초기화 시점에 버튼 명칭 업데이트
     } catch (e) { console.error(e); if (select) select.innerHTML = '<option value="">초기화 실패</option>'; }
 }
@@ -156,7 +163,14 @@ export function toggleMapMenu(event) {
 }
 
 export async function loadCadMap(projectId) {
-    if (!projectId) return;
+    // [수정] projectId가 없는 경우(사용자가 '선택하세요' 클릭) 명시적으로 해제 처리
+    if (!projectId) {
+        state.currentCadProjectId = null;
+        cleanupCadViewer();
+        updateSearchButtonUI();
+        return;
+    }
+
     state.currentCadProjectId = projectId; // [수정] 전역 상태에 프로젝트 ID 저장
 
     // [추가] 프로젝트 전환 시 이전 프로젝트의 GIS 검색 데이터 및 UI 상태 완전 초기화
@@ -499,7 +513,8 @@ export function cleanupCadViewer() {
     if (state.cadMap) { state.cadMap.remove(); state.cadMap = null; }
     state.r2Config = null;
     resetLayerStyles();
-    state.currentCadProjectId = null; 
+    // [수정] 탭 전환 시 프로젝트 유지를 위해 여기서 ID를 초기화하지 않음. 
+    // 명시적 프로젝트 해제(loadCadMap(null)) 시에만 초기화하도록 변경.
     state.vworldFailed = false; // [추가] 실패 플래그 초기화
     state.isMemoIdVisible = false; // [추가] 초기화
     state.highlightedMemoId = null; // [추가] 강조 메모 초기화
