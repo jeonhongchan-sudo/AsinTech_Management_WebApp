@@ -206,18 +206,26 @@ export async function handleDatabaseSearch(query) {
         const allFoundResults = await fetchDbSearchResults(query);
 
         if (allFoundResults.length > 0) {
-            // 점수순 정렬 (검증된 지식 -> 로컬 -> 본문 순으로 가중치 반영됨)
-            allFoundResults.sort((a, b) => b.score - a.score);
-            // [수정] 결과 출력 직전 로딩 UI를 제거하여 사용자에게 검색 완료 사실을 적시함
-            if (contentEl) contentEl.innerHTML = "";
-            displayCombinedResults(allFoundResults, query, "📚 통합 DB 검색 결과");
-            return true;
+            // [수정] 결과를 화면에 뿌리지 않고 AI에게 보낼 텍스트 맥락으로 변환
+            let combinedRawText = "";
+            allFoundResults.slice(0, 10).forEach((match, idx) => {
+                const pageInfo = match.metadata?.page ? ` - p.${match.metadata.page}` : "";
+                combinedRawText += `[데이터 ${idx + 1}] 출처: ${match.file_name}${pageInfo}\n${match.content}\n\n`;
+            });
+
+            // [핵심] 바로 AI 검색(요약 모드)으로 전달하여 AI가 답변하게 함
+            return await handleAiSearch(query, state.lastCadLayersSet, combinedRawText, false, allFoundResults);
         }
 
-        // [수정] 검색 결과가 없을 때 직접 입력 안내 문구에서 '아신' 키워드 언급 삭제
-        showAiResponseModal(query, "지침 DB에서 해당 내용을 찾을 수 없습니다. 외부에서 발췌한 내용을 직접 입력(✍️)하여 저장하시거나, AI의 추론 답변이 필요하다면 하단의 <strong>[🤖 AI 재요청]</strong> 버튼을 눌러보세요.", "📚 통합 DB 검색");
-        return false;
-    } catch (e) { console.error("DB 검색 오류:", e); showModalMessage("⚠️ DB 검색 중 오류가 발생했습니다.", e.message, 'error'); return false; }
+        // [수정] 검색 결과가 아예 없을 때만 추론을 위해 AI 호출 (데이터 없이)
+        console.log("🔍 DB 결과 없음. AI 일반 추론으로 전환.");
+        return await handleAiSearch(query, state.lastCadLayersSet, null, false, null);
+
+    } catch (e) { 
+        console.error("DB 검색 오류:", e); 
+        showModalMessage("⚠️ DB 검색 중 오류가 발생했습니다.", e.message, 'error'); 
+        return false; 
+    }
 }
 
 /** [추가] 잘못 저장된 AI 지식(Confirmed Knowledge) 삭제 */
@@ -341,7 +349,12 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
             // DB 재요청(요약)인 경우: 새로운 대화로 간주
             state.originalAiQuery = query;
             state.aiCorrectionHistory = [];
-            combinedContext = `${systemContextPrefix}[분석 대상 데이터]\n${rawDbContext}\n\n[도면 맥락]\n${layerContext}`;
+
+            // [수정] Workers AI 토큰 한계(8k) 대응을 위해 컨텍스트 길이를 약 10,000자로 제한
+            const truncatedContext = rawDbContext && rawDbContext.length > 10000 
+                ? rawDbContext.substring(0, 10000) + "\n...(중략)...\n" 
+                : rawDbContext;
+            combinedContext = `${systemContextPrefix}[분석 대상 데이터]\n${truncatedContext}\n\n[도면 맥락]\n${layerContext}`;
         } else {
             // 완전히 새로운 질문인 경우
             state.originalAiQuery = query;
@@ -372,7 +385,8 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
             }
             
             // [수정] 이제 AI가 스스로 DB를 검색하지 않으므로 rawData 관련 보정 로직 제거
-            showAiResponseModal(query, res.answer, "실시간 AI 분석");
+            // [추가] Worker AI가 알려준 모델명을 출처 라벨에 함께 표시
+            showAiResponseModal(query, res.answer, res.model || "실시간 AI 분석");
             
             lastAiRequestTime = Date.now();
         } else {

@@ -119,12 +119,11 @@ export async function callSupabaseDirect(endpoint, method = 'GET', body = null, 
 // [추가] Supabase Edge Function (AI) 호출 함수
 export async function callAiEdge(prompt, context = "", type = "general") {
     try {
-        // [추가] 브라우저 측 타임아웃 설정 (45초)
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 45000);
 
-        // [수정] 실제 배포된 Function 이름인 'AI'로 호출합니다.
-        const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/AI`, {
+        // [수정] 1순위: Gemini-2.5-Flash-Lite (Supabase Edge Function) 호출
+        let response = await fetch(`${SUPABASE_FUNCTIONS_URL}/AI`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -134,16 +133,42 @@ export async function callAiEdge(prompt, context = "", type = "general") {
             body: JSON.stringify({ prompt, context, type })
         });
 
+        // [추가] 429 에러(할당량 초과) 발생 시 보험인 Cloudflare Worker AI로 자동 전환
+        if (response.status === 429) {
+            console.warn("⚠️ Gemini 429 발생. Worker AI(보험)로 전환합니다.");
+            response = await fetch(`${WORKER_URL}/ai`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': WORKER_AUTH_KEY
+                },
+                signal: controller.signal,
+                body: JSON.stringify({ prompt, context, type })
+            });
+        }
+
         clearTimeout(timeoutId);
         
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
-            return await response.json();
+            const result = await response.json();
+            
+            // Gemini는 성공 응답을 보냈지만 내부 에러 메시지에 'limit'가 있는 경우 대응
+            if (!result.success && result.error && (result.error.includes("limit") || result.error.includes("quota"))) {
+                console.warn("⚠️ Gemini 내부 할당량 에러. Worker AI로 재시도합니다.");
+                const retryRes = await fetch(`${WORKER_URL}/ai`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': WORKER_AUTH_KEY },
+                    body: JSON.stringify({ prompt, context, type })
+                });
+                return await retryRes.json();
+            }
+            return result;
         }
         
-        // JSON이 아닌 경우(546 에러 등) 텍스트로 읽어서 에러 메시지 생성
         const errorText = await response.text();
-        throw new Error(`서버 오류 (${response.status}): ${errorText.substring(0, 100)}`);
+        // 429가 아닌 일반적인 서버 오류 시 예외 처리
+        return { success: false, error: `서버 응답 오류 (${response.status})` };
 
     } catch (error) {
         if (error.name === 'AbortError') return { success: false, error: "요청 시간 초과 (45초)" };

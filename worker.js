@@ -132,6 +132,44 @@ export default {
       }
     }
 
+    // --- [추가] 7. Workers AI 실행 (/ai) ---
+    if (url.pathname === "/ai" && request.method === "POST") {
+      try {
+        const { prompt, context, type } = await request.json();
+
+        let systemInstruction = `당신은 '아신테크 GIS 관리 도구'의 지식 검색 에이전트 '아신'입니다.
+[데이터 접근 규칙]
+1. 웹 클라이언트에서 전달한 [분석 대상 데이터]가 질문의 의도와 부합하는지 분석하세요.
+2. 데이터 활용: 검색된 내용이 질문과 연관성이 높다면 이를 요약하여 답변하세요. 만약 데이터가 질문의 의도와 너무 다르거나 정보가 부족하다면, 당신의 전문적인 지식을 활용하여 답변을 보완하거나 대안을 제시하세요.
+3. 상태 알림: 당신의 일반 지식을 활용해 답변을 보완한 경우, 답변 하단에 "지침 DB 내 관련 정보가 부족하여 AI의 일반 지식을 바탕으로 설명해 드립니다."라고 명시하세요.
+4. 근거 제시: DB에서 발췌한 정보에는 반드시 출처를 명시하세요. 형식: [출처: 파일명 p.페이지].
+5. 시각 자료: 데이터에 URL이 포함되어 있다면 [ATTACH_SVG:URL] 또는 [ATTACH_IMG:URL] 태그를 반드시 유지하세요.`;
+
+        if (type === 'point_search') {
+          systemInstruction += "\n당신은 도면 레이어와 DB 내용을 분석하여 사용자에게 최적의 답변을 제공합니다. DB에 근거가 없더라도 가능한 전문적인 조언을 제공하되 출처가 없는 정보임을 밝히세요.";
+        } else if (type === 'pdf_summary') {
+          systemInstruction += "\n당신은 고도로 숙련된 데이터 포맷터입니다. 가독성이 뛰어난 레이아웃(표, 리스트 등)을 설계하고 원문의 기호(●, ■, ※ 등)를 유지하세요.";
+        }
+
+        const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `[맥락/데이터]\n${context || "정보 없음"}\n\n[질문]\n${prompt}` }
+          ],
+          max_tokens: 1500 // 입력 데이터가 많을 때를 대비해 출력 공간을 살짝 확보
+        });
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          answer: aiResponse.response,
+          model: "llama-3.1-8b-instruct (Workers AI)" 
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: e.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
     if (url.pathname === "/presign" && request.method === "GET") {
       const fileName = url.searchParams.get("file");
       if (!fileName) return new Response("File name missing", { status: 400 });
