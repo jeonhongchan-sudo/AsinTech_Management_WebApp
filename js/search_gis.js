@@ -337,15 +337,15 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit) {
             }
         });
 
-        // [개선] 2. Supabase RPC 호출 시 Polygon 대응 및 청크(Chunk) 단위 요청
-        // Polygon은 ST_Length가 0이 나오므로 외곽선(LineString)으로 변환하여 전송합니다.
+        // [개선] 2. Supabase RPC 호출 처리
+        // Polygon은 연장 계산에서 제외하기 위해 플래그를 설정하고 외곽선만 추출하여 전송합니다.
         const processedLineFeatures = lineFeatures.map(f => {
             if (f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')) {
                 const ring = f.geometry.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry.coordinates[0][0];
                 return {
                     ...f,
                     geometry: { type: 'LineString', coordinates: ring },
-                    _is_poly: true // 결과 처리 시 2로 나누기 위한 플래그
+                    _is_poly: true // 합산 제외 및 UI 표시용
                 };
             }
             return f;
@@ -372,19 +372,18 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit) {
         let totalSum = 0;
         const handleGroups = new Map(); // 같은 핸들을 가진 조각들을 합산하기 위한 맵
 
-        // 결과 데이터 보정 및 그룹화
+        // 결과 데이터 그룹화 (폴리곤 보정 로직 제거)
         results.forEach((res, idx) => {
             const origin = processedLineFeatures.find(f => f.properties.handle === res.handle);
-            let length = res.length_m;
-            
-            // Polygon에서 변환된 경우 둘레(Perimeter)가 계산되므로 2로 나누어 선 길이를 근사합니다.
-            if (origin && origin._is_poly) length /= 2;
+            const isPoly = origin?._is_poly || false;
+            const length = res.length_m; 
 
             if (!handleGroups.has(res.handle)) {
                 const feat = lineFeatures.find(f => f.properties.handle === res.handle);
                 handleGroups.set(res.handle, {
                     sum: 0,
-                    label: feat?.properties.text || feat?.properties.handle || `객체 #${res.handle}`
+                    label: feat?.properties.text || feat?.properties.handle || `객체 #${res.handle}`,
+                    isPoly: isPoly
                 });
             }
             handleGroups.get(res.handle).sum += length;
@@ -392,10 +391,16 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit) {
 
         let listHtml = `<div style="border:1px solid #ddd; border-radius:8px; overflow:hidden; max-height:350px; overflow-y:auto; background:#fff;">`;
         handleGroups.forEach((data, handle) => {
-            totalSum += data.sum;
+            // [핵심] 폴리곤 데이터는 총 합계에서 제외하고 표시값도 0으로 처리
+            const displayVal = data.isPoly ? "0.00" : data.sum.toFixed(2);
+            if (!data.isPoly) totalSum += data.sum;
+
+            const polyBadge = data.isPoly ? `<span style="background:#f1f3f5; color:#868e96; padding:1px 4px; border-radius:3px; font-size:10px; margin-left:5px; border:1px solid #dee2e6;">폴리곤(제외)</span>` : '';
+            const valColor = data.isPoly ? '#ced4da' : '#16a085';
+
             listHtml += `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid #eee;">
-                <span style="font-size:12px; color:#333;">${data.label}</span>
-                <span style="font-size:12px; font-weight:bold; color:#16a085;">${data.sum.toFixed(2)} m</span>
+                <span style="font-size:12px; color:#333;">${data.label}${polyBadge}</span>
+                <span style="font-size:12px; font-weight:bold; color:${valColor};">${displayVal} m</span>
             </div>`;
         });
         listHtml += `</div>`;
