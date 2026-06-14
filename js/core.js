@@ -122,7 +122,8 @@ export async function callAiEdge(prompt, context = "", type = "general") {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 45000);
 
-        // [수정] 1순위: Gemini-2.5-Flash-Lite (Supabase Edge Function) 호출
+        // [복구] 1순위: Gemini-2.5-Flash-Lite (Supabase Edge Function) 호출
+        console.log("🧪 [AI 우선순위] 1순위: Gemini 호출 시도...");
         let response = await fetch(`${SUPABASE_FUNCTIONS_URL}/AI`, {
             method: 'POST',
             headers: {
@@ -133,9 +134,9 @@ export async function callAiEdge(prompt, context = "", type = "general") {
             body: JSON.stringify({ prompt, context, type })
         });
 
-        // [추가] 429 에러(할당량 초과) 발생 시 보험인 Cloudflare Worker AI로 자동 전환
-        if (response.status === 429) {
-            console.warn("⚠️ Gemini 429 발생. Worker AI(보험)로 전환합니다.");
+        // Gemini 호출 실패 또는 할당량 초과(429) 시 Workers AI로 폴백
+        if (!response.ok || response.status === 429) {
+            console.warn(`⚠️ Gemini 응답 실패 (Status: ${response.status}). 2순위 Workers AI로 전환합니다.`);
             response = await fetch(`${WORKER_URL}/ai`, {
                 method: 'POST',
                 headers: {
@@ -153,16 +154,6 @@ export async function callAiEdge(prompt, context = "", type = "general") {
         if (contentType && contentType.includes("application/json")) {
             const result = await response.json();
             
-            // Gemini는 성공 응답을 보냈지만 내부 에러 메시지에 'limit'가 있는 경우 대응
-            if (!result.success && result.error && (result.error.includes("limit") || result.error.includes("quota"))) {
-                console.warn("⚠️ Gemini 내부 할당량 에러. Worker AI로 재시도합니다.");
-                const retryRes = await fetch(`${WORKER_URL}/ai`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': WORKER_AUTH_KEY },
-                    body: JSON.stringify({ prompt, context, type })
-                });
-                return await retryRes.json();
-            }
             return result;
         }
         

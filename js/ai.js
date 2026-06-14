@@ -35,10 +35,9 @@ function formatResponseText(text) {
         }).join('');
     }
 
-    // [추가] DB 업로더가 생성한 구조적 태그 시각화 (출처 및 섹션 헤더)
-    // 1. 출처 정보 (#### 출처: ... ####) - 다중 샵 지원
-    text = text.replace(/#{1,5} (출처:.*?) #{1,5}/g, 
-        '<div style="font-size:11px; color:#868e96; margin-bottom:10px; border-bottom:1px solid #e9ecef; padding-bottom:5px; font-weight:bold;">📍 $1</div>');
+    // 1. 출처 정보 제거 (사용자 요청 반영)
+    text = text.replace(/#{1,5} 출처:.*? #{1,5}/g, "");
+
     // 2. 섹션 헤더 (##### [표 데이터] ##### 등) - 다중 샵 지원
     text = text.replace(/#{1,5} \[(.*?)\] #{1,5}/g, 
         '<div style="margin:18px 0 8px 0; padding:4px 12px; background:#f8f9fa; border-left:4px solid #228be6; font-weight:bold; color:#495057; font-size:13px; border-radius:0 4px 4px 0; box-shadow: 1px 1px 2px rgba(0,0,0,0.05);">$1</div>');
@@ -209,8 +208,16 @@ export async function handleDatabaseSearch(query) {
             // [수정] 결과를 화면에 뿌리지 않고 AI에게 보낼 텍스트 맥락으로 변환
             let combinedRawText = "";
             allFoundResults.slice(0, 10).forEach((match, idx) => {
-                const pageInfo = match.metadata?.page ? ` - p.${match.metadata.page}` : "";
-                combinedRawText += `[데이터 ${idx + 1}] 출처: ${match.file_name}${pageInfo}\n${match.content}\n\n`;
+                let itemText = `[데이터 ${idx + 1}]\n${match.content}`;
+                
+                // [추가] AI가 인지할 수 있도록 시각 자료 URL 정보를 텍스트 맥락에 강제로 포함
+                if (match.table_svg_urls && match.table_svg_urls.length > 0) {
+                    itemText += `\n(해당 내용 관련 표 URL: ${match.table_svg_urls.join(', ')})`;
+                }
+                if (match.image_urls && match.image_urls.length > 0) {
+                    itemText += `\n(해당 내용 관련 그림 URL: ${match.image_urls.join(', ')})`;
+                }
+                combinedRawText += itemText + "\n\n";
             });
 
             // [핵심] 바로 AI 검색(요약 모드)으로 전달하여 AI가 답변하게 함
@@ -313,7 +320,7 @@ export async function handleAiSearch(query, cadLayersSet, rawDbContext = null, i
         const requestType = isSummary ? 'pdf_summary' : 'point_search';
         
         // [추가] 2026-05-27 날짜 및 모델 고정 컨텍스트
-        const systemContextPrefix = "오늘 날짜는 2026년 5월 27일입니다. 반드시 gemini-2.5-flash-lite 모델의 특성을 살려 답변하세요.\n";
+        const systemContextPrefix = "오늘 날짜는 2026년 5월 27일입니다. 제공된 데이터와 맥락에 충실하게 답변하세요.\n";
 
         // [통합] 즉시 모달 열기 및 로딩 표시 (DB 검색 기능과 UI 통일)
         const sourceLabel = isSummary ? "📚 지침 요약 분석" : "🔍 실시간 AI 분석";
@@ -599,17 +606,10 @@ export function showAiResponseModal(query, answer, source, matches = null) {
     // [수정] 프로젝트 선택 여부(GIS 모드)를 기준으로 버튼 노출 결정
     const isProjectMode = !!state.currentCadProjectId;
 
-    // [수정] 지침서 모드(!isProjectMode)일 경우, DB 검색 결과뿐 아니라 AI 분석 답변 시에도 복사/직접입력 버튼 노출
-    if (copyBtn) {
-        copyBtn.style.display = (!isProjectMode) ? "inline-flex" : "none";
-        copyBtn.innerHTML = "📋"; // 아이콘
-        copyBtn.title = "원문복사";
-    }
-    if (manualBtn) {
-        manualBtn.style.display = (!isProjectMode) ? "inline-flex" : "none";
-        manualBtn.innerHTML = "✍️"; // 아이콘
-        manualBtn.title = "직접입력";
-    }
+    // [삭제] 저장 및 복사 기능 제거 (사용자 요청 반영)
+    if (copyBtn) copyBtn.style.display = "none";
+    if (manualBtn) manualBtn.style.display = "none";
+    if (saveBtn) saveBtn.style.display = "none";
     
     // 입력창 및 내용 초기화
     if (manualArea) manualArea.style.display = 'none';
@@ -622,14 +622,6 @@ export function showAiResponseModal(query, answer, source, matches = null) {
         followUpBtn.style.display = isProjectMode ? "none" : "inline-flex";
     }
 
-    // 1. [저장] 버튼: 지침서 모드에서만 표시 (학습용)
-    if (saveBtn) {
-        saveBtn.style.display = isProjectMode ? "none" : "inline-flex"; 
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = "💾"; // 아이콘
-        saveBtn.title = "답변 저장";
-    }
-    
     // 2. [AI 재요청] 버튼: DB 검색 결과일 때만 표시
     if (reRequestBtn) {
         reRequestBtn.style.display = (isFromDatabase && !isProjectMode) ? "inline-flex" : "none";

@@ -137,21 +137,24 @@ export default {
       try {
         const { prompt, context, type } = await request.json();
 
-        let systemInstruction = `당신은 '아신테크 GIS 관리 도구'의 지식 검색 에이전트 '아신'입니다.
+        let systemInstruction = `당신은 지하시설물 및 도로대장 구축 분야의 전문 기술 컨설턴트입니다.
 [데이터 접근 규칙]
-1. 웹 클라이언트에서 전달한 [분석 대상 데이터]가 질문의 의도와 부합하는지 분석하세요.
-2. 데이터 활용: 검색된 내용이 질문과 연관성이 높다면 이를 요약하여 답변하세요. 만약 데이터가 질문의 의도와 너무 다르거나 정보가 부족하다면, 당신의 전문적인 지식을 활용하여 답변을 보완하거나 대안을 제시하세요.
-3. 상태 알림: 당신의 일반 지식을 활용해 답변을 보완한 경우, 답변 하단에 "지침 DB 내 관련 정보가 부족하여 AI의 일반 지식을 바탕으로 설명해 드립니다."라고 명시하세요.
-4. 근거 제시: DB에서 발췌한 정보에는 반드시 출처를 명시하세요. 형식: [출처: 파일명 p.페이지].
-5. 시각 자료: 데이터에 URL이 포함되어 있다면 [ATTACH_SVG:URL] 또는 [ATTACH_IMG:URL] 태그를 반드시 유지하세요.`;
+1. **응답 스타일**: 인사말, 자기소개 없이 질문에 대한 핵심 답변만 즉시 기술하세요.
+2. **데이터 활용**: 제공된 [맥락/데이터]를 최우선으로 하세요. 텍스트 내용뿐만 아니라 포함된 URL 정보도 매우 중요합니다.
+3. **출처 생략**: 출처 정보는 포함하지 마세요.
+4. **시각 자료 배치(필수)**: 
+   - 데이터 맥락에 '표 URL'이나 '그림 URL'이 존재한다면, 관련된 설명을 하는 문장 바로 아래에 해당 URL을 태그 형식으로 반드시 삽입하세요.
+   - 표(SVG) 태그 형식: [ATTACH_SVG:전체URL]
+   - 그림(WebP) 태그 형식: [ATTACH_IMG:전체URL]
+   - 예: "지침에 따르면 다음과 같은 기준을 따릅니다. [ATTACH_SVG:https://...]"`;
 
         if (type === 'point_search') {
-          systemInstruction += "\n당신은 도면 레이어와 DB 내용을 분석하여 사용자에게 최적의 답변을 제공합니다. DB에 근거가 없더라도 가능한 전문적인 조언을 제공하되 출처가 없는 정보임을 밝히세요.";
+          systemInstruction += "\n[도면 분석] 도면 레이어 정보를 바탕으로 실무적인 가이드를 제공하세요.";
         } else if (type === 'pdf_summary') {
-          systemInstruction += "\n당신은 고도로 숙련된 데이터 포맷터입니다. 가독성이 뛰어난 레이아웃(표, 리스트 등)을 설계하고 원문의 기호(●, ■, ※ 등)를 유지하세요.";
+          systemInstruction += "\n[요약 전문가] 고도로 숙련된 데이터 포맷터로서 가독성이 뛰어난 레이아웃을 설계하고 원문의 기호(●, ■, ※ 등)를 유지하세요.";
         }
 
-        const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+        const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8', {
           messages: [
             { role: 'system', content: systemInstruction },
             { role: 'user', content: `[맥락/데이터]\n${context || "정보 없음"}\n\n[질문]\n${prompt}` }
@@ -162,9 +165,25 @@ export default {
         return new Response(JSON.stringify({ 
           success: true, 
           answer: aiResponse.response,
-          model: "llama-3.1-8b-instruct (Workers AI)" 
+          model: "llama-3.1-8b-instruct-fp8 (Workers AI)" 
         }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: e.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
+    // --- [추가] 8. 임베딩 생성 (/embed) ---
+    if (url.pathname === "/embed" && request.method === "POST") {
+      try {
+        const { text } = await request.json();
+        if (!text) return new Response("Missing text", { status: 400, headers: corsHeaders });
+
+        const embedding = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+          text: [text]
+        });
+
+        return new Response(JSON.stringify({ success: true, embedding: embedding.data[0] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       } catch (e) {
         return new Response(JSON.stringify({ success: false, error: e.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }

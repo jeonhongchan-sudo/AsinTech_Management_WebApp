@@ -441,12 +441,11 @@ class PDFUploaderApp:
 
                         # [개선] 이미지 및 '그림(Vector Drawing)' 추출 로직 강화
                         try:
-                            # 1. 일반 비트맵 이미지 추출
-                            images = fitz_page.get_images()
-                            
-                            # 2. 벡터 도면(도형) 감지: 측량 도면이나 선으로 된 그림 대응
+                            # 1. 벡터 도면(도형) 감지: 측량 도면이나 복잡한 그래프 대응
                             drawings = fitz_page.get_drawings()
-                            if drawings and len(drawings) > 5: # 선이 어느 정도 있는 경우만 그림으로 간주
+                            # [수정] 임계값을 50으로 상향하여 단순 테두리나 구분선 제외
+                            # 또한 드로잉이 페이지에서 차지하는 복잡도를 판단함
+                            if drawings and len(drawings) > 50: 
                                 r2_key = f"knowledge_assets/{file_name}/p{i+1}_drawing.webp"
                                 # 페이지 전체를 고해상도로 렌더링 후 저장
                                 pix = fitz_page.get_pixmap(dpi=200)
@@ -463,16 +462,33 @@ class PDFUploaderApp:
                                 image_urls.append(img_url)
                                 self.log(f"  - [🎨] p.{i+1} 페이지 도면/그래프 감지 및 추출 완료")
 
+                            # 2. 일반 비트맵 이미지 추출 및 필터링
+                            images = fitz_page.get_images()
+                            page_height = fitz_page.rect.height
+
                             for img_idx, img in enumerate(images):
                                 xref = img[0]
-                                pix = fitz.Pixmap(doc, xref)
                                 
-                                if not pix: continue # [안전] 이미지 로드 실패 시 건너뜀
+                                # [추가] 이미지의 위치와 크기 정보를 가져와 필터링
+                                rects = fitz_page.get_image_rects(xref)
+                                if not rects: continue
+                                r = rects[0] # 페이지상의 위치
+                                w, h = r.width, r.height
+                                area = w * h
+
+                                # [필터 1] 너무 작은 이미지(아이콘, 장식용 점 등) 제외
+                                if area < 3500: continue 
                                 
-                                # 너무 작은 이미지(아이콘 등)는 무시 (예: 40x40 미만)
-                                if pix.width < 40 or pix.height < 40:
-                                    pix = None
+                                # [필터 2] 머리말/꼬리말 영역(상하 8%)의 작은 로고/아이콘 제외
+                                if (r.y1 < page_height * 0.08 or r.y0 > page_height * 0.92) and (w < 250 and h < 250):
                                     continue
+                                    
+                                # [필터 3] 가로 또는 세로로 너무 긴 이미지(구분선, 장식선) 제외
+                                if w / (h + 1e-6) > 10 or h / (w + 1e-6) > 10:
+                                    continue
+
+                                pix = fitz.Pixmap(doc, xref)
+                                if not pix: continue
 
                                 # [수정] colorspace가 None인 경우(스텐실 마스크 등) 대비 로직 강화
                                 if pix.colorspace is None or pix.colorspace.n != 3 or pix.alpha:
@@ -520,13 +536,26 @@ class PDFUploaderApp:
                     # DB 삽입용 페이로드 생성
                     db_payload = []
                     for chunk in batch:
+                        # [추가] Worker AI를 이용한 임베딩 생성
+                        embedding = None
+                        try:
+                            res = requests.post(f"{WORKER_URL}/embed", 
+                                              headers={"Authorization": WORKER_AUTH_KEY},
+                                              json={"text": chunk["text"][:3000]}, # 모델 제한에 맞춰 자름
+                                              timeout=15)
+                            if res.status_code == 200:
+                                embedding = res.json().get("embedding")
+                        except Exception as e:
+                            self.log(f"  - [⚠️] 임베딩 생성 실패 (p.{chunk['page']}): {e}")
+
                         db_payload.append({
                             "project_id": "GENERAL",
                             "file_name": file_name,
                             "content": chunk["text"],  # 순수 텍스트(text 타입)로 저장
                             "metadata": {"page": chunk["page"], "is_index": chunk.get("is_index", False)},
                             "table_svg_urls": chunk["table_urls"],
-                            "image_urls": chunk["image_urls"]
+                            "image_urls": chunk["image_urls"],
+                            "embedding": embedding # [추가] 생성된 벡터 데이터
                         })
 
                     if db_payload:
