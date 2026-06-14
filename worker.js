@@ -136,6 +136,33 @@ export default {
     if (url.pathname === "/ai" && request.method === "POST") {
       try {
         const { prompt, context, type } = await request.json();
+        let searchContext = context || "";
+
+        // [추가] Worker AI도 직접 테이블을 검색하도록 RAG 로직 구현
+        if (!searchContext && prompt) {
+          try {
+            // 1. 직접 임베딩 생성
+            const embeddingRes = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
+              text: [prompt]
+            });
+            const query_embedding = embeddingRes.data[0];
+
+            // 2. Supabase RPC 호출하여 벡터 검색
+            const rpcRes = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/match_pdf_knowledge`, {
+              method: 'POST',
+              headers: { 
+                'apikey': env.SUPABASE_KEY, 
+                'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                'Content-Type': 'application/json' 
+              },
+              body: JSON.stringify({ query_embedding, match_threshold: 0.5, match_count: 5 })
+            });
+            const matchedDocs = await rpcRes.json();
+            if (Array.isArray(matchedDocs)) {
+              searchContext = matchedDocs.map(d => d.content).join("\n\n");
+            }
+          } catch (ragErr) { console.error("Worker RAG Error:", ragErr); }
+        }
 
         let systemInstruction = `당신은 지하시설물 및 도로대장 구축 분야의 전문 기술 컨설턴트입니다.
 [데이터 접근 규칙]
@@ -158,7 +185,7 @@ export default {
         const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8', {
           messages: [
             { role: 'system', content: systemInstruction },
-            { role: 'user', content: `[맥락/데이터]\n${context || "정보 없음"}\n\n[질문]\n${prompt}` }
+            { role: 'user', content: `[맥락/데이터]\n${searchContext || "정보 없음"}\n\n[질문]\n${prompt}` }
           ],
           max_tokens: 1500 // 입력 데이터가 많을 때를 대비해 출력 공간을 살짝 확보
         });

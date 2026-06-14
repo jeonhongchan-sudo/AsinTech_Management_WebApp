@@ -3,10 +3,10 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 // 환경 변수(Secrets)에서 안전하게 가져오도록 변경
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); // 서비스 롤 키 사용 권장
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-// [수정] 실제 존재하는 최신 안정화 모델인 gemini-1.5-flash로 변경 (400 에러 해결 핵심)
 const API_URL = `${API_BASE}/models/gemini-2.5-flash-lite:generateContent`;
 
 const corsHeaders = {
@@ -45,6 +45,37 @@ serve(async (req) => {
       );
     }
 
+    // [추가] 벡터 데이터가 있다면 직접 DB를 검색 (RAG)
+    let searchContext = context || "";
+    
+    // context가 비어있고 prompt가 있다면 벡터 검색 시도
+    if (!searchContext && prompt) {
+      try {
+        // 1. Worker AI를 통해 질문의 임베딩 생성 (이미 구현된 worker 활용)
+        const embedRes = await fetch("https://asin-r2-worker.jeonhongchan.workers.dev/embed", {
+          method: 'POST',
+          headers: { 'Authorization': "asin_tech_secret_2024", 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: prompt })
+        });
+        const { embedding } = await embedRes.json();
+
+        if (embedding) {
+          // 2. Supabase RPC 호출 (vector similarity search)
+          const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_pdf_knowledge`, {
+            method: 'POST',
+            headers: { 
+              'apikey': SUPABASE_KEY, 
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({ query_embedding: embedding, match_threshold: 0.5, match_count: 5 })
+          });
+          const matchedDocs = await rpcRes.json();
+          searchContext = matchedDocs.map(d => d.content).join("\n\n");
+        }
+      } catch (err) { console.error("Vector Search Error:", err); }
+    }
+
     // 시스템 프롬프트 설정 (학습형 AI의 정체성 부여)
     let systemInstruction = `당신은 지하시설물 및 도로대장 구축 분야의 고도로 숙련된 전문 기술 컨설턴트입니다.
 [데이터 접근 규칙]
@@ -69,11 +100,11 @@ serve(async (req) => {
 
     // [추가] 30초 타임아웃 설정 (Gate가 무한정 열려있는 것 방지)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), 40000);
 
     const contents = [{
       role: "user",
-      parts: [{ text: `${systemInstruction}\n\n[도면 레이어 맥락]\n${context || ""}\n\n[User Query]\n${prompt}` }]
+      parts: [{ text: `${systemInstruction}\n\n[분석 대상 데이터]\n${searchContext}\n\n[User Query]\n${prompt}` }]
     }];
 
     // [수정] 에이전트 루프 제거, 단일 호출 방식으로 변경

@@ -245,32 +245,8 @@ export async function handleDatabaseSearch(query) {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     try {
-        const allFoundResults = await fetchDbSearchResults(query);
-
-        if (allFoundResults.length > 0) {
-            // [수정] 결과를 화면에 뿌리지 않고 AI에게 보낼 텍스트 맥락으로 변환
-            let combinedRawText = "";
-            allFoundResults.slice(0, 10).forEach((match, idx) => {
-                let itemText = `[데이터 ${idx + 1}]\n${match.content}`;
-                
-                // [추가] AI가 인지할 수 있도록 시각 자료 URL 정보를 텍스트 맥락에 강제로 포함
-                if (match.table_svg_urls && match.table_svg_urls.length > 0) {
-                    itemText += `\n(해당 내용 관련 표 URL: ${match.table_svg_urls.join(', ')})`;
-                }
-                if (match.image_urls && match.image_urls.length > 0) {
-                    itemText += `\n(해당 내용 관련 그림 URL: ${match.image_urls.join(', ')})`;
-                }
-                combinedRawText += itemText + "\n\n";
-            });
-
-            // [핵심] 바로 AI 검색(요약 모드)으로 전달하여 AI가 답변하게 함
-            return await handleAiSearch(query, state.lastCadLayersSet, combinedRawText, false, allFoundResults);
-        }
-
-        // [수정] 검색 결과가 아예 없을 때만 추론을 위해 AI 호출 (데이터 없이)
-        console.log("🔍 DB 결과 없음. AI 일반 추론으로 전환.");
+        // 브라우저 검색을 생략하고 바로 Edge Function의 벡터 검색(RAG) 기능을 활용
         return await handleAiSearch(query, state.lastCadLayersSet, null, false, null);
-
     } catch (e) { 
         console.error("DB 검색 오류:", e); 
         showModalMessage("⚠️ DB 검색 중 오류가 발생했습니다.", e.message, 'error'); 
