@@ -146,7 +146,8 @@ export default {
    - 데이터 맥락에 '표 URL'이나 '그림 URL'이 존재한다면, 관련된 설명을 하는 문장 바로 아래에 해당 URL을 태그 형식으로 반드시 삽입하세요.
    - 표(SVG) 태그 형식: [ATTACH_SVG:전체URL]
    - 그림(WebP) 태그 형식: [ATTACH_IMG:전체URL]
-   - 예: "지침에 따르면 다음과 같은 기준을 따릅니다. [ATTACH_SVG:https://...]"`;
+   - 예: "지침에 따르면 다음과 같은 기준을 따릅니다. [ATTACH_SVG:https://...]"
+5. **수식 표현**: 복잡한 공식이나 계산식은 반드시 LaTeX 형식($$ ... $$)을 사용하여 작성하세요.`;
 
         if (type === 'point_search') {
           systemInstruction += "\n[도면 분석] 도면 레이어 정보를 바탕으로 실무적인 가이드를 제공하세요.";

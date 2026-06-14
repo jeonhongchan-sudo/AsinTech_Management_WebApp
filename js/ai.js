@@ -64,12 +64,13 @@ function formatResponseText(text) {
     // SVG (표) 렌더링
     formatted = formatted.replace(/\[ATTACH_SVG:([^\]]+)\]/g, (match, content) => {
         const [url, id] = content.split('|');
-        const isAdmin = state.currentUser === 'jeonhongchan';
-        const delBtn = (isAdmin && id) ? `<button onclick="event.stopPropagation(); window.deleteKnowledgeAsset('${url}', 'svg', '${id}')" style="position:absolute; top:5px; right:5px; padding:2px 5px; font-size:10px; background:#e03131; color:white; border:none; border-radius:3px; cursor:pointer; opacity:0.8; z-index:10;">삭제</button>` : '';
+        const isAdmin = state.currentUser?.toLowerCase() === 'jeonhongchan';
+        const delBtn = isAdmin ? `<button onclick="event.stopPropagation(); window.deleteKnowledgeAsset('${url}', 'svg', '${id}')" style="position:absolute; top:5px; right:5px; padding:2px 5px; font-size:10px; background:#e03131; color:white; border:none; border-radius:3px; cursor:pointer; opacity:0.8; z-index:10;">삭제</button>` : '';
+        const errorAttr = isAdmin ? `onerror="this.style.border='1px solid red'; this.parentElement.insertAdjacentHTML('beforeend', '<div style=\'color:red;font-size:10px;\'>이미지 로드 실패</div>')"` : `onerror="this.closest('.ai-attached-container').style.display='none'"`;
         
         return `<div class="ai-attached-container svg" style="margin:20px 0; text-align:center; background:#fcfcfc; padding:15px; border:1px solid #eee; border-radius:8px; position:relative;">
             ${delBtn}
-            <img src="${url}" onerror="this.closest('.ai-attached-container').style.display='none'" style="display:block; margin:0 auto; max-width:100%; height:auto; background:#fff; border-radius:4px; cursor:pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.05);" onclick="window.open(this.src, '_blank')">
+            <img src="${url}" ${errorAttr} style="display:block; margin:0 auto; max-width:100%; height:auto; background:#fff; border-radius:4px; cursor:pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.05);" onclick="window.open(this.src, '_blank')">
             <div style="font-size:11px; color:#228be6; margin-top:10px; font-weight:bold;">▲ [참조 표] 클릭 시 원본 크게보기</div>
         </div>`;
     });
@@ -77,12 +78,13 @@ function formatResponseText(text) {
     // WebP (그림) 렌더링
     formatted = formatted.replace(/\[ATTACH_IMG:([^\]]+)\]/g, (match, content) => {
         const [url, id] = content.split('|');
-        const isAdmin = state.currentUser === 'jeonhongchan';
-        const delBtn = (isAdmin && id) ? `<button onclick="event.stopPropagation(); window.deleteKnowledgeAsset('${url}', 'img', '${id}')" style="position:absolute; top:5px; right:5px; padding:2px 5px; font-size:10px; background:#e03131; color:white; border:none; border-radius:3px; cursor:pointer; opacity:0.8; z-index:10;">삭제</button>` : '';
+        const isAdmin = state.currentUser?.toLowerCase() === 'jeonhongchan';
+        const delBtn = isAdmin ? `<button onclick="event.stopPropagation(); window.deleteKnowledgeAsset('${url}', 'img', '${id}')" style="position:absolute; top:5px; right:5px; padding:2px 5px; font-size:10px; background:#e03131; color:white; border:none; border-radius:3px; cursor:pointer; opacity:0.8; z-index:10;">삭제</button>` : '';
+        const errorAttr = isAdmin ? `onerror="this.style.border='1px solid red'; this.parentElement.insertAdjacentHTML('beforeend', '<div style=\'color:red;font-size:10px;\'>이미지 로드 실패</div>')"` : `onerror="this.closest('.ai-attached-container').style.display='none'"`;
 
         return `<div class="ai-attached-container img" style="margin:20px 0; text-align:center; position:relative;">
             ${delBtn}
-            <img src="${url}" onerror="this.closest('.ai-attached-container').style.display='none'" style="display:block; margin:0 auto; max-width:100%; height:auto; border-radius:8px; box-shadow:0 4px 15px rgba(0,0,0,0.15); cursor:pointer;" onclick="window.open(this.src, '_blank')">
+            <img src="${url}" ${errorAttr} style="display:block; margin:0 auto; max-width:100%; height:auto; border-radius:8px; box-shadow:0 4px 15px rgba(0,0,0,0.15); cursor:pointer;" onclick="window.open(this.src, '_blank')">
             <div style="font-size:11px; color:#228be6; margin-top:10px; font-weight:bold;">▲ [참조 그림] 클릭 시 원본 크게보기</div>
         </div>`;
     });
@@ -93,6 +95,47 @@ function formatResponseText(text) {
         .replace(/<u>(.*?)<\/u>/g, '<u>$1</u>');
 
     return formatted;
+}
+
+/** [추가] LaTeX 수식 렌더링 (KaTeX) */
+async function renderMath(element) {
+    if (!element.innerHTML.includes('$')) return;
+    
+    try {
+        if (typeof window.renderMathInElement === 'undefined') {
+            // KaTeX CSS 로드
+            if (!document.getElementById('katex-css')) {
+                const link = document.createElement('link');
+                link.id = 'katex-css';
+                link.rel = 'stylesheet';
+                link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
+                document.head.appendChild(link);
+            }
+            
+            // KaTeX JS 및 Auto-render 확장 로드
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js';
+                script.onload = () => {
+                    const autoRender = document.createElement('script');
+                    autoRender.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js';
+                    autoRender.onload = resolve;
+                    autoRender.onerror = reject;
+                    document.head.appendChild(autoRender);
+                };
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        }
+        
+        window.renderMathInElement(element, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ],
+            throwOnError: false
+        });
+    } catch (e) { console.error("Math rendering failed:", e); }
 }
 
 /** [추가] 모달 내 공통 에러/정보 메시지 출력 헬퍼 (사용자가 눌러야 닫히는 X 버튼 포함) */
@@ -638,6 +681,9 @@ export function showAiResponseModal(query, answer, source, matches = null) {
     
     // [수정] 텍스트 포맷터 적용 및 HTML 렌더링
     content.innerHTML = formatResponseText(answer);
+
+    // [추가] 수식 렌더링 트리거
+    renderMath(content);
 
     // [추가] 새로운 답변 로드 시 스크롤을 최상단으로 이동 (이전 DB 검색 결과 등으로 인한 가독성 문제 해결)
     const scrollArea = modal.querySelector('.container');
