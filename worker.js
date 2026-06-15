@@ -138,32 +138,6 @@ export default {
         const { prompt, context, type } = await request.json();
         let searchContext = context || "";
 
-        // [추가] Worker AI도 직접 테이블을 검색하도록 RAG 로직 구현
-        if (!searchContext && prompt) {
-          try {
-            // 1. 직접 임베딩 생성
-            const embeddingRes = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
-              text: [prompt]
-            });
-            const query_embedding = embeddingRes.data[0];
-
-            // 2. Supabase RPC 호출하여 벡터 검색
-            const rpcRes = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/match_pdf_knowledge`, {
-              method: 'POST',
-              headers: { 
-                'apikey': env.SUPABASE_KEY, 
-                'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-                'Content-Type': 'application/json' 
-              },
-              body: JSON.stringify({ query_embedding, match_threshold: 0.5, match_count: 5 })
-            });
-            const matchedDocs = await rpcRes.json();
-            if (Array.isArray(matchedDocs)) {
-              searchContext = matchedDocs.map(d => d.content).join("\n\n");
-            }
-          } catch (ragErr) { console.error("Worker RAG Error:", ragErr); }
-        }
-
         let systemInstruction = `당신은 지하시설물 및 도로대장 구축 분야의 전문 기술 컨설턴트입니다.
 [데이터 접근 규칙]
 1. **응답 스타일**: 인사말, 자기소개 없이 질문에 대한 핵심 답변만 즉시 기술하세요.
@@ -174,12 +148,56 @@ export default {
    - 표(SVG) 태그 형식: [ATTACH_SVG:전체URL]
    - 그림(WebP) 태그 형식: [ATTACH_IMG:전체URL]
    - 예: "지침에 따르면 다음과 같은 기준을 따릅니다. [ATTACH_SVG:https://...]"
-5. **수식 표현**: 복잡한 공식이나 계산식은 반드시 LaTeX 형식($$ ... $$)을 사용하여 작성하세요.`;
+5. **수식 표현**: 복잡한 공식이나 계산식은 반드시 LaTeX 형식($$ ... $$)을 사용하여 작성하세요.
+6. **GIS 문법 안내**: 검색 문법이나 함수 문의 시 아래 형식을 마크다운 강조(**...**)를 사용하여 안내하세요.
+   - **[레이어명]?** : 리스트 및 분석 출력
+   - **[레이어명]📍** : 지도 위치 표시
+   - **[레이어명][거리]?** : 총 연장(길이) 계산
+   - **[레이어명][사진]?** : 사진/메모 매칭 분석
+   - **A ~ B [거리]?** : 지점 간 경로 거리
+   - **[레이어명][거리]>X?** : 이격 오차 분석
+   - **키워드1 키워드2📍** : 검색 결과 지도 표시`;
 
         if (type === 'point_search') {
           systemInstruction += "\n[도면 분석] 도면 레이어 정보를 바탕으로 실무적인 가이드를 제공하세요.";
-        } else if (type === 'pdf_summary') {
-          systemInstruction += "\n[요약 전문가] 고도로 숙련된 데이터 포맷터로서 가독성이 뛰어난 레이아웃을 설계하고 원문의 기호(●, ■, ※ 등)를 유지하세요.";
+        } else if (type === 'translate_gis') {
+          systemInstruction = `자연어 질문을 GIS 검색 문법으로 변환하는 번역기입니다.
+
+[지침]
+1. 질문이 '전체 레이어' 대상인지 '특정 포인트 명칭/ID' 검색인지 판단하세요.
+2. 레이어 대상이면 [레이어 목록]에서 적합한 이름을 골라 [ ]로 감싸고, 특정 ID나 검색어라면 키워드를 그대로 사용하세요.
+3. 예: "260424-04 찾아줘" -> 260424-04📍
+4. 특정 포인트의 좌표나 상세 정보 조회 요청 시 '포인트명[좌표]?' 문법을 사용하세요.
+4. 선택한 레이어명은 반드시 대괄호 [ ]로 감싸세요.
+5. 복합 검색 의도 파악 시 공백(AND), &(OR), !(NOT) 연산자를 적절히 조합하세요.
+
+[문법 규칙]
+1. [레이어명]? : 리스트 및 분석 출력
+2. [레이어명]📍 : 지도 위치 표시
+3. [레이어명][거리]? : 총 연장(길이) 계산
+4. [레이어명][사진]? : 사진/메모 매칭 분석
+5. A ~ B [거리]? : 지점 간 경로 거리
+6. [레이어명][거리]>X? : 이격 오차 분석
+7. 키워드1 키워드2📍 : **AND 검색** (두 단어 모두 포함)
+8. 키워드1 & 키워드2📍 : **OR 검색** (하나라도 포함)
+9. 키워드1 !키워드2📍 : **NOT 검색** (특정 단어 제외)
+11. 포인트명[좌표]? : 포인트 좌표(TM, 경위도, 높이) 및 상세 속성 출력
+
+[고급 분석 가이드]
+위 문법으로 처리 불가능한 복잡한 요청(예: 레이어 교차, 필터링 후 특정 연산 등)인 경우, 자바스크립트 코드를 직접 생성하세요.
+- **주의: 좌표 변환이나 수식 계산을 브라우저의 직접적인 함수로 구현하지 마세요. 오차가 발생합니다.**
+- 데이터 분석 시 Supabase RPC 활용 로직을 최우선으로 고려하고, 공간 연산 라이브러리인 **Turf.js**(\`turf\` 객체)를 차선책으로 사용하세요.
+- 브라우저에 **Turf.js** 라이브러리가 로드되어 있으므로 전역 \`turf\` 객체를 사용하여 연산하세요.
+- **형식 준수**: 반드시 \`[AGENT_JS]: { "description": "...", "logic": "function(features) { ... }" }\` 형식을 지키고, \`logic\` 값은 반드시 문자열이어야 합니다.
+- **JSON 표준**: 모든 키와 값은 쌍따옴표(\")를 사용하세요.
+- features는 현재 도면의 모든 GeoJSON Feature 배열입니다.
+- results는 { lon, lat, text, handle } 객체의 배열이어야 합니다.
+  - 예: 교차점 검색 시 \`turf.lineIntersect\` 결과의 각 포인트를 results 배열에 푸시합니다.
+
+[주의] 답변은 문법 문자열 또는 [AGENT_JS] JSON 객체 하나만 출력하세요. 부연 설명은 절대 금지입니다. 반드시 마지막은 📍, ?, 또는 }로 끝나야 합니다.
+
+[레이어 목록]
+${searchContext}`;
         }
 
         const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8', {
@@ -196,22 +214,6 @@ export default {
           model: "llama-3.1-8b-instruct-fp8 (Workers AI)" 
         }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-      } catch (e) {
-        return new Response(JSON.stringify({ success: false, error: e.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-    }
-
-    // --- [추가] 8. 임베딩 생성 (/embed) ---
-    if (url.pathname === "/embed" && request.method === "POST") {
-      try {
-        const { text } = await request.json();
-        if (!text) return new Response("Missing text", { status: 400, headers: corsHeaders });
-
-        const embedding = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
-          text: [text]
-        });
-
-        return new Response(JSON.stringify({ success: true, embedding: embedding.data[0] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       } catch (e) {
         return new Response(JSON.stringify({ success: false, error: e.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }

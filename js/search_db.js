@@ -2,8 +2,6 @@
  * [파일 1] search_db.js
  * 프로젝트 미선택 시 동작하며, 지침서/지식 DB 검색 및 공통 텍스트 매칭을 주관합니다.
  */
-import { handleDatabaseSearch } from './ai.js';
-
 /** [공통] 검색어 정제 유틸리티 */
 export function sanitizeSearchText(str, isQuery = false) {
     if (str === null || str === undefined) return '';
@@ -12,7 +10,8 @@ export function sanitizeSearchText(str, isQuery = false) {
         clean = clean.replace(/(알려줘|찾아줘|검색해줘|보여줘|요청해|어떻게|알아봐|알려|확인|검색|분석|설명|보여|찾아|해줘|알려|정리|방법|기준|사항)$/, '');
         clean = clean.replace(/(에서|으로|의|은|는|이|가|을|를|도|에|와|과|하고)$/, '');
     }
-    clean = clean.replace(/\s+/g, '').replace(/%%[cdp]/gi, '').replace(/[/\\-_.]/g, '');
+    // [수정] 대괄호([, ])를 정제 대상에 추가하여 문법 기호가 실제 매칭에 영향을 주지 않도록 함
+    clean = clean.replace(/\s+/g, '').replace(/%%[cdp]/gi, '').replace(/[\[\]/\\-_.]/g, '');
     return clean;
 }
 
@@ -52,11 +51,4 @@ export function matchComplexQuery(targetText, query) {
         }
     });
     return maxScore;
-}
-
-/** 지침서 검색 실행 (프로젝트 미선택 시) */
-export async function executeGuidelinesSearch(searchTerm) {
-    const cleanQuery = searchTerm.replace(/[📍?]/g, '').trim();
-    if (!cleanQuery) return;
-    await handleDatabaseSearch(cleanQuery);
 }

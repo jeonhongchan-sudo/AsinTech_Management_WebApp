@@ -244,26 +244,6 @@ export async function cleanupR2Orphans() {
     } catch (e) { showAlert("R2 정리 오류: " + e.message, "error"); }
 }
 
-export async function syncBrokenKnowledgeAssets() {
-    if (!confirm("지침서 DB 내의 누락된 파일 정보를 정리하시겠습니까?")) return;
-    showAlert("동기화 분석 시작...", "info");
-    try {
-        const data = await callSupabaseDirect('pdf_knowledge?select=id,table_svg_urls,image_urls');
-        let totalFixed = 0;
-        for (const item of data) {
-            const svgValid = await Promise.all(item.table_svg_urls.map(async u => (await fetch(u, {method:'HEAD'})).ok ? u : null));
-            const imgValid = await Promise.all(item.image_urls.map(async u => (await fetch(u, {method:'HEAD'})).ok ? u : null));
-            const newSvg = svgValid.filter(u => u !== null);
-            const newImg = imgValid.filter(u => u !== null);
-            if (newSvg.length !== item.table_svg_urls.length || newImg.length !== item.image_urls.length) {
-                await callSupabaseDirect(`pdf_knowledge?id=eq.${item.id}`, 'PATCH', { table_svg_urls: newSvg, image_urls: newImg });
-                totalFixed++;
-            }
-        }
-        showAlert(`동기화 완료! ${totalFixed}개의 레코드가 수정되었습니다.`, "success");
-    } catch (e) { showAlert("동기화 중 오류: " + e.message, "error"); }
-}
-
 export async function downloadPhotoFile(url, fileName, isSurvey) {
     if (!url) return;
     if (!isSurvey) return alert("조사 메모의 원본 파일만 로컬 저장이 가능합니다.");
@@ -393,50 +373,6 @@ window.openBackupLightbox = function(index) {
         state.currentPhotosData = window.currentBackupPhotos;
         openLightbox(index);
     }
-};
-
-window.deleteKnowledgeAsset = async function(url, type, knowledgeId) {
-    const curUserLower = state.currentUser?.toLowerCase();
-    if (curUserLower !== 'jeonhongchan') return;
-    if (!confirm("이 시각 자료를 완전히 삭제하시겠습니까?")) return;
-    try {
-        showAlert("지침서 자원 영구 삭제 중...", "info");
-        const originalUrl = url.replace(/%5B/g, '[').replace(/%5D/g, ']');
-        if (originalUrl.includes('r2.dev')) {
-            const r2Path = originalUrl.split(R2_BASE_URL + '/')[1];
-            if (r2Path) {
-                await fetch(`${WORKER_URL}/${encodeURIComponent(r2Path)}`, {
-                    method: 'DELETE', headers: { 'Authorization': WORKER_AUTH_KEY }
-                }).catch(e => console.warn("R2 삭제 실패:", e));
-            }
-        }
-
-        const col = type === 'svg' ? 'table_svg_urls' : 'image_urls';
-        let targetId = knowledgeId;
-
-        // [추가] ID가 없거나 불분명한 경우 URL로 역추적 (AI 답변 대응)
-        if (!targetId || targetId === 'undefined' || targetId === 'null') {
-            // PostgREST 배열 연산 시 특수문자가 포함된 값은 큰따옴표로 감싸야 하며, 전체 필터는 URL 인코딩이 필요함
-            const filterValue = `cs.{"${originalUrl}"}`;
-            const searchRes = await callSupabaseDirect(`pdf_knowledge?${col}=${encodeURIComponent(filterValue)}&select=id`);
-            if (searchRes && searchRes.length > 0) targetId = searchRes[0].id;
-        }
-
-        if (!targetId) throw new Error("해당 자원이 연결된 DB 레코드를 찾을 수 없습니다.");
-
-        const data = await callSupabaseDirect(`pdf_knowledge?id=eq.${targetId}&select=${col}`);
-        if (data && data.length > 0) {
-            const currentList = Array.isArray(data[0][col]) ? data[0][col] : [];
-            const newList = currentList.filter(u => u.trim() !== originalUrl.trim() && u.trim() !== url.trim());
-            
-            if (currentList.length !== newList.length) {
-                await callSupabaseDirect(`pdf_knowledge?id=eq.${targetId}`, 'PATCH', { [col]: newList });
-                showAlert("DB 및 저장소 삭제 완료", "success");
-                // UI에서 즉시 사라지게 처리
-                if (window.event?.target) window.event.target.closest('.ai-attached-container').style.display = 'none';
-            }
-        }
-    } catch (e) { showAlert("삭제 중 오류 발생: " + e.message, "error"); }
 };
 
 window.downloadBackupFile = function(url, fileName) {

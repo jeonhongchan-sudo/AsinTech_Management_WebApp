@@ -2,7 +2,7 @@
  * [파일 2] search_gis.js
  * 프로젝트 선택 시 동작하며, 도면 데이터 기반의 GIS 분석 및 특수 문법을 처리합니다.
  */
-import { state, callSupabaseDirect, showAlert } from './core.js';
+import { state, callSupabaseDirect, showAlert, callAiEdge } from './core.js';
 import { sanitizeSearchText, matchComplexQuery } from './search_db.js';
 import { cadLayers, renderSearchResults, displayMatchesOnMap, loadProjectPhotos, ensureGeoJSONLoaded } from './viewers.js';
 import { showAiResponseModal, showModalMessage, closeAiResponseModal } from './ai.js';
@@ -28,6 +28,7 @@ export function openGisSearchModal() {
                         <span><b>~</b> : ~에서 (지점연결)</span>
                         <span><b>[거리]</b> : 연장/거리 계산</span>
                         <span><b>[사진]</b> : 사진 매칭 분석</span>
+                        <span><b>[좌표]</b> : 상세 좌표 조회</span>
                         <span><b>?</b> : 분석 리포트 출력</span>
                         <span><b>📍</b> : 지도 마커 표시</span>
                     </div>
@@ -42,6 +43,7 @@ export function openGisSearchModal() {
                     <button class="btn btn-outline btn-sm" id="btnShortcutLayer" style="padding:4px 8px; font-size:11px; border-color:#2196F3; color:#2196F3; font-weight:bold;">[Layer]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutPhoto" style="padding:4px 8px; font-size:11px; border-color:#4CAF50; color:#4CAF50; font-weight:bold;">[사진]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutDistance" style="padding:4px 8px; font-size:11px; border-color:#9C27B0; color:#9C27B0; font-weight:bold;">[거리]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutCoord" style="padding:4px 8px; font-size:11px; border-color:#607D8B; color:#607D8B; font-weight:bold;">[좌표]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutBookmark" style="padding:4px 8px; font-size:11px; border-color:#FF9800; color:#FF9800; font-weight:bold;">📍</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutAudit" style="padding:4px 8px; font-size:11px; border-color:#e03131; color:#e03131; font-weight:bold;">[분석(?)]</button>
                 </div>
@@ -64,7 +66,7 @@ export function openGisSearchModal() {
             overlay.style.display = 'block';
             listEl.innerHTML = Array.from(cadLayers).sort().map(l => 
                 `<div style="cursor:pointer; padding:8px; background:#fff; border:1px solid #eee; border-radius:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center;" 
-                      onclick="const input = document.getElementById('gisSearchInput'); input.value += '${l}'; document.getElementById('layerSelectorOverlay').style.display='none'; input.focus();">${l}</div>`
+                      onclick="const input = document.getElementById('gisSearchInput'); input.value += '[${l}]'; document.getElementById('layerSelectorOverlay').style.display='none'; input.focus();">${l}</div>`
             ).join('');
         };
 
@@ -77,6 +79,12 @@ export function openGisSearchModal() {
         modal.querySelector('#btnShortcutDistance').onclick = () => {
             const input = document.getElementById('gisSearchInput');
             input.value += '[거리]';
+            input.focus();
+        };
+
+        modal.querySelector('#btnShortcutCoord').onclick = () => {
+            const input = document.getElementById('gisSearchInput');
+            input.value += '[좌표]';
             input.focus();
         };
 
@@ -113,7 +121,37 @@ export async function executeGisSearch(searchTerm) {
     const useBookmark = searchTerm.includes('📍');
     const isAudit = searchTerm.includes('?');
     
-    if (!useBookmark && !isAudit) return showAlert("출력 형식을 선택하세요 (📍: 지도, ?: 리스트)", "info");
+    // [수정] 문법 기호(📍, ?)가 없는 경우 AI 자연어 분석 시도
+    if (!useBookmark && !isAudit) {
+        showAlert("AI가 요청을 분석하고 있습니다...", "info");
+        // 현재 도면에서 감지된 실제 레이어 목록을 맥락으로 제공
+        const layerList = Array.from(cadLayers).join(', ');
+        
+        try {
+            const res = await callAiEdge(searchTerm, `사용 가능한 레이어 목록: ${layerList}`, 'translate_gis');
+            if (res.success && res.answer) {
+                const translated = res.answer.trim().replace(/['"`]/g, '');
+                console.log(`[GIS AI 번역] ${searchTerm} -> ${translated}`);
+                
+                // [추가] AI가 직접 작성한 JS 로직인 경우 (자율 에이전트 모드)
+                if (translated.startsWith('[AGENT_JS]:')) {
+                    let jsonStr = translated.replace('[AGENT_JS]:', '').trim();
+                    // AI가 마크다운 코드 블록으로 감쌌을 경우 정제
+                    jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+                    try {
+                        return await runDynamicGisAgent(JSON.parse(jsonStr));
+                    } catch (jsonErr) { throw new Error("분석 코드 형식이 올바르지 않습니다. (JSON 파싱 실패)"); }
+                }
+
+                // 변환된 문법에 기호가 포함되어 있다면 재귀적으로 다시 실행
+                if (translated.includes('📍') || translated.includes('?')) {
+                    return executeGisSearch(translated);
+                }
+            }
+        } catch (e) { console.error("GIS 자연어 분석 오류:", e); }
+        
+        return showAlert("출력 형식을 선택하세요 (📍: 지도, ?: 리스트)", "info");
+    }
 
     // [최적화] 사용자가 실행 버튼을 누른 이 시점에만 데이터를 로드합니다.
     try {
@@ -139,8 +177,14 @@ export async function executeGisSearch(searchTerm) {
     }
 
     if (cleanInput.endsWith('[거리]')) {
-        const targetLayer = cleanInput.split('[')[0].replace(/\^/g, '').trim();
+        // [수정] 레이어명에 [ ]가 포함되어 있어도 정확하게 레이어 이름만 추출하도록 개선
+        const targetLayer = cleanInput.replace('[거리]', '').replace(/[\[\]^]/g, '').trim();
         return analyzeTotalDistance(targetLayer, useBookmark, isAudit);
+    }
+
+    if (cleanInput.endsWith('[좌표]')) {
+        const pointName = cleanInput.replace('[좌표]', '').replace(/[\[\]^]/g, '').trim();
+        return showPointInfo(pointName);
     }
 
     executePointSearch(cleanInput, useBookmark, isAudit);
@@ -558,4 +602,123 @@ export function checkPhotoMatch(pointText, photoFileName) {
     const regex = new RegExp(escapedId + "(?![0-9])", "i"); 
     
     return regex.test(cleanPoint);
+}
+
+/** 특정 포인트의 상세 좌표 및 정보 출력 */
+async function showPointInfo(pointName) {
+    if (!state.currentProjectGeoJSON) {
+        try {
+            await ensureGeoJSONLoaded();
+        } catch (e) {
+            return showAlert("도면 데이터를 로드할 수 없습니다.", "error");
+        }
+    }
+
+    const features = state.currentProjectGeoJSON.features.filter(f => f.geometry && f.geometry.type === 'Point');
+    const target = features.find(f => {
+        const label = (f.properties.text || f.properties.handle || '').toString();
+        return sanitizeSearchText(label).includes(sanitizeSearchText(pointName));
+    });
+
+    if (!target) return showAlert(`포인트 '${pointName}'을 찾을 수 없습니다.`, "info");
+
+    const p = target.properties;
+    const coords = target.geometry.coordinates; // [lon, lat, z?]
+    const lon = coords[0];
+    const lat = coords[1];
+    const z = (coords[2] !== undefined && !isNaN(coords[2])) ? coords[2] : 0;
+    
+    // [수정] TM 좌표 포맷팅 유틸리티 (항상 소수점 3자리 보장)
+    const formatTm = (val) => (val !== undefined && val !== null && val !== '-' && !isNaN(parseFloat(val))) 
+        ? parseFloat(val).toFixed(3) 
+        : val;
+
+    const tmX = formatTm(p.tm_x || p.x_coord || p.x || p.X || '-');
+    const tmY = formatTm(p.tm_y || p.y_coord || p.y || p.Y || '-');
+    const crs = state.currentProjectSourceCrs || "설정된 좌표계 정보 없음";
+
+    let html = `
+        <div style="padding:5px;">
+            <h3 style="color:#2196F3; margin-bottom:15px; border-bottom:2px solid #2196F3; padding-bottom:10px;">📍 포인트 상세 정보: ${pointName}</h3>
+            <div style="background:#f8f9fa; padding:15px; border-radius:8px; border:1px solid #dee2e6; margin-bottom:15px;">
+                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; width:110px; background:#f1f3f5;">적용 좌표계</td><td style="padding:10px; color:#2c3e50;">${crs}</td></tr>
+                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">TM X (N)</td><td style="padding:10px; font-family:monospace; font-weight:bold; color:#1864ab;">${tmX}</td></tr>
+                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">TM Y (E)</td><td style="padding:10px; font-family:monospace; font-weight:bold; color:#1864ab;">${tmY}</td></tr>
+                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">경도 (Lon)</td><td style="padding:10px; font-family:monospace;">${lon.toFixed(8)}</td></tr>
+                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">위도 (Lat)</td><td style="padding:10px; font-family:monospace;">${lat.toFixed(8)}</td></tr>
+                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">높이 (Z)</td><td style="padding:10px; font-family:monospace; font-weight:bold;">${z.toFixed(3)} m</td></tr>
+                    <tr><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">레이어</td><td style="padding:10px;">${p.layer || '-'}</td></tr>
+                </table>
+            </div>
+            <button class="btn btn-primary" style="width:100%; padding:12px; font-weight:bold;" onclick="window.showPointLocation(${lon}, ${lat}, '${pointName}', '${p.handle}'); window.closeAiResponseModal();">지도 위치로 이동</button>
+        </div>
+    `;
+
+    showAiResponseModal(`정보조회: ${pointName}`, "조회 완료", "📊 포인트 상세 제원");
+    const contentEl = document.getElementById('aiAnswerContent');
+    if (contentEl) contentEl.innerHTML = html;
+}
+
+/** [추가] Turf.js 공간 분석 라이브러리 로드 */
+async function ensureTurfLoaded() {
+    if (window.turf) return true;
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js';
+        script.onload = () => { console.log("✅ Turf.js loaded"); resolve(true); };
+        script.onerror = () => reject(new Error("Turf.js 로드 실패"));
+        document.head.appendChild(script);
+    });
+}
+
+/** [추가] AI가 생성한 자바스크립트 로직을 GeoJSON 데이터에 즉석 적용 */
+async function runDynamicGisAgent(agentPayload) {
+    const { description, logic } = agentPayload;
+
+    try {
+        // 1. Turf.js 로드 대기
+        await ensureTurfLoaded();
+        showAlert(`${description} 분석 중 (Turf.js 활용)...`, "info");
+        
+        // 2. 도면 데이터 로드 확인
+        await ensureGeoJSONLoaded();
+        if (!state.currentProjectGeoJSON) throw new Error("도면 데이터를 로드할 수 없습니다.");
+
+        // 3. AI가 작성한 함수 문자열을 실제 실행 가능한 함수로 변환
+        // logic 형식: "function(features) { ... return results; }"
+        const runLogic = new Function('return ' + logic)();
+        
+        // 4. 분석 실행 (전체 피처 전달)
+        const results = runLogic(state.currentProjectGeoJSON.features);
+
+        if (!Array.isArray(results) || results.length === 0) {
+            return showModalMessage("🔍 분석 결과", "조건에 일치하는 데이터를 찾지 못했습니다.", 'info');
+        }
+
+        // 5. 결과 지도 표시
+        displayMatchesOnMap(results);
+        
+        // 6. 결과 리스트 출력 UI 구성
+        let html = `<div style="padding:5px;"><h3 style="color:#2D3748; margin-bottom:15px; border-bottom:2px solid #2D3748; padding-bottom:10px;">🤖 AI 자율 분석: ${description}</h3>`;
+        html += `<p style="font-size:12px; color:#666; margin-bottom:15px;">AI가 도면 전체 데이터를 직접 분석하여 <strong>${results.length}건</strong>의 지점을 찾아냈습니다.</p>`;
+        html += `<div style="border:1px solid #E2E8F0; border-radius:8px; overflow:hidden; max-height:400px; overflow-y:auto;">`;
+        
+        results.forEach(res => {
+            html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#fff; border-bottom:1px solid #EDF2F7;">
+                        <div style="font-size:12px;">📍 ${res.text}</div>
+                        <button class="btn btn-info btn-sm" style="padding:4px 8px; font-size:11px;" onclick="window.showPointLocation(${res.lon}, ${res.lat}, '${res.text}', '${res.handle}'); window.closeAiResponseModal();">위치</button>
+                     </div>`;
+        });
+        html += `</div></div>`;
+
+        // 7. 결과 모달 표시
+        showAiResponseModal(description, "분석 완료", "🤖 AI 에이전트 분석");
+        const contentEl = document.getElementById('aiAnswerContent');
+        if (contentEl) contentEl.innerHTML = html;
+
+    } catch (e) {
+        console.error("AI 에이전트 실행 오류:", e);
+        showAlert("AI 분석 로직 실행 실패: " + e.message, "error");
+    }
 }

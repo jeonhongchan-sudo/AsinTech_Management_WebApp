@@ -1,6 +1,6 @@
 // e:\Program\SelfProgram\아신테크\js\managers.js
 import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY } from './core.js';
-import { downloadPhotoFile, cleanupR2Orphans, downloadAllPhotos, syncBrokenKnowledgeAssets } from './manager_photos.js';
+import { downloadPhotoFile, cleanupR2Orphans, downloadAllPhotos } from './manager_photos.js';
 import { roomCreateProject, roomDeleteProject, roomUploadCad } from './manager_admin.js';
 export * from './manager_photos.js';
 export * from './manager_memos.js';
@@ -427,4 +427,3 @@ window.roomDeleteProject = roomDeleteProject; // [추가]
 window.roomUploadCad = roomUploadCad; // [추가]
 window.openCadConfigUI = openCadConfigUI; // [추가]
 window.executeCadConversion = executeCadConversion; // [추가]
-window.syncBrokenKnowledgeAssets = syncBrokenKnowledgeAssets; // 바인딩

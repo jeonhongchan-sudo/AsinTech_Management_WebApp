@@ -45,36 +45,7 @@ serve(async (req) => {
       );
     }
 
-    // [추가] 벡터 데이터가 있다면 직접 DB를 검색 (RAG)
     let searchContext = context || "";
-    
-    // context가 비어있고 prompt가 있다면 벡터 검색 시도
-    if (!searchContext && prompt) {
-      try {
-        // 1. Worker AI를 통해 질문의 임베딩 생성 (이미 구현된 worker 활용)
-        const embedRes = await fetch("https://asin-r2-worker.jeonhongchan.workers.dev/embed", {
-          method: 'POST',
-          headers: { 'Authorization': "asin_tech_secret_2024", 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: prompt })
-        });
-        const { embedding } = await embedRes.json();
-
-        if (embedding) {
-          // 2. Supabase RPC 호출 (vector similarity search)
-          const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_pdf_knowledge`, {
-            method: 'POST',
-            headers: { 
-              'apikey': SUPABASE_KEY, 
-              'Authorization': `Bearer ${SUPABASE_KEY}`,
-              'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({ query_embedding: embedding, match_threshold: 0.5, match_count: 5 })
-          });
-          const matchedDocs = await rpcRes.json();
-          searchContext = matchedDocs.map(d => d.content).join("\n\n");
-        }
-      } catch (err) { console.error("Vector Search Error:", err); }
-    }
 
     // 시스템 프롬프트 설정 (학습형 AI의 정체성 부여)
     let systemInstruction = `당신은 지하시설물 및 도로대장 구축 분야의 고도로 숙련된 전문 기술 컨설턴트입니다.
@@ -83,19 +54,56 @@ serve(async (req) => {
 2. **데이터 활용**: 제공된 [분석 대상 데이터]를 바탕으로 답변하되, 데이터에 포함된 URL 정보가 있다면 이를 활용하여 답변 중간에 시각 자료를 배치하세요.
 3. **출처 및 근거 생략**: [출처: ...]와 같은 텍스트나 파일명 정보는 답변에 절대 포함하지 마세요.
 4. **시각 자료 극대화**: 데이터에 표(SVG)나 이미지(WebP) URL이 포함되어 있다면, 해당 URL을 답변의 맥락에 맞게 [ATTACH_SVG:URL] 또는 [ATTACH_IMG:URL] 태그로 반드시 변환하여 삽입하세요.
-5. **수식 표현**: 분수, 제곱근, 거듭제곱 등 복잡한 수학 공식은 반드시 LaTeX 형식($$ ... $$)을 사용하여 작성하세요.`;
+5. **수식 표현**: 분수, 제곱근, 거듭제곱 등 복잡한 수학 공식은 반드시 LaTeX 형식($$ ... $$)을 사용하여 작성하세요.
+6. **GIS 문법 안내**: 사용자가 검색 문법이나 사용법을 물어보면 아래 규칙을 마크다운 강조(**...**)를 사용하여 설명하세요. (강조 시 파란색으로 표시됩니다)
+   - **[레이어명]?** : 레이어 데이터 리스트 출력
+   - **[레이어명]📍** : 지도에 위치 표시
+   - **[레이어명][거리]?** : 레이어 총 연장(길이) 계산
+   - **[레이어명][사진]?** : 사진 매칭 누락 분석
+   - **지점A ~ 지점B [거리]?** : 지점 간 경로 거리 계산
+   - **[레이어명][거리]>숫자?** : 간격 이상 구간 분석
+   - **키워드1 키워드2📍** : AND 검색 (두 단어 모두 포함)
+   - **키워드1 & 키워드2📍** : OR 검색 (둘 중 하나 포함)`;
 
     if (type === 'point_search') {
       systemInstruction += "\n도면 레이어 정보를 분석하여 실무 가이드를 제공하세요.";
-    } else if (type === 'pdf_summary') {
-      systemInstruction += `
-[요약 및 가시화 전문가 모드]
-1. 당신은 고도로 숙련된 '데이터 포맷터(Formatter)'입니다.
-2. 제공된 텍스트 원문을 바탕으로 가독성이 뛰어난 레이아웃(표, 리스트, 강조 등)을 설계하여 예쁘게 정리하세요. 
-   특히 원문의 기호(●, ■, ※, ① 등)를 적극적으로 유지하여 지침서 특유의 계층 구조를 보존하세요.
-3. **시각 자료 활용(필수)**: 데이터 맥락에 포함된 URL들을 활용하여 다음 형식으로 시각 자료를 포함하세요.
-   - 표(SVG)는 [ATTACH_SVG:URL] 형식으로 출력하세요.
-   - 그림(WebP)은 [ATTACH_IMG:URL] 형식으로 출력하세요.`;
+    } else if (type === 'translate_gis') {
+      systemInstruction = `당신은 사용자의 자연어 요청을 GIS 전용 검색 문법으로 변환하는 전문 번역 에이전트입니다.
+
+[핵심 미션]
+1. 사용자의 질문에서 '대상'이 '레이어 전체'인지 아니면 '특정 포인트(명칭/ID)'인지 구분하세요.
+2. 레이어 요청(예: "50Hivp 관로")이라면 [대상 레이어 목록]에서 가장 유사한 명칭을 선택하여 [레이어명] 형식을 사용하세요.
+3. 특정 포인트 명칭(예: "260424-04")이나 검색어 요청이라면 레이어 목록에서 찾지 말고 사용자의 키워드 그대로를 사용하세요.
+4. 특정 포인트의 상세 좌표(TM, 경위도, Z)나 정보 조회를 요청하는 경우 '포인트명[좌표]?' 문법을 사용하세요. (예: "260424-04 좌표 알려줘" -> 260424-04[좌표]?)
+4. 검색어 필터링(AND, OR, NOT) 요청 시 아래 문법 규칙 7~9번을 적극 활용하세요.
+
+[문법 규칙]
+1. [레이어명]? : 레이어 데이터 리스트 출력 (분석, 정리, 계산, 리스트 등)
+2. [레이어명]📍 : 레이어 객체 지도에 마커 표시 (위치, 어디야, 보여줘 등)
+3. [레이어명][거리]? : 레이어의 총 연장(길이) 계산
+4. [레이어명][사진]? : 레이어의 사진/메모 매칭 누락 분석
+5. 지점A ~ 지점B [거리]? : 두 지점 간의 경로 거리 계산
+6. [레이어명][거리]>숫자? : 포인트 간 간격이 숫자(m)보다 큰 구간 분석
+7. 키워드1 키워드2📍 : **AND 검색** (공백 사용, 두 키워드 모두 포함된 포인트)
+8. 키워드1 & 키워드2📍 : **OR 검색** (& 사용, 둘 중 하나라도 포함된 포인트)
+9. 키워드1 !키워드2📍 : **NOT 검색** (! 사용, 키워드1은 포함하되 키워드2는 제외)
+11. 포인트명[좌표]? : 포인트의 상세 좌표(TM X, TM Y, 경위도, Z) 및 속성 조회
+
+[고급 분석 가이드]
+위 문법으로 처리 불가능한 복잡한 요청(예: 레이어 교차, 필터링 후 특정 연산 등)인 경우, 자바스크립트 코드를 직접 생성하세요.
+- **좌표 변환이나 복잡한 기하학적 수식은 절대 브라우저 코드로 직접(Math 함수 등) 계산하지 마세요.**
+- 공간 연산 및 거리 측정은 기존에 정의된 Supabase RPC 함수를 호출하는 코드를 우선적으로 작성하고, 불가능할 경우에만 **Turf.js** 라이브러리를 사용하세요.
+- 브라우저에 **Turf.js** 라이브러리가 로드되어 있으므로 \`turf\` 객체를 사용하여 공간 연산을 수행하세요. (예: \`turf.distance\`, \`turf.booleanPointInPolygon\`, \`turf.lineSlice\` 등)
+- **형식 준수(필수)**: 반드시 \`[AGENT_JS]: { "description": "...", "logic": "function(features) { ... }" }\` 형식을 지키세요.
+- **JSON 규칙**: 모든 키와 문자열 값은 반드시 쌍따옴표(\")로 감싸야 하며, \`logic\` 내의 함수 코드는 반드시 하나의 긴 문자열로 작성되어야 합니다.
+- features는 현재 도면의 모든 GeoJSON Feature 배열입니다.
+- results는 { lon, lat, text, handle } 객체의 배열이어야 합니다.
+  - **교차 분석 예시**: \`turf.lineIntersect(line1, line2)\`를 사용하여 교차점(Points)을 찾아 results에 담으세요.
+
+[주의] 답변은 문법 문자열 또는 [AGENT_JS] JSON 객체 하나만 출력하세요. 부연 설명은 절대 금지입니다. 반드시 마지막은 📍, ?, 또는 }로 끝나야 합니다.
+
+[대상 레이어 목록] (현재 도면에 존재하는 레이어들)
+${searchContext}`;
     }
 
     // [추가] 30초 타임아웃 설정 (Gate가 무한정 열려있는 것 방지)
