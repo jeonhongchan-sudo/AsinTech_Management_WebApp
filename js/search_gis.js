@@ -605,57 +605,72 @@ export function checkPhotoMatch(pointText, photoFileName) {
 }
 
 /** 특정 포인트의 상세 좌표 및 정보 출력 */
-async function showPointInfo(pointName) {
+async function showPointInfo(query) {
     if (!state.currentProjectGeoJSON) {
-        try {
-            await ensureGeoJSONLoaded();
-        } catch (e) {
-            return showAlert("도면 데이터를 로드할 수 없습니다.", "error");
-        }
+        try { await ensureGeoJSONLoaded(); }
+        catch (e) { return showAlert("도면 데이터를 로드할 수 없습니다.", "error"); }
     }
 
     const features = state.currentProjectGeoJSON.features.filter(f => f.geometry && f.geometry.type === 'Point');
-    const target = features.find(f => {
-        const label = (f.properties.text || f.properties.handle || '').toString();
-        return sanitizeSearchText(label).includes(sanitizeSearchText(pointName));
+    
+    // [수정] 복합 문법(&, 공백 등)을 지원하도록 matchComplexQuery 적용 및 필터링
+    const matches = features.filter(f => {
+        const props = f.properties;
+        // 텍스트 속성뿐만 아니라 전체 속성값에서 검색
+        const combinedValues = Object.values(props).join(' ');
+        return matchComplexQuery(combinedValues, query) >= 1.0;
     });
 
-    if (!target) return showAlert(`포인트 '${pointName}'을 찾을 수 없습니다.`, "info");
+    if (matches.length === 0) return showAlert(`포인트/검색어 '${query}'에 일치하는 결과가 없습니다.`, "info");
 
-    const p = target.properties;
-    const coords = target.geometry.coordinates; // [lon, lat, z?]
-    const lon = coords[0];
-    const lat = coords[1];
-    const z = (coords[2] !== undefined && !isNaN(coords[2])) ? coords[2] : 0;
-    
-    // [수정] TM 좌표 포맷팅 유틸리티 (항상 소수점 3자리 보장)
     const formatTm = (val) => (val !== undefined && val !== null && val !== '-' && !isNaN(parseFloat(val))) 
         ? parseFloat(val).toFixed(3) 
         : val;
-
-    const tmX = formatTm(p.tm_x || p.x_coord || p.x || p.X || '-');
-    const tmY = formatTm(p.tm_y || p.y_coord || p.y || p.Y || '-');
     const crs = state.currentProjectSourceCrs || "설정된 좌표계 정보 없음";
 
     let html = `
         <div style="padding:5px;">
-            <h3 style="color:#2196F3; margin-bottom:15px; border-bottom:2px solid #2196F3; padding-bottom:10px;">📍 포인트 상세 정보: ${pointName}</h3>
-            <div style="background:#f8f9fa; padding:15px; border-radius:8px; border:1px solid #dee2e6; margin-bottom:15px;">
-                <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; width:110px; background:#f1f3f5;">적용 좌표계</td><td style="padding:10px; color:#2c3e50;">${crs}</td></tr>
-                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">TM X (N)</td><td style="padding:10px; font-family:monospace; font-weight:bold; color:#1864ab;">${tmX}</td></tr>
-                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">TM Y (E)</td><td style="padding:10px; font-family:monospace; font-weight:bold; color:#1864ab;">${tmY}</td></tr>
-                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">경도 (Lon)</td><td style="padding:10px; font-family:monospace;">${lon.toFixed(8)}</td></tr>
-                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">위도 (Lat)</td><td style="padding:10px; font-family:monospace;">${lat.toFixed(8)}</td></tr>
-                    <tr style="border-bottom:1px solid #eee;"><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">높이 (Z)</td><td style="padding:10px; font-family:monospace; font-weight:bold;">${z.toFixed(3)} m</td></tr>
-                    <tr><td style="padding:10px; font-weight:bold; color:#666; background:#f1f3f5;">레이어</td><td style="padding:10px;">${p.layer || '-'}</td></tr>
-                </table>
-            </div>
-            <button class="btn btn-primary" style="width:100%; padding:12px; font-weight:bold;" onclick="window.showPointLocation(${lon}, ${lat}, '${pointName}', '${p.handle}'); window.closeAiResponseModal();">지도 위치로 이동</button>
-        </div>
+            <h3 style="color:#2196F3; margin-bottom:15px; border-bottom:2px solid #2196F3; padding-bottom:10px;">📊 포인트 상세 좌표 조회</h3>
+            <div style="font-size:12px; color:#666; margin-bottom:10px; background:#f8f9fa; padding:8px; border-radius:4px;">적용 좌표계: <strong>${crs}</strong></div>
+            <div style="overflow-x:auto; border:1px solid #dee2e6; border-radius:8px;">
+                <table style="width:100%; border-collapse:collapse; font-size:12px; min-width:350px;">
+                    <thead>
+                        <tr style="background:#f1f3f5; border-bottom:2px solid #dee2e6;">
+                            <th style="padding:10px; text-align:left;">명칭</th>
+                            <th style="padding:10px; text-align:right;">TM X (N)</th>
+                            <th style="padding:10px; text-align:right;">TM Y (E)</th>
+                            <th style="padding:10px; text-align:right;">높이(Z)</th>
+                            <th style="padding:10px; text-align:center;">이동</th>
+                        </tr>
+                    </thead>
+                    <tbody>
     `;
 
-    showAiResponseModal(`정보조회: ${pointName}`, "조회 완료", "📊 포인트 상세 제원");
+    matches.forEach(m => {
+        const p = m.properties;
+        const coords = m.geometry.coordinates;
+        const label = p.text || p.handle || 'N/A';
+        const z = (coords[2] !== undefined && !isNaN(coords[2])) ? coords[2] : 0;
+        const tmX = formatTm(p.tm_x || p.x_coord || p.x || p.X || '-');
+        const tmY = formatTm(p.tm_y || p.y_coord || p.y || p.Y || '-');
+
+        html += `
+            <tr style="border-bottom:1px solid #eee;">
+                <td style="padding:10px; font-weight:bold; color:#333; max-width:100px; word-break:break-all;">${label}</td>
+                <td style="padding:10px; text-align:right; font-family:monospace; color:#1864ab;">${tmX}</td>
+                <td style="padding:10px; text-align:right; font-family:monospace; color:#1864ab;">${tmY}</td>
+                <td style="padding:10px; text-align:right; font-family:monospace;">${z.toFixed(3)}</td>
+                <td style="padding:10px; text-align:center;">
+                    <button class="btn btn-info btn-sm" style="padding:4px 8px; font-size:11px;" 
+                        onclick="window.showPointLocation(${coords[0]}, ${coords[1]}, '${label}', '${p.handle}'); window.closeAiResponseModal();">📍</button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += `</tbody></table></div></div>`;
+
+    showAiResponseModal(`좌표조회: ${query}`, "조회 완료", "📊 포인트 상세 제원");
     const contentEl = document.getElementById('aiAnswerContent');
     if (contentEl) contentEl.innerHTML = html;
 }
