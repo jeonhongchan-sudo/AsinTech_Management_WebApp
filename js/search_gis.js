@@ -17,16 +17,20 @@ export function openGisSearchModal() {
         modal.innerHTML = `
             <div style="background:white; padding:20px; border-radius:12px; width:90%; max-width:450px; box-shadow:0 10px 30px rgba(0,0,0,0.3);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <h3 style="margin:0; font-size:18px; color:#333;">🔍 도면 포인트 검색</h3>
-                    <button style="border:none; background:none; font-size:24px; cursor:pointer; color:#999;" onclick="document.getElementById('gisSearchModal').style.display='none'">&times;</button>
+                    <h3 style="margin:0; font-size:18px; color:#333;">🔍 프로젝트 검색</h3>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <button id="btnToggleHelp" style="border:1px solid #2196F3; background:#fff; border-radius:50%; width:24px; height:24px; cursor:pointer; font-size:14px; color:#2196F3; font-weight:bold; display:flex; align-items:center; justify-content:center;" title="도움말 토글">?</button>
+                        <button style="border:none; background:none; font-size:24px; cursor:pointer; color:#999;" onclick="document.getElementById('gisSearchModal').style.display='none'">&times;</button>
+                    </div>
                 </div>
-                <div id="gisSearchHelpBox" style="font-size:11px; color:#666; background:#fdfdfe; padding:12px; border-radius:8px; margin-bottom:15px; line-height:1.6; border:1px solid #edf2f7; box-shadow:inset 0 1px 2px rgba(0,0,0,0.02);">
+                <div id="gisSearchHelpBox" style="display:none; font-size:11px; color:#666; background:#fdfdfe; padding:12px; border-radius:8px; margin-bottom:15px; line-height:1.6; border:1px solid #edf2f7; box-shadow:inset 0 1px 2px rgba(0,0,0,0.02);">
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px 12px; margin-bottom:8px; padding-bottom:8px; border-bottom:1px dotted #cbd5e0;">
                         <span><b>&</b> : 또는 (OR)</span>
                         <span><b>공백</b> : 그리고 (AND)</span>
                         <span><b>!</b> : 검색 제외 (NOT)</span>
                         <span><b>~</b> : ~에서 (지점연결)</span>
                         <span><b>[거리]</b> : 연장/거리 계산</span>
+                        <span><b>[교차]</b> : 선 레이어 교차 분석</span>
                         <span><b>[사진]</b> : 사진 매칭 분석</span>
                         <span><b>[좌표]</b> : 상세 좌표 조회</span>
                         <span><b>?</b> : 분석 리포트 출력</span>
@@ -39,16 +43,17 @@ export function openGisSearchModal() {
                         • 정리: 마지막은 항상 📍 또는 ?가 들어가야 검색이 됩니다 
                     </div>
                 </div>
-                <div id="gisSearchShortcuts" style="margin-bottom:15px; display:grid; grid-template-columns: repeat(2, 1fr); gap:8px;">
-                    <button class="btn btn-outline btn-sm" id="btnShortcutLayer" style="padding:5px 8px; font-size:11px; border-color:#2196F3; color:#2196F3; font-weight:bold; white-space:nowrap;">[Layer]</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutPhoto" style="padding:5px 8px; font-size:11px; border-color:#4CAF50; color:#4CAF50; font-weight:bold; white-space:nowrap;">[사진]</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutDistance" style="padding:5px 8px; font-size:11px; border-color:#9C27B0; color:#9C27B0; font-weight:bold; white-space:nowrap;">[거리]</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutCoord" style="padding:5px 8px; font-size:11px; border-color:#607D8B; color:#607D8B; font-weight:bold; white-space:nowrap;">[좌표]</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutBookmark" style="padding:5px 8px; font-size:11px; border-color:#FF9800; color:#FF9800; font-weight:bold; white-space:nowrap;">📍</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutAudit" style="padding:5px 8px; font-size:11px; border-color:#e03131; color:#e03131; font-weight:bold; white-space:nowrap;">[분석(?)]</button>
+                <div id="gisSearchShortcuts" style="margin-bottom:15px; display:grid; grid-template-columns: repeat(5, 1fr); gap:6px;">
+                    <button class="btn btn-outline btn-sm" id="btnShortcutLayer" style="padding:5px 2px; font-size:10px; border-color:#2196F3; color:#2196F3; font-weight:bold; white-space:nowrap;">[Layer]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutPhoto" style="padding:5px 2px; font-size:10px; border-color:#4CAF50; color:#4CAF50; font-weight:bold; white-space:nowrap;">[사진]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutDistance" style="padding:5px 2px; font-size:10px; border-color:#9C27B0; color:#9C27B0; font-weight:bold; white-space:nowrap;">[거리]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutCoord" style="padding:5px 2px; font-size:10px; border-color:#607D8B; color:#607D8B; font-weight:bold; white-space:nowrap;">[좌표]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutIntersection" style="padding:5px 2px; font-size:10px; border-color:#E91E63; color:#E91E63; font-weight:bold; white-space:nowrap;">[교차]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutBookmark" style="padding:5px 2px; font-size:10px; border-color:#FF9800; color:#FF9800; font-weight:bold; white-space:nowrap;">📍</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutAudit" style="padding:5px 2px; font-size:10px; border-color:#e03131; color:#e03131; font-weight:bold; white-space:nowrap;">[분석(?)]</button>
                 </div>
                 <input type="text" id="gisSearchInput" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:15px; box-sizing:border-box; font-size:14px;" placeholder="검색어 또는 문법 입력...">
-                <div style="display:flex; gap:10px;">
+                <div id="gisSearchActions" style="display:flex; gap:10px;">
                     <button class="btn btn-secondary" style="flex:1; padding:12px;" onclick="document.getElementById('gisSearchModal').style.display='none'">취소</button>
                     <button class="btn btn-primary" id="btnGisSearchExecute" style="flex:1; padding:12px; font-weight:bold;">검색/분석 실행</button>
                 </div>
@@ -59,6 +64,25 @@ export function openGisSearchModal() {
             </div>
         `;
         document.body.appendChild(modal);
+
+        modal.querySelector('#btnToggleHelp').onclick = () => {
+            const helpBox = document.getElementById('gisSearchHelpBox');
+            const shortcuts = document.getElementById('gisSearchShortcuts');
+            const input = document.getElementById('gisSearchInput');
+            const actions = document.getElementById('gisSearchActions');
+            const layerOverlay = document.getElementById('layerSelectorOverlay');
+            
+            const isOpeningHelp = helpBox.style.display === 'none';
+            
+            // 도움말 토글
+            helpBox.style.display = isOpeningHelp ? 'block' : 'none';
+            // 검색 UI 토글 (반대로 작동)
+            shortcuts.style.display = isOpeningHelp ? 'none' : 'grid';
+            input.style.display = isOpeningHelp ? 'none' : 'block';
+            actions.style.display = isOpeningHelp ? 'none' : 'flex';
+            // 레이어 선택창이 열려있었다면 닫기
+            if (isOpeningHelp) layerOverlay.style.display = 'none';
+        };
 
         modal.querySelector('#btnShortcutLayer').onclick = () => {
             const listEl = modal.querySelector('#gisLayerList');
@@ -85,6 +109,12 @@ export function openGisSearchModal() {
         modal.querySelector('#btnShortcutCoord').onclick = () => {
             const input = document.getElementById('gisSearchInput');
             input.value += '[좌표]';
+            input.focus();
+        };
+
+        modal.querySelector('#btnShortcutIntersection').onclick = () => {
+            const input = document.getElementById('gisSearchInput');
+            input.value += '[교차]';
             input.focus();
         };
 
@@ -130,18 +160,12 @@ export async function executeGisSearch(searchTerm) {
         try {
             const res = await callAiEdge(searchTerm, `사용 가능한 레이어 목록: ${layerList}`, 'translate_gis');
             if (res.success && res.answer) {
-                const translated = res.answer.trim().replace(/['"`]/g, '');
-                console.log(`[GIS AI 번역] ${searchTerm} -> ${translated}`);
+                let translated = res.answer.trim();
+                console.log(`[GIS AI 원문] ${translated}`);
                 
-                // [추가] AI가 직접 작성한 JS 로직인 경우 (자율 에이전트 모드)
-                if (translated.startsWith('[AGENT_JS]:')) {
-                    let jsonStr = translated.replace('[AGENT_JS]:', '').trim();
-                    // AI가 마크다운 코드 블록으로 감쌌을 경우 정제
-                    jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/```$/, '').trim();
-                    try {
-                        return await runDynamicGisAgent(JSON.parse(jsonStr));
-                    } catch (jsonErr) { throw new Error("분석 코드 형식이 올바르지 않습니다. (JSON 파싱 실패)"); }
-                }
+                // 일반 문법인 경우에만 따옴표 정제
+                translated = translated.replace(/['"`]/g, '');
+                console.log(`[GIS 문법 변환] ${translated}`);
 
                 // 변환된 문법에 기호가 포함되어 있다면 재귀적으로 다시 실행
                 if (translated.includes('📍') || translated.includes('?')) {
@@ -182,6 +206,17 @@ export async function executeGisSearch(searchTerm) {
         return analyzeTotalDistance(targetLayer, useBookmark, isAudit);
     }
 
+    if (cleanInput.endsWith('[교차]')) {
+        // [레이어1][레이어2][교차] 형태에서 각 대괄호 내용 추출
+        const layerGroups = cleanInput.match(/\[(.*?)\]/g) || [];
+        const layerNames = layerGroups.map(g => g.slice(1, -1).trim()).filter(l => l !== '교차');
+        
+        if (layerNames.length === 0) return showAlert("기준 레이어를 입력하세요. 예: [레이어][교차]?", "info");
+        const targetLayer = layerNames[0];
+        const otherLayers = layerNames.length > 1 ? layerNames.slice(1) : null;
+        return analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers);
+    }
+
     if (cleanInput.endsWith('[좌표]')) {
         const pointName = cleanInput.replace('[좌표]', '').replace(/[\[\]^]/g, '').trim();
         return showPointInfo(pointName);
@@ -200,9 +235,26 @@ function executePointSearch(searchTerm, useBookmark, isAudit) {
         ? state.currentProjectGeoJSON.features.filter(f => f.geometry && f.geometry.type === 'Point')
         : (state.cadMap ? state.cadMap.querySourceFeatures('cad_source', { sourceLayer: 'point' }) : []);
 
+    // [추가] [레이어명] 키워드 패턴 분리 (예: [도로경계] 260424-10)
+    const layerMatch = cleanSearch.match(/^\[(.+?)\]\s*(.*)$/);
+    let targetLayer = null;
+    let keyword = cleanSearch;
+
+    if (layerMatch) {
+        targetLayer = layerMatch[1].trim();
+        keyword = layerMatch[2].trim();
+    }
+
     const matches = features.filter(f => {
+        // 1. 레이어 필터가 있는 경우, 해당 레이어인지 확인
+        if (targetLayer && f.properties.layer !== targetLayer) return false;
+
+        // 2. 검색 키워드가 없는 경우 (레이어만 [ ]로 들어온 경우), 해당 레이어 모든 객체 포함
+        if (!keyword) return true;
+
+        // 3. 키워드가 있는 경우, 전체 속성값에서 복합 쿼리 매칭 실행
         const combinedValues = Object.values(f.properties).join(' ');
-        return matchComplexQuery(combinedValues, cleanSearch) >= 1.0; 
+        return matchComplexQuery(combinedValues, keyword) >= 1.0; 
     });
 
     if (matches.length === 0) return showAlert("일치하는 포인트가 없습니다.", "info");
@@ -604,6 +656,81 @@ export function checkPhotoMatch(pointText, photoFileName) {
     return regex.test(cleanPoint);
 }
 
+/** 선 레이어 간의 교차 지점 분석 */
+async function analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers = null) {
+    if (!state.currentProjectGeoJSON) {
+        try { await ensureGeoJSONLoaded(); }
+        catch (e) { return showAlert("도면 데이터를 로드할 수 없습니다.", "error"); }
+    }
+    if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
+
+    // 전체 데이터 중 선형 객체 필터링
+    let lineFeatures = state.currentProjectGeoJSON.features.filter(f => 
+        f.geometry && f.geometry.type.includes('LineString')
+    );
+
+    // [최적화] 특정 비교 레이어들이 지정된 경우, 전송 데이터 크기를 줄이기 위해 필터링
+    if (otherLayers && otherLayers.length > 0) {
+        const filterSet = new Set([targetLayer, ...otherLayers]);
+        lineFeatures = lineFeatures.filter(f => filterSet.has(f.properties.layer));
+    }
+
+    if (lineFeatures.length === 0) return showAlert("도면에 분석 가능한 선형 객체가 없습니다.", "info");
+
+    const targetMsg = otherLayers ? `${targetLayer}와 [${otherLayers.join(', ')}] 간의` : `${targetLayer}와 전체 레이어의`;
+    showAlert(`${targetMsg} 교차 지점 분석 중...`, "info");
+
+    try {
+        const results = await callSupabaseDirect('rpc/analyze_intersections', 'POST', {
+            geoms_json: lineFeatures,
+            target_layer: targetLayer,
+            source_crs: state.currentProjectSourceCrs,
+            other_layers: otherLayers
+        });
+
+        if (!results || results.length === 0) {
+            return showModalMessage("🔍 분석 결과", `${targetLayer} 레이어와 교차되는 다른 선 레이어가 없습니다.`, 'info');
+        }
+
+        // 지도에 북마커 표시
+        if (useBookmark) {
+            const bookmarkPoints = results.map(res => ({
+                lon: res.lon,
+                lat: res.lat,
+                text: `교차: ${targetLayer} ↔ ${res.other_layer}`,
+                handle: `INTERSECT_${res.target_handle}_${res.other_handle}`
+            }));
+            displayMatchesOnMap(bookmarkPoints);
+        }
+
+        if (!isAudit) return;
+
+        // 리스트 리포트 생성
+        let html = `<div style="padding:5px;"><h3 style="color:#e91e63; margin-bottom:15px; border-bottom:2px solid #e91e63; padding-bottom:10px;">💖 선 레이어 교차 분석: ${targetLayer}</h3>`;
+        html += `<p style="font-size:12px; color:#666; margin-bottom:15px;">타 레이어와 교차되는 지점이 총 <strong>${results.length}건</strong> 발견되었습니다.</p>`;
+        html += `<div style="border:1px solid #f8bbd0; border-radius:8px; overflow:hidden; max-height:400px; overflow-y:auto;">`;
+        
+        results.forEach(res => {
+            html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#fff; border-bottom:1px solid #fce4ec;">
+                        <div style="font-size:12px;">
+                            <div style="font-weight:bold; color:#c2185b;">교차 레이어: ${res.other_layer}</div>
+                            <div style="color:#888; font-size:11px;">#${res.target_handle} ↔ #${res.other_handle}</div>
+                        </div>
+                        <button class="btn btn-info btn-sm" style="padding:4px 8px; font-size:11px;" 
+                            onclick="window.showPointLocation(${res.lon}, ${res.lat}, '교차점', 'INTERSECT'); window.closeAiResponseModal();">위치</button>
+                     </div>`;
+        });
+        html += `</div></div>`;
+
+        showAiResponseModal(`교차분석: ${targetLayer}`, "분석 완료", "📚 공간 관계 분석");
+        const contentEl = document.getElementById('aiAnswerContent');
+        if (contentEl) contentEl.innerHTML = html;
+
+    } catch (e) {
+        showAlert("교차 분석 실패: " + e.message, "error");
+    }
+}
+
 /** 특정 포인트의 상세 좌표 및 정보 출력 */
 async function showPointInfo(query) {
     if (!state.currentProjectGeoJSON) {
@@ -673,67 +800,4 @@ async function showPointInfo(query) {
     showAiResponseModal(`좌표조회: ${query}`, "조회 완료", "📊 포인트 상세 제원");
     const contentEl = document.getElementById('aiAnswerContent');
     if (contentEl) contentEl.innerHTML = html;
-}
-
-/** [추가] Turf.js 공간 분석 라이브러리 로드 */
-async function ensureTurfLoaded() {
-    if (window.turf) return true;
-    return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js';
-        script.onload = () => { console.log("✅ Turf.js loaded"); resolve(true); };
-        script.onerror = () => reject(new Error("Turf.js 로드 실패"));
-        document.head.appendChild(script);
-    });
-}
-
-/** [추가] AI가 생성한 자바스크립트 로직을 GeoJSON 데이터에 즉석 적용 */
-async function runDynamicGisAgent(agentPayload) {
-    const { description, logic } = agentPayload;
-
-    try {
-        // 1. Turf.js 로드 대기
-        await ensureTurfLoaded();
-        showAlert(`${description} 분석 중 (Turf.js 활용)...`, "info");
-        
-        // 2. 도면 데이터 로드 확인
-        await ensureGeoJSONLoaded();
-        if (!state.currentProjectGeoJSON) throw new Error("도면 데이터를 로드할 수 없습니다.");
-
-        // 3. AI가 작성한 함수 문자열을 실제 실행 가능한 함수로 변환
-        // logic 형식: "function(features) { ... return results; }"
-        const runLogic = new Function('return ' + logic)();
-        
-        // 4. 분석 실행 (전체 피처 전달)
-        const results = runLogic(state.currentProjectGeoJSON.features);
-
-        if (!Array.isArray(results) || results.length === 0) {
-            return showModalMessage("🔍 분석 결과", "조건에 일치하는 데이터를 찾지 못했습니다.", 'info');
-        }
-
-        // 5. 결과 지도 표시
-        displayMatchesOnMap(results);
-        
-        // 6. 결과 리스트 출력 UI 구성
-        let html = `<div style="padding:5px;"><h3 style="color:#2D3748; margin-bottom:15px; border-bottom:2px solid #2D3748; padding-bottom:10px;">🤖 AI 자율 분석: ${description}</h3>`;
-        html += `<p style="font-size:12px; color:#666; margin-bottom:15px;">AI가 도면 전체 데이터를 직접 분석하여 <strong>${results.length}건</strong>의 지점을 찾아냈습니다.</p>`;
-        html += `<div style="border:1px solid #E2E8F0; border-radius:8px; overflow:hidden; max-height:400px; overflow-y:auto;">`;
-        
-        results.forEach(res => {
-            html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#fff; border-bottom:1px solid #EDF2F7;">
-                        <div style="font-size:12px;">📍 ${res.text}</div>
-                        <button class="btn btn-info btn-sm" style="padding:4px 8px; font-size:11px;" onclick="window.showPointLocation(${res.lon}, ${res.lat}, '${res.text}', '${res.handle}'); window.closeAiResponseModal();">위치</button>
-                     </div>`;
-        });
-        html += `</div></div>`;
-
-        // 7. 결과 모달 표시
-        showAiResponseModal(description, "분석 완료", "🤖 AI 에이전트 분석");
-        const contentEl = document.getElementById('aiAnswerContent');
-        if (contentEl) contentEl.innerHTML = html;
-
-    } catch (e) {
-        console.error("AI 에이전트 실행 오류:", e);
-        showAlert("AI 분석 로직 실행 실패: " + e.message, "error");
-    }
 }
