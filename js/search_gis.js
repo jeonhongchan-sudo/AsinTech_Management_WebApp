@@ -39,13 +39,13 @@ export function openGisSearchModal() {
                         • 정리: 마지막은 항상 📍 또는 ?가 들어가야 검색이 됩니다 
                     </div>
                 </div>
-                <div id="gisSearchShortcuts" style="margin-bottom:8px; display:flex; gap:6px;">
-                    <button class="btn btn-outline btn-sm" id="btnShortcutLayer" style="padding:4px 8px; font-size:11px; border-color:#2196F3; color:#2196F3; font-weight:bold;">[Layer]</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutPhoto" style="padding:4px 8px; font-size:11px; border-color:#4CAF50; color:#4CAF50; font-weight:bold;">[사진]</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutDistance" style="padding:4px 8px; font-size:11px; border-color:#9C27B0; color:#9C27B0; font-weight:bold;">[거리]</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutCoord" style="padding:4px 8px; font-size:11px; border-color:#607D8B; color:#607D8B; font-weight:bold;">[좌표]</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutBookmark" style="padding:4px 8px; font-size:11px; border-color:#FF9800; color:#FF9800; font-weight:bold;">📍</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutAudit" style="padding:4px 8px; font-size:11px; border-color:#e03131; color:#e03131; font-weight:bold;">[분석(?)]</button>
+                <div id="gisSearchShortcuts" style="margin-bottom:15px; display:grid; grid-template-columns: repeat(2, 1fr); gap:8px;">
+                    <button class="btn btn-outline btn-sm" id="btnShortcutLayer" style="padding:5px 8px; font-size:11px; border-color:#2196F3; color:#2196F3; font-weight:bold; white-space:nowrap;">[Layer]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutPhoto" style="padding:5px 8px; font-size:11px; border-color:#4CAF50; color:#4CAF50; font-weight:bold; white-space:nowrap;">[사진]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutDistance" style="padding:5px 8px; font-size:11px; border-color:#9C27B0; color:#9C27B0; font-weight:bold; white-space:nowrap;">[거리]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutCoord" style="padding:5px 8px; font-size:11px; border-color:#607D8B; color:#607D8B; font-weight:bold; white-space:nowrap;">[좌표]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutBookmark" style="padding:5px 8px; font-size:11px; border-color:#FF9800; color:#FF9800; font-weight:bold; white-space:nowrap;">📍</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutAudit" style="padding:5px 8px; font-size:11px; border-color:#e03131; color:#e03131; font-weight:bold; white-space:nowrap;">[분석(?)]</button>
                 </div>
                 <input type="text" id="gisSearchInput" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:15px; box-sizing:border-box; font-size:14px;" placeholder="검색어 또는 문법 입력...">
                 <div style="display:flex; gap:10px;">
