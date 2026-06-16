@@ -50,7 +50,7 @@ export function openGisSearchModal() {
                     <button class="btn btn-outline btn-sm" id="btnShortcutCoord" style="padding:5px 2px; font-size:10px; border-color:#607D8B; color:#607D8B; font-weight:bold; white-space:nowrap;">[좌표]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutIntersection" style="padding:5px 2px; font-size:10px; border-color:#E91E63; color:#E91E63; font-weight:bold; white-space:nowrap;">[교차]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutBookmark" style="padding:5px 2px; font-size:10px; border-color:#FF9800; color:#FF9800; font-weight:bold; white-space:nowrap;">📍</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutAudit" style="padding:5px 2px; font-size:10px; border-color:#e03131; color:#e03131; font-weight:bold; white-space:nowrap;">[분석(📋)]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutAudit" style="padding:5px 2px; font-size:10px; border-color:#e03131; color:#e03131; font-weight:bold; white-space:nowrap;">📋</button>
                 </div>
                 <input type="text" id="gisSearchInput" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:15px; box-sizing:border-box; font-size:14px;" placeholder="검색어 또는 문법 입력...">
                 <div id="gisSearchActions" style="display:flex; gap:10px;">
@@ -147,7 +147,7 @@ export function openGisSearchModal() {
 }
 
 /** GIS 문법 해석 및 실행 */
-export async function executeGisSearch(searchTerm) {
+export async function executeGisSearch(searchTerm, isSubTask = false) {
     const useBookmark = searchTerm.includes('📍');
     const isAudit = searchTerm.includes('📋');
     
@@ -177,6 +177,19 @@ export async function executeGisSearch(searchTerm) {
         return showAlert("출력 형식을 선택하세요 (📍: 지도, 📋: 리스트)", "info");
     }
 
+    // [추가] 다중 작업 오케스트레이션 (&& 기호 처리)
+    if (searchTerm.includes('&&')) {
+        const tasks = searchTerm.split('&&').map(t => t.trim()).filter(t => t);
+        if (tasks.length > 0) {
+            // 첫 번째 작업 시작 전 모달 초기화, 이후 작업들은 append 모드로 동작
+            if (!isSubTask) closeAiResponseModal(); 
+            for (let i = 0; i < tasks.length; i++) {
+                await executeGisSearch(tasks[i], true);
+            }
+            return;
+        }
+    }
+
     // [최적화] 사용자가 실행 버튼을 누른 이 시점에만 데이터를 로드합니다.
     try {
         await ensureGeoJSONLoaded();
@@ -201,18 +214,18 @@ export async function executeGisSearch(searchTerm) {
 
     if (cleanInput.includes('~') && cleanInput.includes('[거리]')) {
         const pointNames = cleanInput.replace(/\[거리\]/g, '').replace(/\^/g, '').split(/[~+]/).map(p => p.trim()).filter(p => p !== "");
-        if (pointNames.length >= 2) return analyzePointToPointDistance(pointNames, useBookmark, isAudit);
+        if (pointNames.length >= 2) return analyzePointToPointDistance(pointNames, useBookmark, isAudit, isSubTask);
     }
 
     const distMatch = cleanInput.match(/(.+?)\^?\[거리\]>([\d.]+)/);
     if (distMatch) return analyzeDistanceGap(distMatch[1].trim(), parseFloat(distMatch[2]), useBookmark, isAudit);
 
     if (foundSuffix === '[사진]') {
-        return analyzePhotoMismatch(targetQuery, useBookmark, isAudit);
+        return analyzePhotoMismatch(targetQuery, useBookmark, isAudit, isSubTask);
     }
 
     if (foundSuffix === '[거리]') {
-        return analyzeTotalDistance(targetQuery, useBookmark, isAudit);
+        return analyzeTotalDistance(targetQuery, useBookmark, isAudit, isSubTask);
     }
 
     if (foundSuffix === '[교차]') {
@@ -223,21 +236,21 @@ export async function executeGisSearch(searchTerm) {
         if (layerNames.length > 0) {
             const targetLayer = layerNames[0];
             const otherLayers = layerNames.length > 1 ? layerNames.slice(1) : null;
-            return analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers);
+            return analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers, isSubTask);
         }
         // 대괄호가 없는 복합 쿼리 형태인 경우 (예: 제수변!하단[교차])
-        return analyzeIntersections(targetQuery, useBookmark, isAudit);
+        return analyzeIntersections(targetQuery, useBookmark, isAudit, null, isSubTask);
     }
 
     if (foundSuffix === '[좌표]') {
-        return showPointInfo(targetQuery);
+        return showPointInfo(targetQuery, isSubTask);
     }
 
-    executePointSearch(cleanInput, useBookmark, isAudit);
+    executePointSearch(cleanInput, useBookmark, isAudit, isSubTask);
 }
 
 /** 포인트 검색 실행 */
-function executePointSearch(searchTerm, useBookmark, isAudit) {
+function executePointSearch(searchTerm, useBookmark, isAudit, isSubTask = false) {
     // [개선] 복합 쿼리 필터링 통합 지원
     const matches = filterFeaturesByComplexQuery(searchTerm);
 
@@ -246,7 +259,7 @@ function executePointSearch(searchTerm, useBookmark, isAudit) {
     if (useBookmark) renderSearchResults(matches);
     if (!isAudit) return;
 
-    renderGisResultList(searchTerm, matches, useBookmark);
+    renderGisResultList(searchTerm, matches, useBookmark, isSubTask);
 }
 
 /** [신규] 전역 복합 쿼리 필터링 유틸리티: 레이어 및 속성값을 통합 검색하여 피처 반환 */
@@ -282,7 +295,7 @@ export function filterFeaturesByComplexQuery(searchTerm, geometryType = 'Point')
 }
 
 /** 레이어 포인트와 사진 저장소 미스매칭 분석 */
-async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit) {
+async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit, isSubTask = false) {
     if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
     
     // [개선] 분석 시작 전 클라우드의 최신 사진 목록을 강제로 다시 불러옵니다.
@@ -338,13 +351,13 @@ async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit) {
     } else html += `<div style="padding:15px; text-align:center; color:#888; font-size:12px;">모든 사진이 도면에 존재합니다.</div>`;
     html += `</div></div></div>`;
 
-    showAiResponseModal(`매칭분석: ${targetLayer}`, "결과 리스트", "📚 무결성 분석");
+    showAiResponseModal(`매칭분석: ${targetLayer}`, "결과 리스트", "📚 무결성 분석", isSubTask);
     const contentEl = document.getElementById('aiAnswerContent');
     if (contentEl) contentEl.innerHTML = html;
 }
 
 /** 여러 포인트 간의 누적 직선 거리 계산 */
-async function analyzePointToPointDistance(pointNames, useBookmark, isAudit) {
+async function analyzePointToPointDistance(pointNames, useBookmark, isAudit, isSubTask = false) {
     if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
     if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
 
@@ -407,7 +420,7 @@ async function analyzePointToPointDistance(pointNames, useBookmark, isAudit) {
                         ${segmentsInfo}
                     </div>
                 </div>`;
-            showAiResponseModal(`거리계산: ${pointNames.join('~')}`, "분석 결과", "📊 공간 연산 분석");
+            showAiResponseModal(`거리계산: ${pointNames.join('~')}`, "분석 결과", "📊 공간 연산 분석", isSubTask);
             const contentEl = document.getElementById('aiAnswerContent');
             if (contentEl) contentEl.innerHTML = html;
         }
@@ -419,7 +432,7 @@ async function analyzePointToPointDistance(pointNames, useBookmark, isAudit) {
 }
 
 /** 레이어별 전체 거리 산출 */
-async function analyzeTotalDistance(targetLayer, useBookmark, isAudit) {
+async function analyzeTotalDistance(targetLayer, useBookmark, isAudit, isSubTask = false) {
     if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
     if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
 
@@ -524,7 +537,7 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit) {
 
         if (useBookmark) renderSearchResults(lineFeatures);
         if (isAudit) {
-            showAiResponseModal(`거리합산: ${targetLayer}`, "분석 결과", "📊 공간 통계 분석");
+            showAiResponseModal(`거리합산: ${targetLayer}`, "분석 결과", "📊 공간 통계 분석", isSubTask);
             const contentEl = document.getElementById('aiAnswerContent');
             if (contentEl) contentEl.innerHTML = html;
         }
@@ -617,7 +630,7 @@ async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit) 
         });
         html += `</div></div>`;
 
-        showAiResponseModal(`거리분석: ${targetLayer}`, "결과 리스트", "📚 공간 분석");
+        showAiResponseModal(`거리분석: ${targetLayer}`, "결과 리스트", "📚 공간 분석", isSubTask);
         const contentEl = document.getElementById('aiAnswerContent');
         if (contentEl) contentEl.innerHTML = html;
     } catch (e) {
@@ -626,7 +639,7 @@ async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit) 
 }
 
 /** 결과 리스트 모달 렌더링 */
-function renderGisResultList(searchTerm, matches, useBookmark) {
+function renderGisResultList(searchTerm, matches, useBookmark, isSubTask = false) {
     let html = `<div style="padding:5px;"><h3 style="color:#2196F3; margin-bottom:15px; border-bottom:2px solid #2196F3; padding-bottom:10px;">🔍 검색 결과: ${searchTerm}</h3>`;
     html += `<p style="font-size:12px; color:#666; margin-bottom:10px;">총 <strong>${matches.length}개</strong>의 결과를 찾았습니다. ${useBookmark ? '(지도 북마크 완료)' : ''}</p>`;
     html += `<div style="border:1px solid #eee; border-radius:8px; overflow:hidden; max-height:400px; overflow-y:auto;">`;
@@ -642,7 +655,7 @@ function renderGisResultList(searchTerm, matches, useBookmark) {
     if (matches.length > 50) html += `<div style="padding:10px; text-align:center; color:#999; font-size:11px;">... 외 ${matches.length - 50}개 항목 리스트 생략</div>`;
     html += `</div></div>`;
 
-    showAiResponseModal(`검색: ${searchTerm}`, "결과 리스트", "📚 도면 검색");
+    showAiResponseModal(`검색: ${searchTerm}`, "결과 리스트", "📚 도면 검색", isSubTask);
     const contentEl = document.getElementById('aiAnswerContent');
     if (contentEl) contentEl.innerHTML = html;
 }
@@ -670,7 +683,7 @@ export function checkPhotoMatch(pointText, photoFileName) {
 }
 
 /** 선 레이어 간의 교차 지점 분석 */
-async function analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers = null) {
+async function analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers = null, isSubTask = false) {
     if (!state.currentProjectGeoJSON) {
         try { await ensureGeoJSONLoaded(); }
         catch (e) { return showAlert("도면 데이터를 로드할 수 없습니다.", "error"); }
@@ -734,7 +747,7 @@ async function analyzeIntersections(targetLayer, useBookmark, isAudit, otherLaye
         });
         html += `</div></div>`;
 
-        showAiResponseModal(`교차분석: ${targetLayer}`, "분석 완료", "📚 공간 관계 분석");
+        showAiResponseModal(`교차분석: ${targetLayer}`, "분석 완료", "📚 공간 관계 분석", isSubTask);
         const contentEl = document.getElementById('aiAnswerContent');
         if (contentEl) contentEl.innerHTML = html;
 
@@ -744,7 +757,7 @@ async function analyzeIntersections(targetLayer, useBookmark, isAudit, otherLaye
 }
 
 /** 특정 포인트의 상세 좌표 및 정보 출력 */
-async function showPointInfo(query) {
+async function showPointInfo(query, isSubTask = false) {
     if (!state.currentProjectGeoJSON) {
         try { await ensureGeoJSONLoaded(); }
         catch (e) { return showAlert("도면 데이터를 로드할 수 없습니다.", "error"); }
@@ -802,7 +815,7 @@ async function showPointInfo(query) {
 
     html += `</tbody></table></div></div>`;
 
-    showAiResponseModal(`좌표조회: ${query}`, "조회 완료", "📊 포인트 상세 제원");
+    showAiResponseModal(`좌표조회: ${query}`, "조회 완료", "📊 포인트 상세 제원", isSubTask);
     const contentEl = document.getElementById('aiAnswerContent');
     if (contentEl) contentEl.innerHTML = html;
 }

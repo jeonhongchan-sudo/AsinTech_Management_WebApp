@@ -393,7 +393,6 @@ export async function askFollowUp() {
 /** AI 관련 버튼 상태 업데이트 */
 function updateAiButtonState(isLoading) {
     const followUpBtn = document.getElementById('btnAiFollowUp');
-    const saveBtn = document.getElementById('btnAiSave');
     const reRequestBtn = document.getElementById('btnAiReRequest');
     
     if (followUpBtn) {
@@ -401,17 +400,15 @@ function updateAiButtonState(isLoading) {
         followUpBtn.innerHTML = isLoading ? "⏳" : "💬";
         followUpBtn.title = isLoading ? "분석중" : "추가질문";
     }
-    if (saveBtn) saveBtn.disabled = isLoading; // saveBtn text is handled in saveAiKnowledge
     if (reRequestBtn) reRequestBtn.disabled = isLoading; // reRequestBtn text is handled in showAiResponseModal
 
 }
 
 /** AI 답변 모달 출력 */
-export function showAiResponseModal(query, answer, source) {
+export function showAiResponseModal(query, answer, source, isAppend = false) {
     const modal = document.getElementById('aiResponseModal');
     const content = document.getElementById('aiAnswerContent');
     const sourceEl = document.getElementById('aiAnswerSource');
-    const saveBtn = document.getElementById('btnAiSave');
     const reRequestBtn = document.getElementById('btnAiReRequest');
     
     const closeBtn = modal.querySelector('.close-btn');
@@ -441,11 +438,6 @@ export function showAiResponseModal(query, answer, source) {
     // [수정] 프로젝트 선택 여부(GIS 모드)를 기준으로 버튼 노출 결정
     const isProjectMode = !!state.currentCadProjectId;
 
-    // [삭제] 저장 및 복사 기능 제거 (사용자 요청 반영)
-    if (copyBtn) copyBtn.style.display = "none";
-    if (manualBtn) manualBtn.style.display = "none";
-    if (saveBtn) saveBtn.style.display = "none";
-    
     // 입력창 및 내용 초기화
     if (manualArea) manualArea.style.display = 'none';
     content.style.display = 'block';
@@ -462,13 +454,18 @@ export function showAiResponseModal(query, answer, source) {
         reRequestBtn.style.display = "none";
     }
 
-    state.lastAiQuery = query;
-    state.lastAiAnswer = answer;
-    
-    sourceEl.innerHTML = `<span class="ai-badge">${source}</span> 질문: ${query}`;
-    
-    // [수정] 텍스트 포맷터 적용 및 HTML 렌더링
-    content.innerHTML = formatResponseText(answer);
+    if (isAppend) {
+        state.lastAiAnswer += "\n\n---\n\n" + answer;
+        sourceEl.innerHTML += ` | <span class="ai-badge" style="background:#888;">${source}</span> ${query}`;
+        content.innerHTML += `<hr style="margin:30px 0; border:none; border-top:2px dashed #eee;">` + formatResponseText(answer);
+    } else {
+        state.lastAiQuery = query;
+        state.lastAiAnswer = answer;
+        sourceEl.innerHTML = `<span class="ai-badge">${source}</span> 질문: ${query}`;
+        
+        // [수정] 텍스트 포맷터 적용 및 HTML 렌더링
+        content.innerHTML = formatResponseText(answer);
+    }
 
     // [추가] 수식 렌더링 트리거
     renderMath(content);
