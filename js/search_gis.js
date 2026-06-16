@@ -33,14 +33,14 @@ export function openGisSearchModal() {
                         <span><b>[교차]</b> : 선 레이어 교차 분석</span>
                         <span><b>[사진]</b> : 사진 매칭 분석</span>
                         <span><b>[좌표]</b> : 상세 좌표 조회</span>
-                        <span><b>?</b> : 분석 리포트 출력</span>
+                        <span><b>📋</b> : 분석 리포트 출력</span>
                         <span><b>📍</b> : 지도 마커 표시</span>
                     </div>
                     <div style="color:#2c5282; font-weight:bold; font-size:10.5px; background:#ebf8ff; padding:5px 8px; border-radius:4px;">
-                        • 예: A~B[거리]? | 레이어?<br>
+                        • 예: A~B[거리]📋 | 레이어📋<br>
                         • 예: 제수변100!하단📍<br>
                         • 예: 260530-01📍<br>
-                        • 정리: 마지막은 항상 📍 또는 ?가 들어가야 검색이 됩니다 
+                        • 정리: 마지막은 항상 📍 또는 📋가 들어가야 문법 검색이 됩니다 
                     </div>
                 </div>
                 <div id="gisSearchShortcuts" style="margin-bottom:15px; display:grid; grid-template-columns: repeat(5, 1fr); gap:6px;">
@@ -50,7 +50,7 @@ export function openGisSearchModal() {
                     <button class="btn btn-outline btn-sm" id="btnShortcutCoord" style="padding:5px 2px; font-size:10px; border-color:#607D8B; color:#607D8B; font-weight:bold; white-space:nowrap;">[좌표]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutIntersection" style="padding:5px 2px; font-size:10px; border-color:#E91E63; color:#E91E63; font-weight:bold; white-space:nowrap;">[교차]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutBookmark" style="padding:5px 2px; font-size:10px; border-color:#FF9800; color:#FF9800; font-weight:bold; white-space:nowrap;">📍</button>
-                    <button class="btn btn-outline btn-sm" id="btnShortcutAudit" style="padding:5px 2px; font-size:10px; border-color:#e03131; color:#e03131; font-weight:bold; white-space:nowrap;">[분석(?)]</button>
+                    <button class="btn btn-outline btn-sm" id="btnShortcutAudit" style="padding:5px 2px; font-size:10px; border-color:#e03131; color:#e03131; font-weight:bold; white-space:nowrap;">[분석(📋)]</button>
                 </div>
                 <input type="text" id="gisSearchInput" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:15px; box-sizing:border-box; font-size:14px;" placeholder="검색어 또는 문법 입력...">
                 <div id="gisSearchActions" style="display:flex; gap:10px;">
@@ -126,7 +126,7 @@ export function openGisSearchModal() {
 
         modal.querySelector('#btnShortcutAudit').onclick = () => {
             const input = document.getElementById('gisSearchInput');
-            input.value += '?';
+            input.value += '📋';
             input.focus();
         };
 
@@ -149,9 +149,9 @@ export function openGisSearchModal() {
 /** GIS 문법 해석 및 실행 */
 export async function executeGisSearch(searchTerm) {
     const useBookmark = searchTerm.includes('📍');
-    const isAudit = searchTerm.includes('?');
+    const isAudit = searchTerm.includes('📋');
     
-    // [수정] 문법 기호(📍, ?)가 없는 경우 AI 자연어 분석 시도
+    // [수정] 문법 기호(📍, 📋)가 없는 경우 AI 자연어 분석 시도 (이제 ?가 질문에 포함되어도 AI가 처리함)
     if (!useBookmark && !isAudit) {
         showAlert("AI가 요청을 분석하고 있습니다...", "info");
         // 현재 도면에서 감지된 실제 레이어 목록을 맥락으로 제공
@@ -168,13 +168,13 @@ export async function executeGisSearch(searchTerm) {
                 console.log(`[GIS 문법 변환] ${translated}`);
 
                 // 변환된 문법에 기호가 포함되어 있다면 재귀적으로 다시 실행
-                if (translated.includes('📍') || translated.includes('?')) {
+                if (translated.includes('📍') || translated.includes('📋')) {
                     return executeGisSearch(translated);
                 }
             }
         } catch (e) { console.error("GIS 자연어 분석 오류:", e); }
         
-        return showAlert("출력 형식을 선택하세요 (📍: 지도, ?: 리스트)", "info");
+        return showAlert("출력 형식을 선택하세요 (📍: 지도, 📋: 리스트)", "info");
     }
 
     // [최적화] 사용자가 실행 버튼을 누른 이 시점에만 데이터를 로드합니다.
@@ -184,7 +184,7 @@ export async function executeGisSearch(searchTerm) {
         return showAlert("분석 데이터를 로드할 수 없습니다. 관리자에게 문의하세요.", "error");
     }
 
-    let cleanInput = searchTerm.replace(/[📍?]/g, '').trim();
+    let cleanInput = searchTerm.replace(/[📍📋]/g, '').trim();
 
     if (cleanInput.includes('~') && cleanInput.includes('[거리]')) {
         const pointNames = cleanInput.replace(/\[거리\]/g, '').replace(/\^/g, '').split(/[~+]/).map(p => p.trim()).filter(p => p !== "");
