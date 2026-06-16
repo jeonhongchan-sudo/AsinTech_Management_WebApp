@@ -186,6 +186,19 @@ export async function executeGisSearch(searchTerm) {
 
     let cleanInput = searchTerm.replace(/[📍📋]/g, '').trim();
 
+    // [개선] 복합 문법(!, &, 공백 등)이 포함된 상태에서도 분석 기능을 수행할 수 있도록 접미사 기반 분리
+    const analysisSuffixes = ['[거리]', '[사진]', '[교차]', '[좌표]'];
+    let targetQuery = cleanInput;
+    let foundSuffix = null;
+
+    for (const s of analysisSuffixes) {
+        if (cleanInput.includes(s)) {
+            foundSuffix = s;
+            targetQuery = cleanInput.replace(s, '').trim();
+            break;
+        }
+    }
+
     if (cleanInput.includes('~') && cleanInput.includes('[거리]')) {
         const pointNames = cleanInput.replace(/\[거리\]/g, '').replace(/\^/g, '').split(/[~+]/).map(p => p.trim()).filter(p => p !== "");
         if (pointNames.length >= 2) return analyzePointToPointDistance(pointNames, useBookmark, isAudit);
@@ -194,32 +207,30 @@ export async function executeGisSearch(searchTerm) {
     const distMatch = cleanInput.match(/(.+?)\^?\[거리\]>([\d.]+)/);
     if (distMatch) return analyzeDistanceGap(distMatch[1].trim(), parseFloat(distMatch[2]), useBookmark, isAudit);
 
-    if (cleanInput.includes('사진')) {
-        // [수정] [사진] 또는 ^사진 문법 모두를 지원하며, 레이어명에서 불필요한 기호([], ^)를 정제합니다.
-        const targetLayer = cleanInput.split('사진')[0].replace(/[\[\]^]/g, '').trim();
-        if (targetLayer) return analyzePhotoMismatch(targetLayer, useBookmark, isAudit);
+    if (foundSuffix === '[사진]') {
+        return analyzePhotoMismatch(targetQuery, useBookmark, isAudit);
     }
 
-    if (cleanInput.endsWith('[거리]')) {
-        // [수정] 레이어명에 [ ]가 포함되어 있어도 정확하게 레이어 이름만 추출하도록 개선
-        const targetLayer = cleanInput.replace('[거리]', '').replace(/[\[\]^]/g, '').trim();
-        return analyzeTotalDistance(targetLayer, useBookmark, isAudit);
+    if (foundSuffix === '[거리]') {
+        return analyzeTotalDistance(targetQuery, useBookmark, isAudit);
     }
 
-    if (cleanInput.endsWith('[교차]')) {
-        // [레이어1][레이어2][교차] 형태에서 각 대괄호 내용 추출
+    if (foundSuffix === '[교차]') {
+        // [레이어1][레이어2][교차] 형태인 경우 다중 레이어 분석으로 처리
         const layerGroups = cleanInput.match(/\[(.*?)\]/g) || [];
         const layerNames = layerGroups.map(g => g.slice(1, -1).trim()).filter(l => l !== '교차');
         
-        if (layerNames.length === 0) return showAlert("기준 레이어를 입력하세요. 예: [레이어][교차]?", "info");
-        const targetLayer = layerNames[0];
-        const otherLayers = layerNames.length > 1 ? layerNames.slice(1) : null;
-        return analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers);
+        if (layerNames.length > 0) {
+            const targetLayer = layerNames[0];
+            const otherLayers = layerNames.length > 1 ? layerNames.slice(1) : null;
+            return analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers);
+        }
+        // 대괄호가 없는 복합 쿼리 형태인 경우 (예: 제수변!하단[교차])
+        return analyzeIntersections(targetQuery, useBookmark, isAudit);
     }
 
-    if (cleanInput.endsWith('[좌표]')) {
-        const pointName = cleanInput.replace('[좌표]', '').replace(/[\[\]^]/g, '').trim();
-        return showPointInfo(pointName);
+    if (foundSuffix === '[좌표]') {
+        return showPointInfo(targetQuery);
     }
 
     executePointSearch(cleanInput, useBookmark, isAudit);
@@ -227,15 +238,26 @@ export async function executeGisSearch(searchTerm) {
 
 /** 포인트 검색 실행 */
 function executePointSearch(searchTerm, useBookmark, isAudit) {
-    // [수정] 검색어에 포함된 시각적 구분자 ^ 제거 (가독성용 기호 무시)
+    // [개선] 복합 쿼리 필터링 통합 지원
+    const matches = filterFeaturesByComplexQuery(searchTerm);
+
+    if (matches.length === 0) return showAlert("일치하는 포인트를 찾을 수 없습니다.", "info");
+
+    if (useBookmark) renderSearchResults(matches);
+    if (!isAudit) return;
+
+    renderGisResultList(searchTerm, matches, useBookmark);
+}
+
+/** [신규] 전역 복합 쿼리 필터링 유틸리티: 레이어 및 속성값을 통합 검색하여 피처 반환 */
+export function filterFeaturesByComplexQuery(searchTerm, geometryType = 'Point') {
     const cleanSearch = searchTerm.replace(/\^/g, '').trim();
 
     // GeoJSON 데이터를 최우선으로 사용하며, 없을 경우에만 현재 화면(Map)의 피처를 검색합니다.
     const features = (state.currentProjectGeoJSON && state.currentProjectGeoJSON.features) 
-        ? state.currentProjectGeoJSON.features.filter(f => f.geometry && f.geometry.type === 'Point')
-        : (state.cadMap ? state.cadMap.querySourceFeatures('cad_source', { sourceLayer: 'point' }) : []);
+        ? state.currentProjectGeoJSON.features.filter(f => f.geometry && (geometryType === 'Any' || f.geometry.type.includes(geometryType)))
+        : (state.cadMap ? state.cadMap.querySourceFeatures('cad_source', { sourceLayer: (geometryType === 'Any' ? 'line' : geometryType.toLowerCase()) }) : []);
 
-    // [추가] [레이어명] 키워드 패턴 분리 (예: [도로경계] 260424-10)
     const layerMatch = cleanSearch.match(/^\[(.+?)\]\s*(.*)$/);
     let targetLayer = null;
     let keyword = cleanSearch;
@@ -245,24 +267,18 @@ function executePointSearch(searchTerm, useBookmark, isAudit) {
         keyword = layerMatch[2].trim();
     }
 
-    const matches = features.filter(f => {
+    return features.filter(f => {
+        const props = f.properties;
         // 1. 레이어 필터가 있는 경우, 해당 레이어인지 확인
-        if (targetLayer && f.properties.layer !== targetLayer) return false;
+        if (targetLayer && props.layer !== targetLayer) return false;
 
         // 2. 검색 키워드가 없는 경우 (레이어만 [ ]로 들어온 경우), 해당 레이어 모든 객체 포함
         if (!keyword) return true;
 
-        // 3. 키워드가 있는 경우, 전체 속성값에서 복합 쿼리 매칭 실행
-        const combinedValues = Object.values(f.properties).join(' ');
+        // 3. 키워드가 있는 경우, 레이어명 포함 전체 속성값에서 복합 쿼리 매칭 실행
+        const combinedValues = Object.values(props).join(' ');
         return matchComplexQuery(combinedValues, keyword) >= 1.0; 
     });
-
-    if (matches.length === 0) return showAlert("일치하는 포인트가 없습니다.", "info");
-
-    if (useBookmark) renderSearchResults(matches);
-    if (!isAudit) return;
-
-    renderGisResultList(cleanSearch, matches, useBookmark);
 }
 
 /** 레이어 포인트와 사진 저장소 미스매칭 분석 */
@@ -275,9 +291,8 @@ async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit) {
     
     showAlert(`${targetLayer} 레이어 사진 매칭 분석 중...`, "info");
 
-    const points = state.currentProjectGeoJSON.features.filter(f => 
-        f.geometry && f.geometry.type === 'Point' && matchComplexQuery(f.properties.layer, targetLayer) >= 10.0
-    );
+    // [수정] 단순 레이어 비교 대신 복합 쿼리 필터 적용
+    const points = filterFeaturesByComplexQuery(targetLayer, 'Point');
 
     const photos = state.projectPhotos;
     if (!photos || photos.length === 0) {
@@ -408,11 +423,10 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit) {
     if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
     if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
 
-    const lineFeatures = state.currentProjectGeoJSON.features.filter(f => {
-        if (!f.geometry || !f.properties.layer) return false;
-        const isLineOrPoly = f.geometry.type.includes('LineString') || f.geometry.type.includes('Polygon');
-        return isLineOrPoly && matchComplexQuery(f.properties.layer, targetLayer) >= 10.0;
-    });
+    // [수정] 복합 쿼리 필터 적용 (선/면 객체 대상)
+    const lineFeatures = filterFeaturesByComplexQuery(targetLayer, 'Any').filter(f => 
+        f.geometry && (f.geometry.type.includes('LineString') || f.geometry.type.includes('Polygon'))
+    );
 
     if (lineFeatures.length === 0) return showModalMessage("📏 분석 불가", `${targetLayer} 레이어에 선형 객체가 존재하지 않습니다.`, 'info');
 
@@ -525,9 +539,8 @@ async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit) 
     if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
     showAlert(`${targetLayer} 레이어 거리 분석 중...`, "info");
 
-    const points = state.currentProjectGeoJSON.features.filter(f => 
-        f.geometry.type === 'Point' && matchComplexQuery(f.properties.layer, targetLayer) >= 10.0
-    );
+    // [수정] 복합 쿼리 필터 적용
+    const points = filterFeaturesByComplexQuery(targetLayer, 'Point');
 
     if (points.length < 2) return showModalMessage("📏 분석 불가", "해당 레이어에 포인트가 2개 이상 존재해야 분석이 가능합니다.", 'info');
 
@@ -665,9 +678,8 @@ async function analyzeIntersections(targetLayer, useBookmark, isAudit, otherLaye
     if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
 
     // 전체 데이터 중 선형 객체 필터링
-    let lineFeatures = state.currentProjectGeoJSON.features.filter(f => 
-        f.geometry && f.geometry.type.includes('LineString')
-    );
+    // [수정] 타겟 레이어/쿼리에 맞는 선형 객체 추출
+    let lineFeatures = filterFeaturesByComplexQuery(targetLayer, 'LineString');
 
     // [최적화] 특정 비교 레이어들이 지정된 경우, 전송 데이터 크기를 줄이기 위해 필터링
     if (otherLayers && otherLayers.length > 0) {
@@ -738,15 +750,8 @@ async function showPointInfo(query) {
         catch (e) { return showAlert("도면 데이터를 로드할 수 없습니다.", "error"); }
     }
 
-    const features = state.currentProjectGeoJSON.features.filter(f => f.geometry && f.geometry.type === 'Point');
-    
-    // [수정] 복합 문법(&, 공백 등)을 지원하도록 matchComplexQuery 적용 및 필터링
-    const matches = features.filter(f => {
-        const props = f.properties;
-        // 텍스트 속성뿐만 아니라 전체 속성값에서 검색
-        const combinedValues = Object.values(props).join(' ');
-        return matchComplexQuery(combinedValues, query) >= 1.0;
-    });
+    // [수정] 포인트 검색과 동일한 복합 쿼리 로직 사용
+    const matches = filterFeaturesByComplexQuery(query, 'Point');
 
     if (matches.length === 0) return showAlert(`포인트/검색어 '${query}'에 일치하는 결과가 없습니다.`, "info");
 
@@ -760,14 +765,14 @@ async function showPointInfo(query) {
             <h3 style="color:#2196F3; margin-bottom:15px; border-bottom:2px solid #2196F3; padding-bottom:10px;">📊 포인트 상세 좌표 조회</h3>
             <div style="font-size:12px; color:#666; margin-bottom:10px; background:#f8f9fa; padding:8px; border-radius:4px;">적용 좌표계: <strong>${crs}</strong></div>
             <div style="overflow-x:auto; border:1px solid #dee2e6; border-radius:8px;">
-                <table style="width:100%; border-collapse:collapse; font-size:12px; min-width:350px;">
+                <table style="width:100%; border-collapse:collapse; font-size:11px; min-width:380px; table-layout: auto;">
                     <thead>
                         <tr style="background:#f1f3f5; border-bottom:2px solid #dee2e6;">
-                            <th style="padding:10px; text-align:left;">명칭</th>
-                            <th style="padding:10px; text-align:right;">TM X (N)</th>
-                            <th style="padding:10px; text-align:right;">TM Y (E)</th>
-                            <th style="padding:10px; text-align:right;">높이(Z)</th>
-                            <th style="padding:10px; text-align:center;">이동</th>
+                            <th style="padding:8px; text-align:left; white-space:nowrap;">명칭</th>
+                            <th style="padding:8px; text-align:right; white-space:nowrap;">TM X (N)</th>
+                            <th style="padding:8px; text-align:right; white-space:nowrap;">TM Y (E)</th>
+                            <th style="padding:8px; text-align:right; white-space:nowrap;">높이(Z)</th>
+                            <th style="padding:8px; text-align:center; white-space:nowrap;">이동</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -783,11 +788,11 @@ async function showPointInfo(query) {
 
         html += `
             <tr style="border-bottom:1px solid #eee;">
-                <td style="padding:10px; font-weight:bold; color:#333; max-width:100px; word-break:break-all;">${label}</td>
-                <td style="padding:10px; text-align:right; font-family:monospace; color:#1864ab;">${tmX}</td>
-                <td style="padding:10px; text-align:right; font-family:monospace; color:#1864ab;">${tmY}</td>
-                <td style="padding:10px; text-align:right; font-family:monospace;">${z.toFixed(3)}</td>
-                <td style="padding:10px; text-align:center;">
+                <td style="padding:8px; font-weight:bold; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100px;">${label}</td>
+                <td style="padding:8px; text-align:right; font-family:monospace; color:#1864ab; white-space:nowrap;">${tmX}</td>
+                <td style="padding:8px; text-align:right; font-family:monospace; color:#1864ab; white-space:nowrap;">${tmY}</td>
+                <td style="padding:8px; text-align:right; font-family:monospace; white-space:nowrap;">${z.toFixed(3)}</td>
+                <td style="padding:8px; text-align:center;">
                     <button class="btn btn-info btn-sm" style="padding:4px 8px; font-size:11px;" 
                         onclick="window.showPointLocation(${coords[0]}, ${coords[1]}, '${label}', '${p.handle}'); window.closeAiResponseModal();">📍</button>
                 </td>
