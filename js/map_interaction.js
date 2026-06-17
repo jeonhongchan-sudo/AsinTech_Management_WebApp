@@ -167,7 +167,8 @@ async function handleMapClick(e) {
     }
 
     if (state.isDistanceMode) {
-        handleDistanceClick(targetFeature.geometry.coordinates);
+        // [수정] 단순 좌표가 아닌, handle ID로 연결된 정밀 GeoJSON 피처를 직접 전달
+        handleDistanceClick(targetFeature.geometry.coordinates, targetFeature);
         return;
     }
     openMemoPopup(targetFeature);

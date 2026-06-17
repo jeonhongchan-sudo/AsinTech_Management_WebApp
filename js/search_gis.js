@@ -43,8 +43,8 @@ export function openGisSearchModal() {
                         • 정리: 마지막은 항상 📍 또는 📋가 들어가야 문법 검색이 됩니다 
                     </div>
                 </div>
-                <div id="gisSearchShortcuts" style="margin-bottom:15px; display:grid; grid-template-columns: repeat(5, 1fr); gap:6px;">
-                    <button class="btn btn-outline btn-sm" id="btnShortcutLayer" style="padding:5px 2px; font-size:10px; border-color:#2196F3; color:#2196F3; font-weight:bold; white-space:nowrap;">[Layer]</button>
+                <div id="gisSearchShortcuts" style="margin-bottom:15px; display:grid; grid-template-columns: repeat(4, 1fr); gap:6px;">
+                    <button class="btn btn-outline btn-sm" id="btnShortcutLayer" style="padding:5px 2px; font-size:11px; border-color:#2196F3; color:#2196F3; font-weight:bold; white-space:nowrap;">[Layer]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutPhoto" style="padding:5px 2px; font-size:10px; border-color:#4CAF50; color:#4CAF50; font-weight:bold; white-space:nowrap;">[사진]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutDistance" style="padding:5px 2px; font-size:10px; border-color:#9C27B0; color:#9C27B0; font-weight:bold; white-space:nowrap;">[거리]</button>
                     <button class="btn btn-outline btn-sm" id="btnShortcutCoord" style="padding:5px 2px; font-size:10px; border-color:#607D8B; color:#607D8B; font-weight:bold; white-space:nowrap;">[좌표]</button>
@@ -148,8 +148,11 @@ export function openGisSearchModal() {
 
 /** GIS 문법 해석 및 실행 */
 export async function executeGisSearch(searchTerm, isSubTask = false) {
-    const useBookmark = searchTerm.includes('📍');
-    const isAudit = searchTerm.includes('📋');
+    // [추가] 직관적인 한글 명령어 정규화 ([분석] -> 📋, [지도] -> 📍)
+    let normalizedTerm = searchTerm.replace(/\[분석\]/g, '📋').replace(/\[지도\]/g, '📍');
+    
+    const useBookmark = normalizedTerm.includes('📍');
+    const isAudit = normalizedTerm.includes('📋');
     
     // [수정] 문법 기호(📍, 📋)가 없는 경우 AI 자연어 분석 시도 (이제 ?가 질문에 포함되어도 AI가 처리함)
     if (!useBookmark && !isAudit) {
@@ -158,7 +161,7 @@ export async function executeGisSearch(searchTerm, isSubTask = false) {
         const layerList = Array.from(cadLayers).join(', ');
         
         try {
-            const res = await callAiEdge(searchTerm, `사용 가능한 레이어 목록: ${layerList}`, 'translate_gis');
+            const res = await callAiEdge(normalizedTerm, `사용 가능한 레이어 목록: ${layerList}`, 'translate_gis');
             if (res.success && res.answer) {
                 let translated = res.answer.trim();
                 console.log(`[GIS AI 원문] ${translated}`);
@@ -178,8 +181,8 @@ export async function executeGisSearch(searchTerm, isSubTask = false) {
     }
 
     // [추가] 다중 작업 오케스트레이션 (&& 기호 처리)
-    if (searchTerm.includes('&&')) {
-        const tasks = searchTerm.split('&&').map(t => t.trim()).filter(t => t);
+    if (normalizedTerm.includes('&&')) {
+        const tasks = normalizedTerm.split('&&').map(t => t.trim()).filter(t => t);
         if (tasks.length > 0) {
             // 첫 번째 작업 시작 전 모달 초기화, 이후 작업들은 append 모드로 동작
             if (!isSubTask) closeAiResponseModal(); 
@@ -197,7 +200,7 @@ export async function executeGisSearch(searchTerm, isSubTask = false) {
         return showAlert("분석 데이터를 로드할 수 없습니다. 관리자에게 문의하세요.", "error");
     }
 
-    let cleanInput = searchTerm.replace(/[📍📋]/g, '').trim();
+    let cleanInput = normalizedTerm.replace(/[📍📋]/g, '').trim();
 
     // [개선] 복합 문법(!, &, 공백 등)이 포함된 상태에서도 분석 기능을 수행할 수 있도록 접미사 기반 분리
     const analysisSuffixes = ['[거리]', '[사진]', '[교차]', '[좌표]'];
