@@ -9,7 +9,7 @@ export function toggleDistanceMode(forceValue) {
     if (chk) chk.checked = state.isDistanceMode;
     
     if (state.isDistanceMode) {
-        const mode = confirm("거리 측정 방식을 선택하세요.\n\n[확인]: 노선(관로) 따라 측정\n[취소]: 직선 거리 측정") ? 'route' : 'straight';
+        const mode = confirm("거리 측정 방식을 선택하세요.\n\n[확인]: 도상(관로) 따라 측정\n[취소]: 직선 거리 측정") ? 'map' : 'straight';
         state.distanceMeasureMode = mode;
         if (state.cadMap) state.cadMap.getCanvas().style.cursor = 'crosshair';
         
@@ -39,6 +39,11 @@ export async function handleDistanceClick(coords, feature = null) {
     else {
         const start = state.distanceStartPoint;
         const end = { lon: useCoords[0], lat: useCoords[1] };
+        
+        // 시작점과 끝점이 동일한 좌표인 경우(중복 클릭) 계산 방지
+        if (Math.abs(start.lon - end.lon) < 0.00000001 && Math.abs(start.lat - end.lat) < 0.00000001) {
+            return;
+        }
         
         const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8, anchor: 'center' })
             .setLngLat([lon, lat])
@@ -73,11 +78,11 @@ export async function handleDistanceClick(coords, feature = null) {
         
         popupContent.appendChild(closeBtn);
 
-        // [추가] 두 점을 공유하는 노선 자동 찾기 로직 (노선 모드일 때만)
-        if (state.distanceMeasureMode === 'route') {
+        // [추가] 두 점을 공유하는 도상 경로 자동 찾기 로직 (도상 모드일 때만)
+        if (state.distanceMeasureMode === 'map') {
             if (!state.currentProjectGeoJSON) await ensureGeoJSONLoaded();
 
-            const findSharedRoute = (s, e) => {
+            const findSharedMapPath = (s, e) => {
                 // [개선] 유사 위치가 아닌, 정밀 좌표가 선의 정점(Vertex)과 '완전히 일치'하는 레이어 탐색
                 const getLayersWithVertex = (lon, lat) => {
                     const matchedLayers = new Set();
@@ -103,7 +108,7 @@ export async function handleDistanceClick(coords, feature = null) {
                 
                 if (common.length === 0) return null;
 
-                // 3. 가장 적합한 레이어(첫 번째)의 모든 선분을 베이스라인으로 설정
+                // 3. 가장 적합한 레이어의 모든 선분을 베이스라인으로 설정
                 const layerName = common[0];
                 return {
                     name: layerName,
@@ -113,7 +118,7 @@ export async function handleDistanceClick(coords, feature = null) {
                 };
             };
 
-            state.distanceRouteBaseline = findSharedRoute(start, end);
+            state.distanceMapBaseline = findSharedMapPath(start, end);
         }
 
         // [수정] 결과 팝업이 측정 지점(마커)을 가리지 않도록 선의 중간(Midpoint) 좌표를 계산하여 표시
@@ -134,19 +139,35 @@ export async function handleDistanceClick(coords, feature = null) {
                 throw new Error("좌표계 정보 누락");
             }
 
-            if (state.distanceMeasureMode === 'route') {
-                if (!state.distanceRouteBaseline) {
-                    throw new Error("공유 노선을 찾을 수 없음");
+            if (state.distanceMeasureMode === 'map') {
+                if (!state.distanceMapBaseline) {
+                    throw new Error("공유 경로를 찾을 수 없음");
                 }
-                // 노선 거리 계산 RPC 호출
-                const dist = await callSupabaseDirect('rpc/calculate_route_distance', 'POST', {
-                    baseline_geoms: state.distanceRouteBaseline.features,
+                // [수정] 도상 거리 및 실제 경로 Geometry를 함께 요청
+                const res = await callSupabaseDirect('rpc/calculate_route_distance', 'POST', {
+                    baseline_geoms: state.distanceMapBaseline.features,
                     start_pt: [start.lon, start.lat],
                     end_pt: [end.lon, end.lat],
                     source_crs: state.currentProjectSourceCrs
                 });
-                const layerName = state.distanceRouteBaseline.name;
-                popupContent.querySelector('.dist-val').innerText = `[${layerName}]\n🛤️ ${dist.toFixed(3)}m`;
+
+                const dist = res.dist || 0;
+                
+                // [추가] 단순 직선 대신 실제 계산에 사용된 도상 경로(중간점 포함)를 지도에 표시
+                if (res.geom) {
+                    const source = state.cadMap.getSource(lineId);
+                    if (source) source.setData(res.geom);
+                }
+
+                const layerName = state.distanceMapBaseline.name;
+                
+                // [수정] 아주 미세한 거리라도 계산이 되었다면 표시 (정밀도 유지)
+                if (dist > 0.0001) {
+                    popupContent.querySelector('.dist-val').innerText = `[${layerName}]\n🗺️ ${dist.toFixed(3)}m`;
+                } else {
+                    popupContent.querySelector('.dist-val').innerText = `도상 경로 단절`;
+                    popupContent.querySelector('.dist-val').style.color = '#dc3545';
+                }
             } else {
                 // 기존 직선 거리 계산
                 const segmentFeature = {
@@ -163,9 +184,9 @@ export async function handleDistanceClick(coords, feature = null) {
                 } else throw new Error();
             }
         } catch (err) {
-            if (err.message === "공유 노선을 찾을 수 없음") {
-                popupContent.querySelector('.dist-val').innerText = `공유 노선 없음`;
-                showAlert("두 점을 연결하는 관로(선)를 찾을 수 없습니다. 직선 거리를 확인하세요.", "warning");
+            if (err.message === "공유 경로를 찾을 수 없음") {
+                popupContent.querySelector('.dist-val').innerText = `공유 경로 없음`;
+                showAlert("두 점을 연결하는 도상 경로를 찾을 수 없습니다. 직선 거리를 확인하세요.", "warning");
             } else if (err.message === "좌표계 정보 누락") {
                 popupContent.querySelector('.dist-val').innerText = `좌표계 오류`;
                 showAlert("이 프로젝트에 설정된 좌표계(EPSG) 정보가 없습니다. 도면 변환 시 좌표계를 다시 설정해 주세요.", "error");
@@ -181,7 +202,7 @@ export async function handleDistanceClick(coords, feature = null) {
 /** 거리 측정 초기화 */
 export function clearDistanceMeasurement() {
     state.distanceStartPoint = null;
-    state.distanceRouteBaseline = null;
+    state.distanceMapBaseline = null;
     if (state.distanceMarkers) {
         state.distanceMarkers.forEach(item => {
             if (item.remove) {

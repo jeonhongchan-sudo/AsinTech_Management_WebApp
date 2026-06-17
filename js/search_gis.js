@@ -28,7 +28,7 @@ export function openGisSearchModal() {
                         <span><b>&</b> : 또는 (OR)</span>
                         <span><b>공백</b> : 그리고 (AND)</span>
                         <span><b>!</b> : 검색 제외 (NOT)</span>
-                        <span><b>~</b> : ~에서 (지점연결)</span>
+                        <span><b>~</b> : 도상 거리 (지표연결)</span>
                         <span><b>[거리]</b> : 연장/거리 계산</span>
                         <span><b>[교차]</b> : 선 레이어 교차 분석</span>
                         <span><b>[사진]</b> : 사진 매칭 분석</span>
