@@ -287,13 +287,20 @@ export async function toggleUserAccess(projectId, shouldAllow) {
         if (shouldAllow) {
             await callSupabaseDirect(`project_shares?project_id=eq.${projectId}&username=eq.${encodeURIComponent(username)}`, 'DELETE');
         } else {
+            // 기존 레코드 먼저 삭제 후 추가 (중복 방지)
+            await callSupabaseDirect(`project_shares?project_id=eq.${projectId}&username=eq.${encodeURIComponent(username)}`, 'DELETE');
             await callSupabaseDirect('project_shares', 'POST', { 
                 project_id: projectId, 
                 username: username 
-            }, { 'Prefer': 'resolution=ignore-duplicates' });
+            });
         }
-        loadProjects();
+        // 현재 유저의 권한이 변경된 경우에만 프로젝트 목록 갱신
+        if (username === state.currentUser) {
+            const { loadProjects } = await import('./managers.js');
+            loadProjects();
+        }
     } catch (e) {
+        console.error('toggleUserAccess error:', e);
         showAlert("권한 변경 실패", "error");
     }
 }
@@ -311,15 +318,22 @@ export async function bulkToggleUserAccess(shouldAllow) {
         } else {
             const projects = await callSupabaseDirect('cad_projects?select=id');
             if (projects && projects.length > 0) {
+                // 기존 레코드 먼저 삭제 후 추가 (중복 방지)
+                await callSupabaseDirect(`project_shares?username=eq.${encodeURIComponent(username)}`, 'DELETE');
                 const payload = projects.map(p => ({ project_id: p.id, username: username }));
-                await callSupabaseDirect('project_shares', 'POST', payload, { 'Prefer': 'resolution=ignore-duplicates' });
+                await callSupabaseDirect('project_shares', 'POST', payload);
             }
         }
         showAlert(shouldAllow ? "모든 프로젝트가 활성화되었습니다." : "모든 프로젝트가 비활성화되었습니다.");
-        loadProjects();
+        // 현재 유저의 권한이 변경된 경우에만 프로젝트 목록 갱신
+        if (username === state.currentUser) {
+            const { loadProjects } = await import('./managers.js');
+            loadProjects();
+        }
         loadRoomUserAccessData(username);
     } catch (e) {
-        showAlert("일괄 변경 실패", "error");
+        console.error('bulkToggleUserAccess error:', e);
+        showAlert("일괄 변경 실패: " + e.message, "error");
     }
 }
 
