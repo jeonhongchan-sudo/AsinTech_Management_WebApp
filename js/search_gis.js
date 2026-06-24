@@ -184,12 +184,28 @@ export async function executeGisSearch(searchTerm, isSubTask = false) {
     if (normalizedTerm.includes('&&')) {
         const tasks = normalizedTerm.split('&&').map(t => t.trim()).filter(t => t);
         if (tasks.length > 0) {
-            // 첫 번째 작업 시작 전 모달 초기화, 이후 작업들은 append 모드로 동작
+            // 일반 다중 작업: 각 작업 순차 실행 (서로 다른 질문)
             if (!isSubTask) closeAiResponseModal(); 
             for (let i = 0; i < tasks.length; i++) {
                 await executeGisSearch(tasks[i], true);
             }
             return;
+        }
+    }
+
+    // [추가] 합산 작업 오케스트레이션 (+ 기호 처리)
+    if (normalizedTerm.includes('+')) {
+        const tasks = normalizedTerm.split('+').map(t => t.trim()).filter(t => t);
+        if (tasks.length > 0) {
+            // 모든 작업이 [거리]📋인 경우 거리 합산
+            const allDistanceTasks = tasks.every(t => t.includes('[거리]') && t.includes('📋'));
+            
+            if (allDistanceTasks && tasks.length > 1) {
+                return executeMultiLayerDistanceSummation(tasks, isSubTask);
+            }
+            
+            // 다른 합산 작업은 추후 확장 가능
+            return showAlert("+ 연산자는 현재 [거리]📋 합산만 지원합니다.", "info");
         }
     }
 
@@ -432,6 +448,114 @@ async function analyzePointToPointDistance(pointNames, useBookmark, isAudit, isS
     } catch (e) {
         showAlert("거리 계산 실패: " + e.message, "error");
     }
+}
+
+/** 다중 레이어 거리 합산 (&& 연결된 [거리]📋 작업) */
+async function executeMultiLayerDistanceSummation(tasks, isSubTask = false) {
+    if (!state.currentProjectGeoJSON) return showAlert("도면 데이터가 로드되지 않았습니다.", "error");
+    if (!state.currentProjectSourceCrs) return showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
+
+    showAlert("다중 레이어 거리 합산 중...", "info");
+
+    const results = [];
+    let grandTotal = 0;
+
+    for (const task of tasks) {
+        const cleanTask = task.replace(/[📍📋]/g, '').replace('[거리]', '').trim();
+        
+        // 복합 쿼리 필터 적용
+        const lineFeatures = filterFeaturesByComplexQuery(cleanTask, 'Any').filter(f => 
+            f.geometry && (f.geometry.type.includes('LineString') || f.geometry.type.includes('Polygon'))
+        );
+
+        if (lineFeatures.length === 0) {
+            results.push({ layer: cleanTask, total: 0, count: 0, error: '선형 객체 없음' });
+            continue;
+        }
+
+        // 로컬 속성 우선 합산
+        let localSum = 0;
+        let hasLocalLength = false;
+
+        lineFeatures.forEach(f => {
+            const p = f.properties;
+            const val = p.length_m || p.length || p.Length || p.LENGTH || p.LEN || p.len || p.dist || p.distance;
+            if (val !== undefined && val !== null && !isNaN(parseFloat(val))) {
+                localSum += parseFloat(val);
+                hasLocalLength = true;
+            }
+        });
+
+        // PostGIS 계산 (로컬 속성이 없는 경우)
+        if (!hasLocalLength) {
+            const processedLineFeatures = lineFeatures.map(f => {
+                if (f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')) {
+                    const ring = f.geometry.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry.coordinates[0][0];
+                    return { ...f, geometry: { type: 'LineString', coordinates: ring }, _is_poly: true };
+                }
+                return f;
+            });
+
+            const chunkSize = 500;
+            const chunkResults = [];
+            for (let i = 0; i < processedLineFeatures.length; i += chunkSize) {
+                const chunk = processedLineFeatures.slice(i, i + chunkSize);
+                const chunkResultsData = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+                    geoms: chunk,
+                    source_crs: state.currentProjectSourceCrs
+                });
+                if (chunkResultsData && Array.isArray(chunkResultsData)) {
+                    chunkResults.push(...chunkResultsData);
+                }
+            }
+
+            const handleGroups = new Map();
+            chunkResults.forEach((res) => {
+                const origin = processedLineFeatures.find(f => f.properties.handle === res.handle);
+                const isPoly = origin?._is_poly || false;
+                if (!handleGroups.has(res.handle)) {
+                    const feat = lineFeatures.find(f => f.properties.handle === res.handle);
+                    handleGroups.set(res.handle, { sum: 0, isPoly: isPoly });
+                }
+                handleGroups.get(res.handle).sum += res.length_m;
+            });
+
+            handleGroups.forEach((data) => {
+                if (!data.isPoly) localSum += data.sum;
+            });
+        }
+
+        results.push({ layer: cleanTask, total: localSum, count: lineFeatures.length });
+        grandTotal += localSum;
+    }
+
+    // 결과 렌더링
+    let html = `<div style="padding:5px;"><h3 style="color:#2c3e50; margin-bottom:15px; border-bottom:2px solid #2c3e50; padding-bottom:10px;">📏 다중 레이어 거리 합산</h3>`;
+    html += `<div style="background:#f1f8f9; padding:20px; border-radius:12px; text-align:center; border:1px solid #a3d2ca; margin-bottom:20px;">`;
+    html += `<div style="font-size:13px; color:#666; margin-bottom:8px;">총 합계 (Grand Total)</div>`;
+    html += `<div style="font-size:32px; font-weight:bold; color:#07689f;">${grandTotal.toFixed(2)} m</div>`;
+    html += `<div style="font-size:11px; color:#999; margin-top:8px;">기준 좌표계: ${state.currentProjectSourceCrs}</div>`;
+    html += `</div>`;
+
+    html += `<div style="font-size:12px; font-weight:bold; margin-bottom:10px; color:#555;">레이어별 상세 내역</div>`;
+    html += `<div style="border:1px solid #ddd; border-radius:8px; overflow:hidden; background:#fff;">`;
+    
+    results.forEach(r => {
+        if (r.error) {
+            html += `<div style="padding:12px; border-bottom:1px solid #eee; color:#e03131; font-size:12px;">⚠️ ${r.layer}: ${r.error}</div>`;
+        } else {
+            html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid #eee;">
+                <span style="font-size:12px; color:#333;">${r.layer} <small style="color:#999;">(${r.count}건)</small></span>
+                <span style="font-size:13px; font-weight:bold; color:#16a085;">${r.total.toFixed(2)} m</span>
+            </div>`;
+        }
+    });
+    
+    html += `</div></div>`;
+
+    showAiResponseModal("다중 레이어 거리 합산", "분석 결과", "📊 공간 통계 분석", isSubTask);
+    const contentEl = document.getElementById('aiAnswerContent');
+    if (contentEl) contentEl.innerHTML = html;
 }
 
 /** 레이어별 전체 거리 산출 */
