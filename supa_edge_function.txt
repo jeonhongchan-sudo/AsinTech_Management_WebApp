@@ -1,13 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
-// 환경 변수(Secrets)에서 안전하게 가져오도록 변경
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
-const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); // 서비스 롤 키 사용 권장
-
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const API_URL = `${API_BASE}/models/gemini-2.5-flash-lite:generateContent`;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -16,43 +10,48 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // CORS 프리플라이트 요청 처리
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const { prompt, context, type } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { prompt, context, type } = body;
 
-    // [추가] 사용 가능한 모델 리스트 조회 기능
+    // [수정] 1. 모델 리스트 조회 시, 하위 복잡한 로직을 거치지 않고 즉시 반환하도록 완전 분리
     if (type === 'list_models') {
+      if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.");
       const listResponse = await fetch(`${API_BASE}/models?key=${GEMINI_API_KEY}`);
       const listData = await listResponse.json();
       
       if (listData.error) {
         return new Response(
           JSON.stringify({ success: false, error: listData.error.message }),
-          { 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: listResponse.status 
-          }
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: listResponse.status }
         );
       }
-
       return new Response(
         JSON.stringify({ success: true, models: listData.models }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
       );
     }
 
+    // 2. 일반 텍스트 분석/번역 요청인데 prompt가 없는 경우 가차없이 클라이언트 에러 반환
+    if (!prompt) {
+      return new Response(
+        JSON.stringify({ success: false, error: "요청바디에 'prompt' 값이 누락되었습니다." }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      );
+    }
+
     let searchContext = context || "";
 
-    // 시스템 프롬프트 설정 (학습형 AI의 정체성 부여)
-    let systemInstruction = `당신은 지하시설물 및 도로대장 구축 분야의 고도로 숙련된 전문 기술 컨설턴트입니다.
+    // 시스템 프롬프트 정의
+    let systemInstructionText = `당신은 지하시설물 및 도로대장 구축 분야의 고도로 숙련된 전문 기술 컨설턴트입니다.
 [데이터 접근 규칙]
 1. **GIS 문법 안내**: 사용자가 검색 문법이나 사용법을 물어보면 아래 규칙을 마크다운 강조(**...**)를 사용하여 설명하세요. (강조 시 파란색으로 표시됩니다)
    - **[레이어명]📋** : 레이어 데이터 리스트 출력
-   - **[레이어명]�** : 지도에 위치 표시
+   - **[레이어명]📍** : 지도에 위치 표시
    - **[레이어명][거리]📋** : 레이어 총 연장(길이) 계산
    - **[레이어명][사진]📋** : 사진 매칭 누락 분석
    - **지점A ~ 지점B [거리]📋** : 지점 간 도상/경로 거리 계산
@@ -60,42 +59,31 @@ serve(async (req) => {
    - **키워드1 & 키워드2📍** : OR 검색 (둘 중 하나 포함)`;
 
     if (type === 'point_search') {
-      systemInstruction += "\n도면 레이어 정보를 분석하여 실무 가이드를 제공하세요.";
+      systemInstructionText += "\n도면 레이어 정보를 분석하여 실무 가이드를 제공하세요.";
     } else if (type === 'translate_gis') {
-      systemInstruction = `당신은 사용자의 자연어 요청을 GIS 전용 검색 문법으로 변환하는 전문 번역 에이전트입니다.
-
+      systemInstructionText = `당신은 사용자의 자연어 요청을 GIS 전용 검색 문법으로 변환하는 전문 번역 에이전트입니다.
 [핵심 미션]
-1. **검색어 정규화**: 수치 뒤의 단위('mm', 'cm' 등)는 제거하고 숫자만 남기세요. 명칭과 숫자 사이의 공백도 제거하여 결합하세요.
-   - 예: "제수변 150mm" -> \`제수변150\`
-2. **레이어 vs 포인트 구분**: 사용자가 언급한 대상이 **[대상 레이어 목록]에 정확히 일치하는 이름일 경우에만** 대괄호 \`[레이어명]\`을 사용하세요.
+1. **검색어 정규화**: 수치 뒤의 단위('mm', 'cm' 등)는 제거하고 숫자만 남기세요. 명칭과 숫자 사이의 공백도 제거하여 결합하세요. (예: "제수변 150mm" -> \`제수변150\`)
+2. **레이어 vs 포인트 구분**: 사용자가 언급한 대상이 [대상 레이어 목록]에 정확히 일치하는 이름일 경우에만 대괄호 \`[레이어명]\`을 사용하세요.
 3. **복합 검색**: "X 레이어에서 Y를 찾아줘"와 같은 요청은 \`[X] Y📍\` 형식으로 변환하세요.
-4. 시설물 명칭이라도 목록에 없는 이름은 절대 대괄호를 씌우지 마세요. (예: "이토변"이 목록에 없으면 \`이토변📍\`)
-5. **제외 검색(NOT)**: "X를 제외한", "빼고" 등의 요청은 \`!\` 연산자를 사용하세요. (예: "하단 빼고 제수변" -> \`제수변 !하단📍\`)
-6. **교차 분석**: 특정 선 레이어 간의 교차점을 분석합니다.
-   - \`[A][교차]📍\` : A와 교차되는 **모든** 선 레이어 검색
-   - \`[A][B][교차]📍\` : A와 B **두 레이어 간의** 교차점만 검색
-   - \`[A][B][C][교차]📍\` : A와 B, C 레이어들이 만나는 지점 분석 (다중 레이어 지원)
-   - **중요**: "교차", "만나는", "intersect" 등 교차 관련 키워드가 명시된 경우만 교차 분석으로 처리하세요.
-6. **정보 조회**: 특정 포인트의 좌표(TM, 경위도, Z)를 요청하는 경우 '포인트명[좌표]📋' 문법을 사용하세요. (예: "260424-04 좌표 알려줘" -> 260424-04[좌표]📋, "A와 B의 좌표" -> A&B[좌표]📋)
-7. **복합 기능 결합**: 검색 필터(!, &, 공백)는 모든 분석 태그([사진], [거리], [좌표] 등)와 자유롭게 결합 가능합니다.
-   - 예: "하단 제외 제수변 사진 분석" -> \`제수변 !하단[사진]📋\`
-   - 예: "A 또는 B 레이어 거리 계산" -> \`A & B[거리]📋\`
-8. **다중 작업 수행(중요)**: 사용자가 여러 레이어에 대해 동일한 분석(거리, 사진 등)을 요청하거나, 여러 정보를 동시에 요청하면 적절한 구분자를 사용하세요.
-   - **합산(+)**: 동일한 분석 결과를 합산할 때 사용합니다. "A 레이어와 B 레이어의 전체 길이를 합산해줘" -> \`[A][거리]📋 + [B][거리]📋\`
-   - **다중 질문(&&)**: 서로 다른 질문을 동시에 실행할 때 사용합니다. "제수변 거리랑 좌표 알려줘" -> \`제수변[거리]📋 && 제수변[좌표]📋\`
-   - **문맥 구분**: "와"가 "교차"와 함께 언급되지 않고, 동일한 분석(거리, 사진 등)을 여러 대상에 적용하는 경우 \`+\`로 변환하세요. 서로 다른 종류의 질문인 경우 \`&&\`를 사용하세요.
+4. 시설물 명칭이라도 목록에 없는 이름은 절대 대괄호를 씌우지 마세요.
+5. **제외 검색(NOT)**: "하단 빼고 제수변" -> \`제수변 !하단📍\`
+6. **교차 분석**: 선 레이어 간 교차점을 분석합니다. \`[A][교차]📍\`, \`[A][B][교차]📍\`
+6. **정보 조회**: 포인트 상세 좌표 요청 시 '포인트명[좌표]📋' 문법 사용
+7. **복합 기능 결합**: \`제수변 !하단[사진]📋\` 형태로 자유롭게 결합
+8. **다중 작업 수행(중요)**: 합산(+) 혹은 다중 질문(&&) 구분자 사용
 
 [문법 규칙]
-1. [레이어명]📋 : 레이어 데이터 리스트 출력 (분석, 정리, 계산, 리스트 등)
-2. [레이어명]📍 : 레이어 객체 지도에 마커 표시 (위치, 어디야, 보여줘 등)
-3. [레이어명][거리]📋 : 레이어의 총 연장(길이) 계산
-4. [레이어명][사진]📋 : 레이어의 사진/메모 매칭 누락 분석
+1. [레이어명]📋 : 레이어 데이터 리스트 출력
+2. [레이어명]📍 : 레이어 객체 지도에 마커 표시
+3. [레이어명][거리]📋 : 레이어의 총 연장 계산
+4. [레이어명][사진]📋 : 레이어의 사진 매칭 누락 분석
 5. 지점A ~ 지점B [거리]📋 : 두 지점 간의 도상 거리 계산
-6. [레이어명][거리]>숫자📋 : 포인트 간 간격이 숫자(m)보다 큰 구간 분석
-7. [레이어1][레이어2...][교차]📋 : 선 레이어 간 교차점 분석 (여러 레이어 지정 가능)
-8. 키워드1 키워드2📍 : **AND 검색** (두 키워드 모두 포함)
-9. 키워드1 & 키워드2📍 : **OR 검색** (하나라도 포함)
-10. 키워드1 !키워드2📍 : **NOT 검색** (특정 단어 제외)
+6. [레이어명][거리]>숫자📋 : 포인트 간 간격 분석
+7. [레이어1][레이어2...][교차]📋 : 선 레이어 간 교차점 분석
+8. 키워드1 키워드2📍 : AND 검색
+9. 키워드1 & 키워드2📍 : OR 검색
+10. 키워드1 !키워드2📍 : NOT 검색
 11. [레이어명] 키워드📍 : 특정 레이어 내 상세 검색
 12. 포인트명[좌표]📋 : 포인트의 상세 좌표 및 속성 조회
 
@@ -105,46 +93,53 @@ serve(async (req) => {
 ${searchContext}`;
     }
 
-    // [추가] 30초 타임아웃 설정 (Gate가 무한정 열려있는 것 방지)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 40000);
 
-    const contents = [{
-      role: "user",
-      parts: [{ text: `${systemInstruction}\n\n[분석 대상 데이터]\n${searchContext}\n\n[User Query]\n${prompt}` }]
-    }];
+    // [수정] 3. Gemini API 공식 규격에 맞춰 systemInstruction을 별도 파라미터로 추출하여 Body 구성
+    const apiPayload = {
+      contents: [{
+        role: "user",
+        parts: [{ text: `[분석 대상 데이터]\n${searchContext}\n\n[User Query]\n${prompt}` }]
+      }],
+      systemInstruction: {
+        parts: [{ text: systemInstructionText }]
+      },
+      generationConfig: { 
+        temperature: 0.1, // 번역 정확도를 위해 값 조절
+        maxOutputTokens: 1024 
+      }
+    };
 
-    // [수정] 에이전트 루프 제거, 단일 호출 방식으로 변경
-    const response = await fetch(`${API_URL}?key=${GEMINI_API_KEY}`, {
+    const API_URL = `${API_BASE}/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({
-        contents: contents,
-        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
-      }),
+      body: JSON.stringify(apiPayload),
     });
 
     const data = await response.json();
+    clearTimeout(timeoutId);
+
     if (data.error) {
-      console.error("Gemini API Error:", data.error);
-      throw new Error(`Gemini API: ${data.error.message}`);
+      console.error("Gemini API Error Detail:", data.error);
+      return new Response(
+        JSON.stringify({ success: false, error: `Gemini API 에러: ${data.error.message}` }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 502 } // 502 Bad Gateway로 명확히 분리
+      );
     }
 
     const finalAnswer = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-    clearTimeout(timeoutId);
-
     return new Response(
       JSON.stringify({ 
         success: true, 
-        answer: finalAnswer || "답변을 생성할 수 없습니다.",
-        model: data.model_version || "gemini-2.5-flash-lite"
+        answer: finalAnswer.trim() || "답변을 생성할 수 없습니다.",
+        model: "gemini-2.5-flash-lite"
       }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200 
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     );
 
   } catch (error) {
@@ -154,11 +149,11 @@ ${searchContext}`;
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: isTimeout ? "AI 응답 시간이 초과되었습니다. (30초)" : error.message 
+        error: isTimeout ? "AI 응답 시간이 초과되었습니다. (40초)" : error.message 
       }),
       { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: isTimeout ? 504 : 400 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+        status: isTimeout ? 504 : 500 // 단순 문법/런타임 에러는 500 내부 서버 에러로 표기
       }
     );
   }
