@@ -120,49 +120,83 @@ export async function callSupabaseDirect(endpoint, method = 'GET', body = null, 
 export async function callAiEdge(prompt, context = "", type = "general") {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000);
+        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45초 타임아웃
 
-        // [복구] 1순위: Gemini-2.5-Flash-Lite (Supabase Edge Function) 호출
-        console.log("🧪 [AI 우선순위] 1순위: Gemini 호출 시도...");
-        let response = await fetch(`${SUPABASE_FUNCTIONS_URL}/AI`, {
+        let response;
+        let result;
+
+        // 1순위: Cloudflare Worker AI (Llama-3.1) 호출
+        console.log("🧪 [AI 우선순위] 1순위: Cloudflare Worker AI 호출 시도...");
+        try {
+            response = await fetch(`${WORKER_URL}/ai`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${state.supabaseConfig.key}`
-            },
-            signal: controller.signal,
-            body: JSON.stringify({ prompt, context, type })
-        });
-
-        // Gemini 호출 실패 또는 할당량 초과(429) 시 Workers AI로 폴백
-        if (!response.ok || response.status === 429) {
-            console.warn(`⚠️ Gemini 응답 실패 (Status: ${response.status}). 2순위 Workers AI로 전환합니다.`);
-            response = await fetch(`${WORKER_URL}/ai`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
                     'Authorization': WORKER_AUTH_KEY
                 },
                 signal: controller.signal,
                 body: JSON.stringify({ prompt, context, type })
             });
-        }
-
-        clearTimeout(timeoutId);
         
+            if (response.ok) {
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
-            const result = await response.json();
-            
-            return result;
+                    result = await response.json();
+                    console.log("✅ Cloudflare Worker AI 응답 성공:", result.model);
+                    return result; // 성공 시 즉시 반환
+                } else {
+                    // JSON이 아닌 응답 처리
+                    throw new Error(`Cloudflare Worker AI: 비정상적인 응답 형식 (Content-Type: ${contentType})`);
         }
-        
-        const errorText = await response.text();
-        // 429가 아닌 일반적인 서버 오류 시 예외 처리
-        return { success: false, error: `서버 응답 오류 (${response.status})` };
+            } else {
+                // Worker AI 응답이 실패했을 경우 (200 OK가 아님)
+                const errorBody = await response.text(); // 오류 본문 확보
+                console.warn(`⚠️ Cloudflare Worker AI 응답 실패 (Status: ${response.status}). Supabase Edge Function으로 폴백 시도.`);
+                console.warn(`Worker AI Error Detail: ${errorBody}`);
+                // 에러 발생 시 try-catch 블록을 빠져나가 2순위 Supabase 호출 로직으로 이동
+            }
+        } catch (workerError) {
+            console.warn("❌ Cloudflare Worker AI 호출 중 오류 발생:", workerError.message);
+            console.warn("Supabase Edge Function으로 폴백 시도합니다.");
+            // 에러 발생 시 2순위 Supabase 호출 로직으로 이동
+        }
 
+        // 2순위: Supabase Edge Function (Gemini) 호출 (1순위가 실패했을 때만)
+        console.log("🧪 [AI 우선순위] 2순위: Supabase Edge Function 호출 시도...");
+        try {
+            response = await fetch(`${SUPABASE_FUNCTIONS_URL}/AI`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${state.supabaseConfig.key}`
+                },
+                signal: controller.signal,
+                body: JSON.stringify({ prompt, context, type })
+            });
+
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+                result = await response.json();
+                if (response.ok) {
+                    console.log("✅ Supabase Edge Function AI 응답 성공:", result.model || "Gemini-2.5-Flash-Lite");
+                    return result; // 성공 시 즉시 반환
+                } else {
+                    // Supabase에서 에러 응답이 왔을 경우
+                    throw new Error(`Supabase Edge Function AI 에러: ${result.error || '알 수 없는 오류'}`);
+                }
+            } else {
+                // JSON이 아닌 응답 처리
+                throw new Error(`Supabase Edge Function AI: 비정상적인 응답 형식 (Content-Type: ${contentType})`);
+            }
+        } catch (supabaseError) {
+            console.error("❌ Supabase Edge Function AI 호출 중 최종 오류 발생:", supabaseError.message);
+            throw supabaseError; // 최종적으로 Supabase 호출도 실패하면 오류를 던짐
+        } finally {
+            clearTimeout(timeoutId); // 모든 시도가 끝난 후 타임아웃 해제
+        }
     } catch (error) {
         if (error.name === 'AbortError') return { success: false, error: "요청 시간 초과 (45초)" };
         return { success: false, error: error.toString() };
     }
 }
+
