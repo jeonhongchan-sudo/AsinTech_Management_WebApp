@@ -144,15 +144,20 @@ export function openGisSearchModal() {
 }
 
 /** GIS 문법 해석 및 실행 (다중 작업 지원을 위해 결과 HTML을 문자열로 반환 가능 구조화) */
-export async function executeGisSearch(searchTerm, isSubTask = false) {
+export async function executeGisSearch(searchTerm, useBookmarkFromParent = false, isAuditFromParent = false, isSubTask = false) {
     let normalizedTerm = searchTerm.replace(/\[분석\]/g, '📋').replace(/\[지도\]/g, '📍');
     
-    const useBookmark = normalizedTerm.includes('📍');
-    const isAudit = normalizedTerm.includes('📋');
+    // 전체 검색어에서 useBookmark와 isAudit 플래그를 먼저 추출
+    let useBookmark = normalizedTerm.includes('📍') || useBookmarkFromParent;
+    let isAudit = normalizedTerm.includes('📋') || isAuditFromParent;
     
+    // 추출된 플래그는 normalizedTerm에서 제거하여 실제 쿼리만 남김
+    normalizedTerm = normalizedTerm.replace(/[📍📋]/g, '').trim();
+
     if (!useBookmark && !isAudit) {
         if (isSubTask) {
-            return `<div style="padding:10px; color:#e03131;">유효하지 않은 GIS 문법: ${searchTerm}</div>`;
+            // 하위 태스크는 명시적인 📍 또는 📋가 없으면 유효하지 않다고 판단
+            return `<div style="padding:10px; color:#e03131;">유효하지 않은 GIS 문법: ${normalizedTerm} (결과 출력 플래그 없음)</div>`;
         }
         // AI 전용 모달을 통한 2단계 자연어 검색 오케스트레이션 실행
         window.handleGisAiSearch(normalizedTerm, false);
@@ -168,7 +173,7 @@ export async function executeGisSearch(searchTerm, isSubTask = false) {
 
             for (let i = 0; i < tasks.length; i++) {
                 // 하위 태스크 실행 시 HTML 결과 텍스트를 반환받도록 처리
-                const htmlFragment = await executeGisSearch(tasks[i], true);
+                const htmlFragment = await executeGisSearch(tasks[i], useBookmark, isAudit, true); // 플래그 전달
                 if (htmlFragment && typeof htmlFragment === 'string') {
                     // 구분을 위한 하단 여백 및 경계선 컴포넌트 추가
                     resultsHtml.push(`
@@ -198,20 +203,19 @@ export async function executeGisSearch(searchTerm, isSubTask = false) {
         const tasks = normalizedTerm.split('+').map(t => t.trim()).filter(t => t);
         if (tasks.length > 0) {
             const allDistanceTasks = tasks.every(t => t.includes('[거리]') && t.includes('📋'));
-            if (allDistanceTasks && tasks.length > 1) {
-                return executeMultiLayerDistanceSummation(tasks, isSubTask);
+            if (tasks.length > 1 && tasks.every(t => t.includes('[거리]'))) { // [수정] 모든 태스크가 [거리] 포함 여부만 확인
+                return executeMultiLayerDistanceSummation(tasks, useBookmark, isAudit, isSubTask); // 플래그 전달
             }
-            return showAlert("+ 연산자는 현재 [거리]📋 합산만 지원합니다.", "info");
+            return showAlert("+ 연산자는 현재 [거리] 합산만 지원합니다.", "info");
         }
     }
-
     try {
         await ensureGeoJSONLoaded();
     } catch (e) {
         return showAlert("분석 데이터를 로드할 수 없습니다. 관리자에게 문의하세요.", "error");
     }
 
-    let cleanInput = normalizedTerm.replace(/[📍📋]/g, '').trim();
+    let cleanInput = normalizedTerm; // 이미 위에서 📍📋 제거됨
 
     const analysisSuffixes = ['[거리]', '[사진]', '[교차]', '[좌표]'];
     let targetQuery = cleanInput;
@@ -257,7 +261,7 @@ export async function executeGisSearch(searchTerm, isSubTask = false) {
         return showPointInfo(targetQuery, isSubTask);
     }
 
-    return executePointSearch(cleanInput, useBookmark, isAudit, isSubTask);
+    return executePointSearch(cleanInput, useBookmark, isAudit, isSubTask); // 플래그 전달
 }
 
 /** 포인트 검색 실행 */
@@ -284,7 +288,7 @@ export function filterFeaturesByComplexQuery(searchTerm, geometryType = 'Point')
     const cleanSearch = searchTerm.replace(/\^/g, '').trim();
 
     const features = (state.currentProjectGeoJSON && state.currentProjectGeoJSON.features) 
-        ? state.currentProjectGeoJSON.features.filter(f => f.geometry && (geometryType === 'Any' || f.geometry.type.includes(geometryType)))
+            ? state.currentProjectGeoJSON.features.filter(f => f.geometry && (geometryType === 'Any' ? true : f.geometry.type.includes(geometryType))) // [수정] geometryType 'Any' 처리 로직 개선
         : (state.cadMap ? state.cadMap.querySourceFeatures('cad_source', { sourceLayer: (geometryType === 'Any' ? 'line' : geometryType.toLowerCase()) }) : []);
 
     const layerMatch = cleanSearch.match(/^\[(.+?)\]\s*(.*)$/);
@@ -369,7 +373,7 @@ async function analyzePhotoMismatch(targetLayer, useBookmark, isAudit, isSubTask
 }
 
 /** 여러 포인트 간의 누적 직선 거리 계산 */
-async function analyzePointToPointDistance(pointNames, useBookmark, isAudit, isSubTask = false) {
+async function analyzePointToPointDistance(pointNames, useBookmark, isAudit, isSubTask = false) { // 플래그 인자 추가
     if (!state.currentProjectGeoJSON) return isSubTask ? "데이터 오류" : showAlert("도면 데이터가 로드되지 않았습니다.", "error");
     if (!state.currentProjectSourceCrs) return isSubTask ? "좌표계 오류" : showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
 
@@ -453,9 +457,12 @@ async function analyzePointToPointDistance(pointNames, useBookmark, isAudit, isS
 }
 
 /** 다중 레이어 거리 합산 */
-async function executeMultiLayerDistanceSummation(tasks, isSubTask = false) {
-    if (!state.currentProjectGeoJSON) return isSubTask ? "데이터 구조 에러" : showAlert("도면 데이터가 로드되지 않았습니다.", "error");
-    if (!state.currentProjectSourceCrs) return isSubTask ? "좌표 정보 에러" : showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
+async function executeMultiLayerDistanceSummation(tasks, useBookmark, isAudit, isSubTask = false) { // 플래그 인자 추가
+    // [수정] GeoJSON 로드 상태 및 좌표계 정보 방어 로직 강화
+    await ensureGeoJSONLoaded(); // [추가] 방어적으로 다시 GeoJSON 로드 확인
+    if (!state.currentProjectGeoJSON) return isSubTask ? "데이터 구조 에러" : showModalMessage("데이터 로드 오류", "도면 데이터가 로드되지 않았습니다. 프로젝트를 선택했는지 확인해주세요.", "error");
+
+    if (!state.currentProjectSourceCrs) return isSubTask ? "좌표 정보 에러" : showModalMessage("좌표계 오류", "프로젝트 좌표계 정보가 없습니다. 관리자에게 문의하세요.", "error");
 
     if (!isSubTask) showAlert("다중 레이어 거리 합산 중...", "info");
 
@@ -463,7 +470,7 @@ async function executeMultiLayerDistanceSummation(tasks, isSubTask = false) {
     let grandTotal = 0;
 
     for (const task of tasks) {
-        const cleanTask = task.replace(/[📍📋]/g, '').replace('[거리]', '').trim();
+        const cleanTask = task.replace('[거리]', '').trim(); // 이미 상위 함수에서 📍📋 제거됨
         const lineFeatures = filterFeaturesByComplexQuery(cleanTask, 'Any').filter(f => 
             f.geometry && (f.geometry.type.includes('LineString') || f.geometry.type.includes('Polygon'))
         );
@@ -478,7 +485,7 @@ async function executeMultiLayerDistanceSummation(tasks, isSubTask = false) {
 
         lineFeatures.forEach(f => {
             const p = f.properties;
-            const val = p.length_m || p.length || p.Length || p.LENGTH || p.LEN || p.len || p.dist || p.distance;
+            const val = p.length_m || p.length || p.Length || p.LENGTH || p.LEN || p.dist || p.distance;
             if (val !== undefined && val !== null && !isNaN(parseFloat(val))) {
                 localSum += parseFloat(val);
                 hasLocalLength = true;
@@ -556,9 +563,11 @@ async function executeMultiLayerDistanceSummation(tasks, isSubTask = false) {
 }
 
 /** 레이어별 전체 거리 산출 */
-async function analyzeTotalDistance(targetLayer, useBookmark, isAudit, isSubTask = false) {
-    if (!state.currentProjectGeoJSON) return isSubTask ? "데이터 유실" : showAlert("도면 데이터가 로드되지 않았습니다.", "error");
-    if (!state.currentProjectSourceCrs) return isSubTask ? "좌표 유실" : showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
+async function analyzeTotalDistance(targetLayer, useBookmark, isAudit, isSubTask = false) { // 플래그 인자 추가
+    // [수정] GeoJSON 로드 상태 및 좌표계 정보 방어 로직 강화
+    await ensureGeoJSONLoaded(); // [추가] 방어적으로 다시 GeoJSON 로드 확인
+    if (!state.currentProjectGeoJSON) return isSubTask ? "데이터 유실" : showModalMessage("데이터 로드 오류", "도면 데이터가 로드되지 않았습니다. 프로젝트를 선택했는지 확인해주세요.", "error");
+    if (!state.currentProjectSourceCrs) return isSubTask ? "좌표 유실" : showModalMessage("좌표계 오류", "프로젝트 좌표계 정보가 없습니다. 관리자에게 문의하세요.", "error");
 
     const lineFeatures = filterFeaturesByComplexQuery(targetLayer, 'Any').filter(f => 
         f.geometry && (f.geometry.type.includes('LineString') || f.geometry.type.includes('Polygon'))
@@ -578,7 +587,7 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit, isSubTask
 
         lineFeatures.forEach(f => {
             const p = f.properties;
-            const val = p.length_m || p.length || p.Length || p.LENGTH || p.LEN || p.len || p.dist || p.distance;
+            const val = p.length_m || p.length || p.Length || p.LENGTH || p.LEN || p.dist || p.distance;
             if (val !== undefined && val !== null && !isNaN(parseFloat(val))) {
                 localTotalSum += parseFloat(val);
                 hasLocalLength = true;
@@ -667,7 +676,7 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit, isSubTask
 }
 
 /** 포인트 간 거리 누락 분석 */
-async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit, isSubTask = false) {
+async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit, isSubTask = false) { // 플래그 인자 추가
     if (!state.currentProjectGeoJSON) return isSubTask ? "데이터 없음" : showAlert("도면 데이터(GeoJSON)가 아직 로드되지 않았습니다.", "error");
     if (!state.currentProjectSourceCrs) return isSubTask ? "좌표계 없음" : showAlert("프로젝트 좌표계 정보가 없습니다.", "error");
     
@@ -805,7 +814,7 @@ export function checkPhotoMatch(pointText, photoFileName) {
 }
 
 /** 선 레이어 간의 교차 지점 분석 */
-async function analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers = null, isSubTask = false) {
+async function analyzeIntersections(targetLayer, useBookmark, isAudit, otherLayers = null, isSubTask = false) { // 플래그 인자 추가
     if (!state.currentProjectGeoJSON) {
         try { await ensureGeoJSONLoaded(); }
         catch (e) { return isSubTask ? "데이터 로드 실패" : showAlert("도면 데이터를 로드할 수 없습니다.", "error"); }
@@ -906,9 +915,8 @@ async function showPointInfo(query, isSubTask = false) {
         <div style="padding:5px;">
             <h3 style="color:#2196F3; margin-bottom:15px; border-bottom:2px solid #2196F3; padding-bottom:10px;">📊 포인트 상세 좌표 조회</h3>
             <div style="font-size:12px; color:#666; margin-bottom:10px; background:#f8f9fa; padding:8px; border-radius:4px;">적용 좌표계: <strong>${crs}</strong></div>
-            <div style="overflow-x:auto; border:1px solid #dee2e6; border-radius:8px;">
+            <div class="gis-ai-responsive-grid" style="font-size:12px; color:#666; margin-bottom:10px; background:#f8f9fa; padding:8px; border-radius:4px;">적용 좌표계: <strong>${crs}</strong></div>
                 <table style="width:100%; border-collapse:collapse; font-size:11px; min-width:380px; table-layout: auto;">
-                    <thead>
                         <tr style="background:#f1f3f5; border-bottom:2px solid #dee2e6;">
                             <th style="padding:8px; text-align:left; white-space:nowrap;">명칭</th>
                             <th style="padding:8px; text-align:right; white-space:nowrap;">TM X (N)</th>
