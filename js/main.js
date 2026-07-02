@@ -1,10 +1,13 @@
 // e:\Program\SelfProgram\아신테크\js\main.js
 import { state, callApi, callSupabaseDirect, showAlert, WORKER_URL, WORKER_AUTH_KEY, R2_BASE_URL } from './core.js';
-import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleLineLabels, toggleMarkers, toggleMemoIds, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider, openLayerStyleModal, closeLayerStyleModal, switchStyleTab, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, updateIndividualStyle, loadCadProjects, toggleDynamicText, showProjectInfo, switchProjectInfoTab, clearSearchMarkers, resetSearchUI, showPointLocation } from './viewers.js';
+import { selectGuideline, toggleFullScreen, initCadViewer, loadCadMap, cleanupCadViewer, toggleLayer, changeLayerColor, changeLayerWidth, changeAllLayerColors, changeAllLayerWidths, changeLineLabelSize, changeLineLabelColor, toggleLayerPanel, toggleBackgroundMap, toggleLineLabels, toggleMarkers, toggleMemoIds, reloadLayerStylesFromSettings, loadMapMemos, flyToLocation, toggleDistanceMode, toggleMapMenu, switchMapProvider, openLayerStyleModal, closeLayerStyleModal, switchStyleTab, changeAllPointColors, changeAllPointSizes, changeAllTextColors, changeAllTextSizes, updateIndividualStyle, loadCadProjects, toggleDynamicText, showProjectInfo, switchProjectInfoTab, clearSearchMarkers, resetSearchUI, showPointLocation, cadLayers } from './viewers.js';
 import { searchPoints, sanitizeSearchText, matchComplexQuery, updateSearchButtonUI } from './search_engine.js';
 import { loadProjects, openPhotoManager, closePhotoManager, openLightbox, closeLightbox, navigateLightbox, openAdminPage, closeAdminPage, toggleSystemLock, createNewUser, deleteUser, renameUser, loadMemoList, deleteMemo, deleteProjectMemos, handleMemoFileSelect, removeMemoFile, removeExistingMemoImage, saveGeneralMemo, openGeneralMemoModal, openRoomManagerPage, closeRoomManagerPage, roomCreateUser, switchRoomView, setUserRole, toggleProjectPrivate, openUserAccess, toggleUserAccess, bulkToggleUserAccess, downloadMemosCSV, openMemoProjectFilter, setMemoFilter, downloadPhotoFile, downloadAllPhotos, cleanupR2Orphans, saveMemo, roomCreateProject, roomDeleteProject, roomUploadCad, openCadConfigUI, executeCadConversion, togglePhotoMenu } from './managers.js';
 import { askFollowUp, closeAiResponseModal } from './ai.js';
+import { executeGisSearch } from './search_gis.js';
 window.showPointLocation = showPointLocation; // [추가] search_engine의 모달 결과물과 지도 연동용
+window.executeGisSearch = executeGisSearch; // [추가] AI 답변 연동용
+window.cadLayers = cadLayers; // [추가] AI 답변 연동용
 
 // 전역 함수 바인딩 (HTML onclick 속성 및 viewers.js에서 호출 지원용)
 window.loadCadProjects = loadCadProjects;

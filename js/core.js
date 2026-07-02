@@ -43,7 +43,10 @@ export const state = {
     isDynamicText: true,       // [수정] 텍스트 동적 위치 기본 활성화
     searchMarkers: [],         // [추가] 검색 결과 마커 관리용
     currentProjectBounds: null, // [추가] 현재 프로젝트의 전체 영역 저장용
-    currentProjectGeoJSON: null // [추가] 전역 검색용 데이터 (handle ID 매칭용)
+    currentProjectGeoJSON: null, // [추가] 전역 검색용 데이터 (handle ID 매칭용)
+    gisAiHistory: [],          // [추가] GIS AI 대화 기록
+    lastGisAiQuery: "",        // [추가] 마지막 GIS AI 질문
+    lastGisAiGrammar: ""       // [추가] 마지막 GIS AI 번역 문법
 };
 
 // 유틸리티 함수
@@ -125,44 +128,8 @@ export async function callAiEdge(prompt, context = "", type = "general") {
         let response;
         let result;
 
-        // 1순위: Cloudflare Worker AI (Llama-3.1) 호출
-        console.log("🧪 [AI 우선순위] 1순위: Cloudflare Worker AI 호출 시도...");
-        try {
-            response = await fetch(`${WORKER_URL}/ai`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                    'Authorization': WORKER_AUTH_KEY
-                },
-                signal: controller.signal,
-                body: JSON.stringify({ prompt, context, type })
-            });
-        
-            if (response.ok) {
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("application/json")) {
-                    result = await response.json();
-                    console.log("✅ Cloudflare Worker AI 응답 성공:", result.model);
-                    return result; // 성공 시 즉시 반환
-                } else {
-                    // JSON이 아닌 응답 처리
-                    throw new Error(`Cloudflare Worker AI: 비정상적인 응답 형식 (Content-Type: ${contentType})`);
-        }
-            } else {
-                // Worker AI 응답이 실패했을 경우 (200 OK가 아님)
-                const errorBody = await response.text(); // 오류 본문 확보
-                console.warn(`⚠️ Cloudflare Worker AI 응답 실패 (Status: ${response.status}). Supabase Edge Function으로 폴백 시도.`);
-                console.warn(`Worker AI Error Detail: ${errorBody}`);
-                // 에러 발생 시 try-catch 블록을 빠져나가 2순위 Supabase 호출 로직으로 이동
-            }
-        } catch (workerError) {
-            console.warn("❌ Cloudflare Worker AI 호출 중 오류 발생:", workerError.message);
-            console.warn("Supabase Edge Function으로 폴백 시도합니다.");
-            // 에러 발생 시 2순위 Supabase 호출 로직으로 이동
-        }
-
-        // 2순위: Supabase Edge Function (Gemini) 호출 (1순위가 실패했을 때만)
-        console.log("🧪 [AI 우선순위] 2순위: Supabase Edge Function 호출 시도...");
+        // 1순위: Supabase Edge Function (Gemini-2.5-Flash) 호출
+        console.log("🧪 [AI 우선순위] 1순위: Supabase Edge Function (Gemini-2.5-Flash) 호출 시도...");
         try {
             response = await fetch(`${SUPABASE_FUNCTIONS_URL}/AI`, {
                 method: 'POST',
@@ -178,7 +145,7 @@ export async function callAiEdge(prompt, context = "", type = "general") {
             if (contentType && contentType.includes("application/json")) {
                 result = await response.json();
                 if (response.ok) {
-                    console.log("✅ Supabase Edge Function AI 응답 성공:", result.model || "Gemini-2.5-Flash-Lite");
+                    console.log("✅ Supabase Edge Function AI 응답 성공:", result.model || "Gemini-2.5-Flash");
                     return result; // 성공 시 즉시 반환
                 } else {
                     // Supabase에서 에러 응답이 왔을 경우
@@ -189,8 +156,43 @@ export async function callAiEdge(prompt, context = "", type = "general") {
                 throw new Error(`Supabase Edge Function AI: 비정상적인 응답 형식 (Content-Type: ${contentType})`);
             }
         } catch (supabaseError) {
-            console.error("❌ Supabase Edge Function AI 호출 중 최종 오류 발생:", supabaseError.message);
-            throw supabaseError; // 최종적으로 Supabase 호출도 실패하면 오류를 던짐
+            console.warn("❌ Supabase Edge Function AI 호출 중 오류 발생:", supabaseError.message);
+            console.warn("Cloudflare Worker AI로 폴백 시도합니다.");
+            // 에러 발생 시 2순위 Cloudflare 호출 로직으로 이동
+        }
+
+        // 2순위: Cloudflare Worker AI (Llama-3.1) 호출 (1순위가 실패했을 때만)
+        console.log("🧪 [AI 우선순위] 2순위: Cloudflare Worker AI 호출 시도...");
+        try {
+            response = await fetch(`${WORKER_URL}/ai`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': WORKER_AUTH_KEY
+                },
+                signal: controller.signal,
+                body: JSON.stringify({ prompt, context, type })
+            });
+        
+            if (response.ok) {
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    result = await response.json();
+                    console.log("✅ Cloudflare Worker AI 응답 성공:", result.model);
+                    return result; // 성공 시 즉시 반환
+                } else {
+                    // JSON이 아닌 응답 처리
+                    throw new Error(`Cloudflare Worker AI: 비정상적인 응답 형식 (Content-Type: ${contentType})`);
+                }
+            } else {
+                // Worker AI 응답이 실패했을 경우 (200 OK가 아님)
+                const errorBody = await response.text(); // 오류 본문 확보
+                console.warn(`⚠️ Cloudflare Worker AI 응답 실패 (Status: ${response.status}).`);
+                throw new Error(`Cloudflare Worker AI 에러: Status ${response.status} - ${errorBody}`);
+            }
+        } catch (workerError) {
+            console.error("❌ Cloudflare Worker AI 호출 중 최종 오류 발생:", workerError.message);
+            throw workerError; // 최종적으로 Cloudflare 호출도 실패하면 오류를 던짐
         } finally {
             clearTimeout(timeoutId); // 모든 시도가 끝난 후 타임아웃 해제
         }

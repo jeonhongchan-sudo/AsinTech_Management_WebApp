@@ -151,24 +151,12 @@ export async function executeGisSearch(searchTerm, isSubTask = false) {
     const isAudit = normalizedTerm.includes('📋');
     
     if (!useBookmark && !isAudit) {
-        showAlert("AI가 요청을 분석하고 있습니다...", "info");
-        const layerList = Array.from(cadLayers).join(', ');
-        
-        try {
-            const res = await callAiEdge(normalizedTerm, `사용 가능한 레이어 목록: ${layerList}`, 'translate_gis');
-            if (res.success && res.answer) {
-                let translated = res.answer.trim();
-                console.log(`[GIS AI 원문] ${translated}`);
-                translated = translated.replace(/['"`]/g, '');
-                console.log(`[GIS 문법 변환] ${translated}`);
-
-                if (translated.includes('📍') || translated.includes('📋')) {
-                    return executeGisSearch(translated, isSubTask);
-                }
-            }
-        } catch (e) { console.error("GIS 자연어 분석 오류:", e); }
-        
-        return showAlert("출력 형식을 선택하세요 (📍: 지도, 📋: 리스트)", "info");
+        if (isSubTask) {
+            return `<div style="padding:10px; color:#e03131;">유효하지 않은 GIS 문법: ${searchTerm}</div>`;
+        }
+        // AI 전용 모달을 통한 2단계 자연어 검색 오케스트레이션 실행
+        window.handleGisAiSearch(normalizedTerm, false);
+        return;
     }
 
     // [수정 파트 1] 다중 작업 오케스트레이션 (&& 기호 일괄 취합 처리)
@@ -281,7 +269,12 @@ function executePointSearch(searchTerm, useBookmark, isAudit, isSubTask = false)
     }
 
     if (useBookmark) renderSearchResults(matches);
-    if (!isAudit) return null;
+    if (!isAudit) {
+        if (isSubTask) {
+            return `<div style="padding:10px; color:#2b8a3e;">📍 <b>${searchTerm}</b> 레이어에서 <b>${matches.length}개</b>의 위치를 지도에 표시했습니다.</div>`;
+        }
+        return null;
+    }
 
     return renderGisResultList(searchTerm, matches, useBookmark, isSubTask);
 }

@@ -486,8 +486,211 @@ export async function saveAiKnowledge() {
     showAlert("지식 저장 기능이 비활성화되었습니다.", "info");
 }
 
+/** JSON 안전 파서 */
+function parseJsonSafe(text) {
+    try {
+        let cleanText = text.trim();
+        if (cleanText.startsWith("```")) {
+            cleanText = cleanText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+        }
+        return JSON.parse(cleanText);
+    } catch (e) {
+        console.error("JSON 파싱 오류:", text, e);
+        return null;
+    }
+}
+
+/** GIS AI 모달 로딩 상태 표기 */
+function showGisAiModalLoading(query, isFollowUp) {
+    const modal = document.getElementById('gisAiModal');
+    if (!modal) return;
+
+    document.getElementById('gisAiUserQuery').innerText = query;
+    document.getElementById('gisAiIntent').innerHTML = `<span class="spinner"></span> 의도 분석 중...`;
+    document.getElementById('gisAiGrammar').innerText = "⏳ 번역 중...";
+    document.getElementById('gisAiNarrative').innerHTML = `<span class="spinner"></span> 데이터를 도면과 대조하여 답변을 작성하고 있습니다...`;
+    document.getElementById('gisAiResultContainer').style.display = 'none';
+    document.getElementById('gisAiResultHtml').innerHTML = '';
+    document.getElementById('gisAiFollowUpInput').value = '';
+
+    if (!isFollowUp) {
+        modal.style.display = 'flex';
+    }
+}
+
+/** GIS AI 모달 성공 상태 표기 */
+function showGisAiModalSuccess(query, intent, grammar, narrative, resultHtml) {
+    const modal = document.getElementById('gisAiModal');
+    if (!modal) return;
+
+    document.getElementById('gisAiUserQuery').innerText = query;
+    document.getElementById('gisAiIntent').innerText = intent;
+    document.getElementById('gisAiGrammar').innerText = grammar;
+    document.getElementById('gisAiNarrative').innerHTML = formatResponseText(narrative);
+    document.getElementById('gisAiFollowUpInput').value = '';
+
+    const resultContainer = document.getElementById('gisAiResultContainer');
+    const resultHtmlEl = document.getElementById('gisAiResultHtml');
+
+    if (resultHtml && resultHtml.trim() !== '') {
+        resultHtmlEl.innerHTML = resultHtml;
+        resultContainer.style.display = 'block';
+    } else {
+        resultContainer.style.display = 'none';
+    }
+
+    modal.style.display = 'flex';
+}
+
+/** GIS AI 모달 에러 상태 표기 */
+function showGisAiModalError(query, errorMessage) {
+    const modal = document.getElementById('gisAiModal');
+    if (!modal) return;
+
+    document.getElementById('gisAiUserQuery').innerText = query;
+    document.getElementById('gisAiIntent').innerText = "분석 실패";
+    document.getElementById('gisAiGrammar').innerText = "ERROR";
+    document.getElementById('gisAiNarrative').innerHTML = `<div style="color:#e03131; font-weight:bold;">⚠️ 분석 중 에러 발생: ${errorMessage}</div>`;
+    document.getElementById('gisAiResultContainer').style.display = 'none';
+}
+
+/** GIS AI 질문 처리 핸들러 (번역 -> 실행 -> 서술화 파이프라인) */
+export async function handleGisAiSearch(query, isFollowUp = false) {
+    if (isAiProcessing) {
+        showAlert("AI가 이전 질문을 분석 중입니다. 잠시만 기다려 주세요.", "info");
+        return;
+    }
+
+    try {
+        isAiProcessing = true;
+        showGisAiModalLoading(query, isFollowUp);
+
+        // 레이어 리스트 획득
+        const layerList = Array.from(window.cadLayers || []).join(', ');
+
+        // 1단계: 자연어 -> GIS 문법 번역
+        let promptText = query;
+        let contextText = `사용 가능한 레이어 목록: ${layerList}`;
+        
+        if (isFollowUp) {
+            const historyText = state.gisAiHistory.map(h => `질문: ${h.query} -> 번역된 문법: ${h.grammar}`).join('\n');
+            contextText += `\n\n[이전 대화 맥락]\n${historyText}\n\n위 대화 흐름을 참고하여 사용자의 새 질문을 GIS 전용 검색 문법으로 정확히 번역해줘.`;
+        }
+
+        const transRes = await callAiEdge(promptText, contextText, 'translate_gis');
+        
+        if (!transRes.success || !transRes.answer) {
+            throw new Error(transRes.error || "문법 번역에 실패했습니다.");
+        }
+
+        let grammar = transRes.answer.trim().replace(/['"`]/g, '');
+        console.log(`[GIS AI 번역]: ${grammar}`);
+
+        if (!grammar.includes('📍') && !grammar.includes('📋')) {
+            throw new Error(`유효한 GIS 검색 문법이 생성되지 않았습니다: ${grammar}`);
+        }
+
+        document.getElementById('gisAiGrammar').innerText = grammar;
+
+        // 2단계: 문법 로컬 실행
+        let localResultHtml = "";
+        let resultSummary = "";
+        
+        try {
+            // isSubTask = true로 실행하여 모달 개방을 억제하고 데이터만 수령
+            const res = await window.executeGisSearch(grammar, true);
+            if (typeof res === 'string') {
+                localResultHtml = res;
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = res;
+                resultSummary = tempDiv.innerText.replace(/\s+/g, ' ').substring(0, 300).trim();
+            } else {
+                resultSummary = "지도 상에 마커를 생성하여 시각화했습니다.";
+            }
+        } catch (execErr) {
+            console.error("Local GIS Execution failed:", execErr);
+            localResultHtml = `<div style="color:red; padding:10px;">로컬 도면 데이터 검색 실행 실패: ${execErr.message}</div>`;
+            resultSummary = "로컬 도면 검색 오류: " + execErr.message;
+        }
+
+        // 3단계: AI 결과 서술화 호출 (point_search 모드로 호출하여 JSON 획득)
+        const narratePrompt = `
+사용자 질문: "${query}"
+적용된 GIS 문법: "${grammar}"
+도면 데이터 검색 결과 요약: "${resultSummary}"
+
+위 정보를 바탕으로 아래 세 가지 필드를 포함한 JSON 형식으로 최종 답변을 작성해 주세요. JSON 외의 다른 텍스트는 절대 포함하지 마십시오.
+{
+  "intent": "사용자의 질문 의도 요약 (한 문장)",
+  "applied_grammar": "적용된 문법 기호 및 레이어 정보 요약",
+  "narrative_answer": "계산 결과를 친절하고 자연스러운 구어체로 설명하는 서술형 답변 (예: 도면에서 제수변 150mm 레이어를 검색하여 총 12개의 위치를 찾아 지도에 표시해 드렸습니다.)"
+}
+`;
+        const narrateRes = await callAiEdge(narratePrompt, "오늘 날짜는 2026년 5월 27일입니다. 출력은 반드시 JSON이어야 합니다.", "point_search");
+        
+        let finalIntent = "도면 데이터 분석";
+        let finalNarrative = "분석이 성공적으로 완료되었습니다.";
+
+        if (narrateRes.success && narrateRes.answer) {
+            const parsed = parseJsonSafe(narrateRes.answer);
+            if (parsed) {
+                finalIntent = parsed.intent || finalIntent;
+                finalNarrative = parsed.narrative_answer || finalNarrative;
+            } else {
+                finalNarrative = narrateRes.answer;
+            }
+        }
+
+        // 대화 이력 저장
+        if (!isFollowUp) {
+            state.gisAiHistory = [];
+        }
+        state.gisAiHistory.push({
+            query: query,
+            grammar: grammar,
+            intent: finalIntent,
+            narrative: finalNarrative
+        });
+        state.lastGisAiQuery = query;
+        state.lastGisAiGrammar = grammar;
+
+        // 최종 모달 바인딩 및 출력
+        showGisAiModalSuccess(query, finalIntent, grammar, finalNarrative, localResultHtml);
+
+    } catch (err) {
+        console.error("GIS AI Search error:", err);
+        showGisAiModalError(query, err.message);
+    } finally {
+        isAiProcessing = false;
+    }
+}
+
+/** 추가/변경 질문 전송 */
+export async function submitGisAiFollowUp() {
+    const inputEl = document.getElementById('gisAiFollowUpInput');
+    if (!inputEl) return;
+    const query = inputEl.value.trim();
+    if (!query) return;
+
+    await handleGisAiSearch(query, true);
+}
+
+/** 모달 내부에서 문법 강제 재실행 */
+export async function runGisAiGrammar() {
+    const grammar = document.getElementById('gisAiGrammar').innerText;
+    if (grammar && grammar !== '-' && grammar !== 'ERROR') {
+        const modal = document.getElementById('gisAiModal');
+        if (modal) modal.style.display = 'none';
+        showAlert(`문법 실행 중: ${grammar}`, "info");
+        await window.executeGisSearch(grammar, false);
+    }
+}
+
 // 브라우저 콘솔 및 HTML에서 직접 호출할 수 있도록 전역 객체에 등록
 window.saveAiKnowledge = saveAiKnowledge;
 window.askFollowUp = askFollowUp;
 window.copyRawContent = copyRawContent;
 window.toggleManualInput = toggleManualInput;
+window.submitGisAiFollowUp = submitGisAiFollowUp;
+window.runGisAiGrammar = runGisAiGrammar;
+window.handleGisAiSearch = handleGisAiSearch;

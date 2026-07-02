@@ -128,7 +128,7 @@ ${searchContext}`;
       }
     };
 
-    const API_URL = `${API_BASE}/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
+    const API_URL = `${API_BASE}/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     const response = await fetch(API_URL, {
       method: 'POST',
@@ -154,7 +154,7 @@ ${searchContext}`;
       JSON.stringify({ 
         success: true, 
         answer: finalAnswer.trim() || "답변을 생성할 수 없습니다.",
-        model: "gemini-2.5-flash-lite"
+        model: "gemini-2.5-flash"
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     );
