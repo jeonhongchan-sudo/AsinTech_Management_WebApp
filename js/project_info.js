@@ -65,7 +65,7 @@ function renderProjectInfoModal(data) {
                     <p style="font-size:12px; color:#888; margin-top:8px;">※ 비고: ${managers.etc || '-'}</p>
                 </div>
                 <div id="info-tab-pipe" class="info-tab-pane" style="display:none;">
-                    <div style="margin-bottom:15px; font-size:16px; font-weight:bold; color:#e03131; background:#fff5f5; padding:12px; border-radius:6px; border:1px solid #ffa8a8; text-align:center;">📏 총 연장: ${pipes.total || '0.00'} m</div>
+                    <div style="margin-bottom:15px; font-size:16px; font-weight:bold; color:#e03131; background:#fff5f5; padding:12px; border-radius:6px; border:1px solid #ffa8a8; text-align:center;">📏 총 연장: ${pipes.total || '0.00'} km</div>
                     ${renderInfoTable(pipes)}
                     <p style="font-size:12px; color:#888; margin-top:8px;">※ 비고: ${pipes.etc || '-'}</p>
                 </div>
