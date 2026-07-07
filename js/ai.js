@@ -176,9 +176,8 @@ export async function handleAiSearch(query, cadLayersSet, isFollowUp = false) {
         if (isFollowUp) {
             state.aiCorrectionHistory.push(query);
             combinedContext = `${systemContextPrefix}[이전 대화 요약]\n${state.lastAiAnswer}\n\n[도면 맥락]\n${layerContext}\n\n위 답변과 사용자 히스토리를 종합하여 질문에 답하세요.`;
-            finalQuery = query;
+            combinedContext = `${systemContextPrefix}[이전 대화 요약]\n${state.lastAiAnswer}\n\n[도면 맥락]\n${layerContext}\n\n위 답변과 사용자 히스토리1를 종합하여 질문에 답하세요.`;
         } else {
-            state.originalAiQuery = query;
             state.aiCorrectionHistory = [];
             combinedContext = `${systemContextPrefix}현재 도면 레이어: ${layerContext}`;
         }
@@ -539,8 +538,9 @@ export async function handleGisAiSearch(query, isFollowUp = false) {
         let grammar = transRes.answer.trim().replace(/['"`]/g, '');
         console.log(`[GIS AI 번역]: ${grammar}`);
 
+        // AI가 생성한 문법이 유효한 출력 플래그(📍 또는 📋)를 포함하는지 검증
         if (!grammar.includes('📍') && !grammar.includes('📋')) {
-            throw new Error(`유효한 GIS 검색 문법이 생성되지 않았습니다: ${grammar}`);
+            throw new Error(`유효한 GIS 검색 문법이 생성되지 않았습니다. 결과 출력 플래그(📍 또는 📋)가 누락되었습니다: ${grammar}`);
         }
 
         document.getElementById('gisAiGrammar').innerText = grammar;
