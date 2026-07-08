@@ -2,10 +2,72 @@
  * [파일 2] search_gis.js
  * 프로젝트 선택 시 동작하며, 도면 데이터 기반의 GIS 분석 및 특수 문법을 처리합니다.
  */
-import { state, callSupabaseDirect, showAlert, callAiEdge } from './core.js';
+import { state, callSupabaseDirect, showAlert } from './core.js';
 import { sanitizeSearchText, matchComplexQuery } from './search_db.js';
 import { cadLayers, renderSearchResults, displayMatchesOnMap, loadProjectPhotos, ensureGeoJSONLoaded } from './viewers.js';
-import { showAiResponseModal, showModalMessage, closeAiResponseModal } from './ai.js';
+
+if (typeof window !== 'undefined') {
+    window.handleGisAiSearch = function(query, isSubTask = false) {
+        return executePointSearch(query, false, true, isSubTask);
+    };
+
+    window.askFollowUp = function() {
+        closeGisResultModal();
+        openGisSearchModal();
+    };
+}
+
+export function showGisResultModal(title, subtitle = '', sourceHint = '', isSubTask = false) {
+    const modal = document.getElementById('aiResponseModal');
+    const titleEl = modal?.querySelector('h3');
+    const sourceEl = document.getElementById('aiAnswerSource');
+    const contentEl = document.getElementById('aiAnswerContent');
+    const manualArea = document.getElementById('aiManualInputArea');
+    const manualInput = document.getElementById('aiManualInput');
+
+    if (!modal || !contentEl) {
+        showAlert(title || '분석 결과를 표시할 수 없습니다.', 'info');
+        return;
+    }
+
+    if (titleEl) titleEl.textContent = title || 'AI 분석 답변';
+    if (sourceEl) sourceEl.textContent = sourceHint || subtitle || '';
+    if (manualArea) manualArea.style.display = 'none';
+    if (manualInput) manualInput.value = '';
+    contentEl.innerHTML = '';
+    modal.style.display = 'flex';
+}
+
+export function closeGisResultModal() {
+    const modal = document.getElementById('aiResponseModal');
+    const contentEl = document.getElementById('aiAnswerContent');
+    if (modal) modal.style.display = 'none';
+    if (contentEl) contentEl.innerHTML = '';
+}
+
+export function showAiResponseModal(title, subtitle = '', sourceHint = '', isSubTask = false) {
+    showGisResultModal(title, subtitle, sourceHint, isSubTask);
+}
+
+export function closeAiResponseModal() {
+    closeGisResultModal();
+}
+
+export function showModalMessage(title, message, type = 'info') {
+    const modal = document.getElementById('aiResponseModal');
+    const titleEl = modal?.querySelector('h3');
+    const contentEl = document.getElementById('aiAnswerContent');
+
+    if (!modal || !contentEl) {
+        showAlert(message, type);
+        return;
+    }
+
+    if (titleEl) titleEl.textContent = title || '알림';
+    const color = type === 'error' ? '#e03131' : type === 'warning' ? '#f08c00' : '#2b8a3e';
+    contentEl.innerHTML = `<div style="padding:10px; color:${color};">${message}</div>`;
+    modal.style.display = 'flex';
+}
 
 /** GIS 전용 검색 모달 UI 생성 */
 export function openGisSearchModal() {
@@ -159,9 +221,10 @@ export async function executeGisSearch(searchTerm, useBookmarkFromParent = false
             // 하위 태스크는 명시적인 📍 또는 📋가 없으면 유효하지 않다고 판단
             return `<div style="padding:10px; color:#e03131;">유효하지 않은 GIS 문법: ${normalizedTerm} (결과 출력 플래그 없음)</div>`;
         }
-        // AI 전용 모달을 통한 2단계 자연어 검색 오케스트레이션 실행
-        window.handleGisAiSearch(normalizedTerm, false);
-        return;
+        if (typeof window.handleGisAiSearch === 'function') {
+            return window.handleGisAiSearch(normalizedTerm, false);
+        }
+        return executePointSearch(normalizedTerm, false, true, false);
     }
 
     // [수정 파트 1] 다중 작업 오케스트레이션 (&& 기호 일괄 취합 처리)
