@@ -43,6 +43,7 @@ export const state = {
     searchMarkers: [],         // [추가] 검색 결과 마커 관리용
     currentProjectBounds: null, // [추가] 현재 프로젝트의 전체 영역 저장용
     currentProjectGeoJSON: null, // [추가] 전역 검색용 데이터 (handle ID 매칭용)
+    currentProjectSourceCrs: null, // [추가] 현재 프로젝트의 입력/원본 좌표계
 };
 
 // 유틸리티 함수

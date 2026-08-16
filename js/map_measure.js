@@ -75,6 +75,67 @@ function resolveMeasurementPoint(rawLon, rawLat, feature = null) {
     return { lon: Number(rawLon), lat: Number(rawLat) };
 }
 
+function normalizeSupabaseCoordinateResult(result) {
+    if (!result || typeof result !== 'object') return null;
+
+    const candidates = [
+        result.coordinates,
+        result.point,
+        result.xy,
+        result.geom?.coordinates,
+        result.geometry?.coordinates,
+        result.location,
+        result.coords,
+        result.position
+    ];
+
+    for (const candidate of candidates) {
+        if (Array.isArray(candidate) && candidate.length >= 2 && Number.isFinite(Number(candidate[0])) && Number.isFinite(Number(candidate[1]))) {
+            return [Number(candidate[0]), Number(candidate[1])];
+        }
+    }
+
+    if (Number.isFinite(Number(result.x)) && Number.isFinite(Number(result.y))) {
+        return [Number(result.x), Number(result.y)];
+    }
+    if (Number.isFinite(Number(result.lon)) && Number.isFinite(Number(result.lat))) {
+        return [Number(result.lon), Number(result.lat)];
+    }
+    if (Array.isArray(result)) {
+        const nums = result.filter(v => Number.isFinite(Number(v)));
+        if (nums.length >= 2) return [Number(nums[0]), Number(nums[1])];
+    }
+
+    return null;
+}
+
+async function transformPointToProjectCrs(point) {
+    if (!state.currentProjectSourceCrs) return point;
+
+    const sourceCrs = state.currentProjectSourceCrs;
+    const candidates = [
+        { name: 'transform_point_to_tm', body: { point: [point.lon, point.lat], source_crs: sourceCrs } },
+        { name: 'convert_to_tm', body: { point: [point.lon, point.lat], source_crs: sourceCrs } },
+        { name: 'reproject_to_tm', body: { point: [point.lon, point.lat], source_crs: sourceCrs } },
+        { name: 'transform_point', body: { lon: point.lon, lat: point.lat, source_crs: sourceCrs } },
+        { name: 'transform_coordinates', body: { coordinates: [point.lon, point.lat], source_crs: sourceCrs } },
+        { name: 'project_point', body: { point: [point.lon, point.lat], source_crs: sourceCrs } },
+        { name: 'convert_point_to_source_crs', body: { point: [point.lon, point.lat], source_crs: sourceCrs } }
+    ];
+
+    for (const candidate of candidates) {
+        try {
+            const result = await callSupabaseDirect(`rpc/${candidate.name}`, 'POST', candidate.body);
+            const coords = normalizeSupabaseCoordinateResult(result);
+            if (coords) return { lon: coords[0], lat: coords[1] };
+        } catch (err) {
+            // 다음 후보로 시도합니다.
+        }
+    }
+
+    return point;
+}
+
 async function calculateLineLength(feature) {
     if (!state.currentProjectSourceCrs) {
         throw new Error('좌표계 정보 누락');
@@ -119,7 +180,8 @@ export async function handleDistanceClick(coords, feature = null) {
     const lon = Number(useCoords[0]);
     const lat = Number(useCoords[1]);
     const rawPoint = { lon, lat };
-    const exactPoint = resolveMeasurementPoint(lon, lat, feature);
+    const geoJsonPoint = resolveMeasurementPoint(lon, lat, feature);
+    const exactPoint = await transformPointToProjectCrs(geoJsonPoint);
 
     if (state.distanceMeasureMode === 'straight') {
         if (!state.distanceStartPoint) {
@@ -139,7 +201,7 @@ export async function handleDistanceClick(coords, feature = null) {
         }
 
         const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8, anchor: 'center' })
-            .setLngLat([lon, lat])
+            .setLngLat([exactPoint.lon, exactPoint.lat])
             .addTo(state.cadMap);
         state.distanceMarkers.push(endMarker);
 
@@ -228,7 +290,7 @@ export async function handleDistanceClick(coords, feature = null) {
 
     const start = state.distanceStartPoint;
     const baseEnd = state.distanceSecondPoint;
-    const target = rawPoint;
+    const target = exactPoint;
 
     if (Math.abs(start.lon - target.lon) < 0.00000001 && Math.abs(start.lat - target.lat) < 0.00000001) {
         return;
