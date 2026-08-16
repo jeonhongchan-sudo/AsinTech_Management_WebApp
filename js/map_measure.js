@@ -35,6 +35,46 @@ function createMeasurementPopup(content, position) {
     return popupContent;
 }
 
+function resolveMeasurementPoint(rawLon, rawLat, feature = null) {
+    if (feature && feature.geometry && Array.isArray(feature.geometry.coordinates)) {
+        const coords = feature.geometry.coordinates;
+        return { lon: Number(coords[0]), lat: Number(coords[1]) };
+    }
+
+    if (state.currentProjectGeoJSON && Array.isArray(state.currentProjectGeoJSON.features)) {
+        let best = null;
+        let bestDist = Infinity;
+
+        state.currentProjectGeoJSON.features.forEach(feat => {
+            if (!feat || !feat.geometry || !Array.isArray(feat.geometry.coordinates)) return;
+            const coords = feat.geometry.coordinates;
+            const points = Array.isArray(coords[0]) ? coords.flat() : coords;
+
+            for (let i = 0; i + 1 < points.length; i += 2) {
+                const px = Number(points[i]);
+                const py = Number(points[i + 1]);
+                const dx = px - rawLon;
+                const dy = py - rawLat;
+                const distSq = dx * dx + dy * dy;
+
+                if (distSq < bestDist) {
+                    bestDist = distSq;
+                    best = { lon: px, lat: py };
+                }
+            }
+        });
+
+        if (best) {
+            const snapThreshold = 1.0;
+            if (bestDist <= snapThreshold * snapThreshold) {
+                return best;
+            }
+        }
+    }
+
+    return { lon: Number(rawLon), lat: Number(rawLat) };
+}
+
 async function calculateLineLength(feature) {
     if (!state.currentProjectSourceCrs) {
         throw new Error('좌표계 정보 누락');
@@ -76,21 +116,23 @@ export function toggleDistanceMode(forceValue) {
 /** 거리 측정 클릭 핸들러 */
 export async function handleDistanceClick(coords, feature = null) {
     const useCoords = (feature && feature.geometry) ? feature.geometry.coordinates : coords;
-    const lon = useCoords[0];
-    const lat = useCoords[1];
+    const lon = Number(useCoords[0]);
+    const lat = Number(useCoords[1]);
+    const rawPoint = { lon, lat };
+    const exactPoint = resolveMeasurementPoint(lon, lat, feature);
 
     if (state.distanceMeasureMode === 'straight') {
         if (!state.distanceStartPoint) {
-            state.distanceStartPoint = { lon, lat };
+            state.distanceStartPoint = { lon: exactPoint.lon, lat: exactPoint.lat };
             const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8, anchor: 'center' })
-                .setLngLat([lon, lat])
+                .setLngLat([exactPoint.lon, exactPoint.lat])
                 .addTo(state.cadMap);
             state.distanceMarkers.push(startMarker);
             return;
         }
 
         const start = state.distanceStartPoint;
-        const end = { lon, lat };
+        const end = { lon: exactPoint.lon, lat: exactPoint.lat };
 
         if (Math.abs(start.lon - end.lon) < 0.00000001 && Math.abs(start.lat - end.lat) < 0.00000001) {
             return;
@@ -122,7 +164,7 @@ export async function handleDistanceClick(coords, feature = null) {
         try {
             const dist = await calculateLineLength(createLineFeature(start, end, 'MANUAL_MEASURE'));
             const popupContent = createMeasurementPopup(
-                `<div class="dist-val" style="font-weight:bold; font-size:14px;">${dist.toFixed(3)}m</div>`,
+                `<div class="dist-val" style="font-weight:bold; font-size:14px;">${dist.toFixed(2)}m</div>`,
                 [(start.lon + end.lon) / 2, (start.lat + end.lat) / 2]
             );
             popupContent.querySelector('.dist-val').style.color = '#1f3c88';
@@ -139,9 +181,9 @@ export async function handleDistanceClick(coords, feature = null) {
     }
 
     if (!state.distanceStartPoint) {
-        state.distanceStartPoint = { lon, lat };
+        state.distanceStartPoint = { lon: exactPoint.lon, lat: exactPoint.lat };
         const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8, anchor: 'center' })
-            .setLngLat([lon, lat])
+            .setLngLat([exactPoint.lon, exactPoint.lat])
             .addTo(state.cadMap);
         state.distanceMarkers.push(startMarker);
         return;
@@ -149,7 +191,7 @@ export async function handleDistanceClick(coords, feature = null) {
 
     if (!state.distanceSecondPoint) {
         const start = state.distanceStartPoint;
-        const end = { lon, lat };
+        const end = { lon: exactPoint.lon, lat: exactPoint.lat };
 
         if (Math.abs(start.lon - end.lon) < 0.00000001 && Math.abs(start.lat - end.lat) < 0.00000001) {
             return;
@@ -158,7 +200,7 @@ export async function handleDistanceClick(coords, feature = null) {
         state.distanceSecondPoint = end;
 
         const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8, anchor: 'center' })
-            .setLngLat([lon, lat])
+            .setLngLat([exactPoint.lon, exactPoint.lat])
             .addTo(state.cadMap);
         state.distanceMarkers.push(endMarker);
 
@@ -186,7 +228,7 @@ export async function handleDistanceClick(coords, feature = null) {
 
     const start = state.distanceStartPoint;
     const baseEnd = state.distanceSecondPoint;
-    const target = { lon, lat };
+    const target = rawPoint;
 
     if (Math.abs(start.lon - target.lon) < 0.00000001 && Math.abs(start.lat - target.lat) < 0.00000001) {
         return;
@@ -254,10 +296,10 @@ export async function handleDistanceClick(coords, feature = null) {
 
         const popupContent = createMeasurementPopup(
             `<div class="dist-val" style="font-weight:bold; font-size:13px; line-height:1.6; color:#1f3c88;">
-                <div>AB: ${ab.toFixed(3)}m</div>
-                <div>AH: ${ah.toFixed(3)}m</div>
-                <div>HB: ${hb.toFixed(3)}m</div>
-                <div>HC: ${hc.toFixed(3)}m</div>
+                <div>AB: ${ab.toFixed(2)}m</div>
+                <div>AH: ${ah.toFixed(2)}m</div>
+                <div>HB: ${hb.toFixed(2)}m</div>
+                <div>HC: ${hc.toFixed(2)}m</div>
             </div>`,
             [foot.lon, foot.lat]
         );
