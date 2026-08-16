@@ -3,9 +3,16 @@ import { state, callSupabaseDirect, showAlert } from './core.js';
 function createLineFeature(start, end, handle = 'DISTANCE') {
     return {
         type: 'Feature',
-        properties: { handle },
+        properties: {
+            handle: handle,
+            tm_x: start.tmX,
+            tm_y: start.tmY,
+            tm_x_end: end.tmX,
+            tm_y_end: end.tmY
+        },
         geometry: {
             type: 'LineString',
+            // WGS84 좌표는 지도 표시에만 사용하고, TM 좌표는 계산에 활용합니다.
             coordinates: [[start.lon, start.lat], [end.lon, end.lat]]
         }
     };
@@ -24,7 +31,7 @@ function createMeasurementPopup(content, position) {
     const popup = new maplibregl.Popup({ closeOnClick: false, closeButton: false, anchor: 'bottom', offset: 15 })
         .setLngLat(position)
         .setDOMContent(popupContent)
-        .addTo(state.cadMap);
+                .addTo(state.cadMap);
 
     closeBtn.onclick = (e) => {
         e.stopPropagation();
@@ -36,43 +43,58 @@ function createMeasurementPopup(content, position) {
 }
 
 function resolveMeasurementPoint(rawLon, rawLat, feature = null) {
-    if (feature && feature.geometry && Array.isArray(feature.geometry.coordinates)) {
-        const coords = feature.geometry.coordinates;
-        return { lon: Number(coords[0]), lat: Number(coords[1]) };
+    // 만약 직접 feature가 주어졌다면, 해당 feature의 TM 좌표와 handle을 우선적으로 사용
+    if (feature && feature.properties && feature.properties.handle &&
+        feature.properties.tm_x !== undefined && feature.properties.tm_y !== undefined) {
+        return {
+            lon: Number(feature.geometry.coordinates[0]),
+            lat: Number(feature.geometry.coordinates[1]),
+            tmX: Number(feature.properties.tm_x),
+            tmY: Number(feature.properties.tm_y),
+            handle: feature.properties.handle
+        };
     }
 
+    // `state.currentProjectGeoJSON`에서 가장 가까운 점을 찾아 TM 좌표와 handle 반환
     if (state.currentProjectGeoJSON && Array.isArray(state.currentProjectGeoJSON.features)) {
         let best = null;
-        let bestDist = Infinity;
+        let bestDistSq = Infinity;
+        let bestFeature = null;
 
         state.currentProjectGeoJSON.features.forEach(feat => {
-            if (!feat || !feat.geometry || !Array.isArray(feat.geometry.coordinates)) return;
-            const coords = feat.geometry.coordinates;
-            const points = Array.isArray(coords[0]) ? coords.flat() : coords;
+            if (!feat || !feat.geometry || feat.geometry.type !== 'Point' || !Array.isArray(feat.geometry.coordinates)) return;
+            // GeoJSON 피처의 WGS84 좌표
+            const px = Number(feat.geometry.coordinates[0]);
+            const py = Number(feat.geometry.coordinates[1]);
+            const dx = px - rawLon;
+            const dy = py - rawLat;
+            const distSq = dx * dx + dy * dy;
 
-            for (let i = 0; i + 1 < points.length; i += 2) {
-                const px = Number(points[i]);
-                const py = Number(points[i + 1]);
-                const dx = px - rawLon;
-                const dy = py - rawLat;
-                const distSq = dx * dx + dy * dy;
-
-                if (distSq < bestDist) {
-                    bestDist = distSq;
-                    best = { lon: px, lat: py };
-                }
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = { lon: px, lat: py };
+                bestFeature = feat;
             }
         });
 
-        if (best) {
-            const snapThreshold = 1.0;
-            if (bestDist <= snapThreshold * snapThreshold) {
-                return best;
+        if (best && bestFeature) {
+            const snapThreshold = 1.0; // WGS84 기준 스냅 임계값 (예: 1.0 = 1도)
+            if (bestDistSq <= snapThreshold * snapThreshold) {
+                // 가장 가까운 피처의 TM 좌표와 handle을 반환
+                return {
+                    lon: best.lon,
+                    lat: best.lat,
+                    tmX: Number(bestFeature.properties.tm_x || bestFeature.properties.x_coord || bestFeature.properties.x),
+                    tmY: Number(bestFeature.properties.tm_y || bestFeature.properties.y_coord || bestFeature.properties.y),
+                    handle: bestFeature.properties.handle
+                };
             }
         }
     }
 
-    return { lon: Number(rawLon), lat: Number(rawLat) };
+    // GeoJSON 스냅에 실패했거나 TM 좌표가 없는 경우, 원시 WGS84 좌표와 TM 좌표(null)를 반환
+    // 이 경우 거리 계산은 실패할 수 있음.
+    return { lon: Number(rawLon), lat: Number(rawLat), tmX: null, tmY: null, handle: null };
 }
 
 function normalizeSupabaseCoordinateResult(result) {
@@ -87,7 +109,7 @@ function normalizeSupabaseCoordinateResult(result) {
         result.location,
         result.coords,
         result.position
-    ];
+        ];
 
     for (const candidate of candidates) {
         if (Array.isArray(candidate) && candidate.length >= 2 && Number.isFinite(Number(candidate[0])) && Number.isFinite(Number(candidate[1]))) {
@@ -109,41 +131,36 @@ function normalizeSupabaseCoordinateResult(result) {
     return null;
 }
 
-async function transformPointToProjectCrs(point) {
-    if (!state.currentProjectSourceCrs) return point;
+// transformPointToProjectCrs 함수는 이제 필요 없으므로 제거합니다.
 
-    const sourceCrs = state.currentProjectSourceCrs;
-    const candidates = [
-        { name: 'transform_point_to_tm', body: { point: [point.lon, point.lat], source_crs: sourceCrs } },
-        { name: 'convert_to_tm', body: { point: [point.lon, point.lat], source_crs: sourceCrs } },
-        { name: 'reproject_to_tm', body: { point: [point.lon, point.lat], source_crs: sourceCrs } },
-        { name: 'transform_point', body: { lon: point.lon, lat: point.lat, source_crs: sourceCrs } },
-        { name: 'transform_coordinates', body: { coordinates: [point.lon, point.lat], source_crs: sourceCrs } },
-        { name: 'project_point', body: { point: [point.lon, point.lat], source_crs: sourceCrs } },
-        { name: 'convert_point_to_source_crs', body: { point: [point.lon, point.lat], source_crs: sourceCrs } }
-    ];
-
-    for (const candidate of candidates) {
-        try {
-            const result = await callSupabaseDirect(`rpc/${candidate.name}`, 'POST', candidate.body);
-            const coords = normalizeSupabaseCoordinateResult(result);
-            if (coords) return { lon: coords[0], lat: coords[1] };
-        } catch (err) {
-            // 다음 후보로 시도합니다.
-        }
-    }
-
-    return point;
-}
 
 async function calculateLineLength(feature) {
     if (!state.currentProjectSourceCrs) {
         throw new Error('좌표계 정보 누락');
     }
 
+    // calculate_distance_by_handles RPC 호출
+    // start와 end는 resolveMeasurementPoint에서 반환된 객체 (tmX, tmY, handle 포함)
+    const startHandle = feature.properties.handle; // 'AB', 'AH', 'HB', 'HC' 등
+    const startTmX = feature.properties.tm_x;
+    const startTmY = feature.properties.tm_y;
+    const endTmX = feature.properties.tm_x_end;
+    const endTmY = feature.properties.tm_y_end;
+
+    // Supabase RPC에 두 점의 TM 좌표를 직접 전달하여 거리 계산
+    // calculate_line_lengths 대신 이 부분은 새로운 RPC 함수를 호출해야 함.
+    // 임시로 calculate_line_lengths를 사용하지만, 내부 로직은 TM 좌표 기반으로 변경되어야 함
+    // 또는, 이전에 제안했던 calculate_line_lengths 함수의 수정을 기반으로 호출
     const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
-        geoms: [feature],
-        source_crs: state.currentProjectSourceCrs
+        geoms: [{
+            type: 'Feature',
+            properties: { handle: startHandle },
+            geometry: {
+                type: 'LineString',
+                coordinates: [[startTmX, startTmY], [endTmX, endTmY]] // TM 좌표를 GeoJSON으로 구성
+            }
+        }],
+        source_crs: state.currentProjectSourceCrs // 좌표계 정보는 계속 전달
     });
 
     if (!results || results.length === 0) {
@@ -176,16 +193,24 @@ export function toggleDistanceMode(forceValue) {
 
 /** 거리 측정 클릭 핸들러 */
 export async function handleDistanceClick(coords, feature = null) {
-    const useCoords = (feature && feature.geometry) ? feature.geometry.coordinates : coords;
-    const lon = Number(useCoords[0]);
-    const lat = Number(useCoords[1]);
-    const rawPoint = { lon, lat };
-    const geoJsonPoint = resolveMeasurementPoint(lon, lat, feature);
-    const exactPoint = await transformPointToProjectCrs(geoJsonPoint);
+    const rawLon = Number(coords[0]);
+    const rawLat = Number(coords[1]);
+
+    // GeoJSON에서 가장 가까운 포인트의 TM 좌표와 handle을 가져옴
+    const resolvedPoint = resolveMeasurementPoint(rawLon, rawLat, feature);
+
+    // TM 좌표가 유효한지 확인
+    if (resolvedPoint.tmX === null || resolvedPoint.tmY === null) {
+        showAlert('선택된 지점의 유효한 TM 좌표를 찾을 수 없습니다. CAD 데이터에 TM 좌표가 포함되어 있는지 확인해 주세요.', 'error');
+        return;
+    }
+
+    // 이제 exactPoint는 TM 좌표와 handle을 포함한 resolvedPoint 객체
+    const exactPoint = resolvedPoint;
 
     if (state.distanceMeasureMode === 'straight') {
         if (!state.distanceStartPoint) {
-            state.distanceStartPoint = { lon: exactPoint.lon, lat: exactPoint.lat };
+            state.distanceStartPoint = { lon: exactPoint.lon, lat: exactPoint.lat, tmX: exactPoint.tmX, tmY: exactPoint.tmY, handle: exactPoint.handle };
             const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8, anchor: 'center' })
                 .setLngLat([exactPoint.lon, exactPoint.lat])
                 .addTo(state.cadMap);
@@ -194,9 +219,10 @@ export async function handleDistanceClick(coords, feature = null) {
         }
 
         const start = state.distanceStartPoint;
-        const end = { lon: exactPoint.lon, lat: exactPoint.lat };
+        const end = { lon: exactPoint.lon, lat: exactPoint.lat, tmX: exactPoint.tmX, tmY: exactPoint.tmY, handle: exactPoint.handle };
 
-        if (Math.abs(start.lon - end.lon) < 0.00000001 && Math.abs(start.lat - end.lat) < 0.00000001) {
+        // WGS84 좌표 기준이지만, TM 좌표가 동일한지 확인하는 것이 더 정확할 수 있음.
+        if (Math.abs(start.tmX - end.tmX) < 0.00000001 && Math.abs(start.tmY - end.tmY) < 0.00000001) {
             return;
         }
 
@@ -224,26 +250,27 @@ export async function handleDistanceClick(coords, feature = null) {
         state.distanceMarkers.push({ type: 'layer', id: lineId });
 
         try {
+            // createLineFeature에 TM 좌표 정보도 함께 전달
             const dist = await calculateLineLength(createLineFeature(start, end, 'MANUAL_MEASURE'));
-            const popupContent = createMeasurementPopup(
+        const popupContent = createMeasurementPopup(
                 `<div class="dist-val" style="font-weight:bold; font-size:14px;">${dist.toFixed(2)}m</div>`,
                 [(start.lon + end.lon) / 2, (start.lat + end.lat) / 2]
-            );
-            popupContent.querySelector('.dist-val').style.color = '#1f3c88';
-        } catch (err) {
-            const popupContent = createMeasurementPopup(
+        );
+        popupContent.querySelector('.dist-val').style.color = '#1f3c88';
+    } catch (err) {
+        const popupContent = createMeasurementPopup(
                 '<div class="dist-val" style="font-weight:bold; font-size:13px; color:#dc3545;">거리 계산 불가</div>',
                 [(start.lon + end.lon) / 2, (start.lat + end.lat) / 2]
-            );
+        );
             showAlert('두 점 거리 계산에 실패했습니다. 좌표계를 확인해 주세요.', 'error');
-        }
-
-        state.distanceStartPoint = null;
+    }
+    state.distanceStartPoint = null;
         return;
     }
 
+    // (직교 거리 측정 모드)
     if (!state.distanceStartPoint) {
-        state.distanceStartPoint = { lon: exactPoint.lon, lat: exactPoint.lat };
+        state.distanceStartPoint = { lon: exactPoint.lon, lat: exactPoint.lat, tmX: exactPoint.tmX, tmY: exactPoint.tmY, handle: exactPoint.handle };
         const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8, anchor: 'center' })
             .setLngLat([exactPoint.lon, exactPoint.lat])
             .addTo(state.cadMap);
@@ -253,12 +280,11 @@ export async function handleDistanceClick(coords, feature = null) {
 
     if (!state.distanceSecondPoint) {
         const start = state.distanceStartPoint;
-        const end = { lon: exactPoint.lon, lat: exactPoint.lat };
+        const end = { lon: exactPoint.lon, lat: exactPoint.lat, tmX: exactPoint.tmX, tmY: exactPoint.tmY, handle: exactPoint.handle };
 
-        if (Math.abs(start.lon - end.lon) < 0.00000001 && Math.abs(start.lat - end.lat) < 0.00000001) {
+        if (Math.abs(start.tmX - end.tmX) < 0.00000001 && Math.abs(start.tmY - end.tmY) < 0.00000001) {
             return;
         }
-
         state.distanceSecondPoint = end;
 
         const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8, anchor: 'center' })
@@ -290,18 +316,19 @@ export async function handleDistanceClick(coords, feature = null) {
 
     const start = state.distanceStartPoint;
     const baseEnd = state.distanceSecondPoint;
-    const target = exactPoint;
+    const target = { lon: exactPoint.lon, lat: exactPoint.lat, tmX: exactPoint.tmX, tmY: exactPoint.tmY, handle: exactPoint.handle }; // 세 번째 점도 TM 좌표 포함
 
-    if (Math.abs(start.lon - target.lon) < 0.00000001 && Math.abs(start.lat - target.lat) < 0.00000001) {
+    if (Math.abs(start.tmX - target.tmX) < 0.00000001 && Math.abs(start.tmY - target.tmY) < 0.00000001) {
         return;
     }
 
-    if (Math.abs(baseEnd.lon - target.lon) < 0.00000001 && Math.abs(baseEnd.lat - target.lat) < 0.00000001) {
+    if (Math.abs(baseEnd.tmX - target.tmX) < 0.00000001 && Math.abs(baseEnd.tmY - target.tmY) < 0.00000001) {
         return;
     }
 
-    const dx = baseEnd.lon - start.lon;
-    const dy = baseEnd.lat - start.lat;
+    // TM 좌표를 사용하여 직교 지점(foot) 계산
+    const dx = baseEnd.tmX - start.tmX;
+    const dy = baseEnd.tmY - start.tmY;
     const ab2 = dx * dx + dy * dy;
 
     if (ab2 < 1e-12) {
@@ -309,12 +336,24 @@ export async function handleDistanceClick(coords, feature = null) {
         return;
     }
 
-    const vx = target.lon - start.lon;
-    const vy = target.lat - start.lat;
+    const vx = target.tmX - start.tmX;
+    const vy = target.tmY - start.tmY;
     const t = Math.min(1, Math.max(0, (vx * dx + vy * dy) / ab2));
+    const footTmX = start.tmX + dx * t;
+    const footTmY = start.tmY + dy * t;
+
+    // foot의 WGS84 좌표는 현재 없으므로, 대략적인 중간 지점을 표시용으로 사용하거나,
+    // 실제 WGS84 역변환이 필요하다면 별도의 RPC 함수를 호출해야 함.
+    // 여기서는 단순히 지도 표시에 사용할 대략적인 WGS84 좌표를 계산하여 마커를 표시
+    const footLon = start.lon + (baseEnd.lon - start.lon) * t;
+    const footLat = start.lat + (baseEnd.lat - start.lat) * t;
+
     const foot = {
-        lon: start.lon + dx * t,
-        lat: start.lat + dy * t
+        lon: footLon,
+        lat: footLat,
+        tmX: footTmX,
+        tmY: footTmY,
+        handle: 'FOOT_POINT'
     };
 
     const footMarker = new maplibregl.Marker({ color: '#17a2b8', scale: 0.8, anchor: 'center' })
@@ -347,6 +386,7 @@ export async function handleDistanceClick(coords, feature = null) {
 
     try {
         const meas = [
+            // createLineFeature에 TM 좌표도 함께 전달
             createLineFeature(start, baseEnd, 'AB'),
             createLineFeature(start, foot, 'AH'),
             createLineFeature(foot, baseEnd, 'HB'),
@@ -366,7 +406,6 @@ export async function handleDistanceClick(coords, feature = null) {
             [foot.lon, foot.lat]
         );
         popupContent.querySelector('.dist-val').style.color = '#1f3c88';
-
         state.distanceStartPoint = null;
         state.distanceSecondPoint = null;
     } catch (err) {
@@ -376,7 +415,7 @@ export async function handleDistanceClick(coords, feature = null) {
         );
         popupContent.querySelector('.dist-val').style.color = '#dc3545';
         showAlert('직교 거리 계산에 실패했습니다. 좌표계를 확인해 주세요.', 'error');
-    }
+}
 }
 
 /** 거리 측정 초기화 */
