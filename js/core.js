@@ -33,6 +33,7 @@ export const state = {
     projectPhotos: [],      // [추가] 현재 프로젝트의 전체 사진 목록 (자동 매칭용)
     isDistanceMode: false,  // [추가] 거리 측정 모드 활성화 여부
     distanceStartPoint: null, // [추가] 거리 측정 시작점 {lon, lat}
+    distanceSecondPoint: null, // [추가] 거리 측정 기준선 끝점 {lon, lat}
     distanceMarkers: [],     // [추가] 거리 측정용 마커/팝업 관리 배열
     isSurveyMode: false,      // [추가] 조사 모드 활성화 여부
     isMemoIdVisible: false,   // [추가] 지도 메모 ID 표시 여부

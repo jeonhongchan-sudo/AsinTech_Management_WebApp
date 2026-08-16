@@ -1,50 +1,101 @@
 import { state, callSupabaseDirect, showAlert } from './core.js';
-import { ensureGeoJSONLoaded } from './viewers.js';
+
+function createLineFeature(start, end, handle = 'DISTANCE') {
+    return {
+        type: 'Feature',
+        properties: { handle },
+        geometry: {
+            type: 'LineString',
+            coordinates: [[start.lon, start.lat], [end.lon, end.lat]]
+        }
+    };
+}
+
+function createMeasurementPopup(content, position) {
+    const popupContent = document.createElement('div');
+    popupContent.style.cssText = 'padding-right: 20px; position: relative; min-width: 120px;';
+    popupContent.innerHTML = content;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '×';
+    closeBtn.style.cssText = 'position: absolute; top: -5px; right: -5px; background: #dc3545; color: white; border: none; border-radius: 4px; width: 20px; height: 20px; font-size: 18px; line-height: 1; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center;';
+    popupContent.appendChild(closeBtn);
+
+    const popup = new maplibregl.Popup({ closeOnClick: false, closeButton: false, anchor: 'bottom', offset: 15 })
+        .setLngLat(position)
+        .setDOMContent(popupContent)
+        .addTo(state.cadMap);
+
+    closeBtn.onclick = (e) => {
+        e.stopPropagation();
+        clearDistanceMeasurement();
+    };
+
+    state.distanceMarkers.push(popup);
+    return popupContent;
+}
+
+async function calculateLineLength(feature) {
+    if (!state.currentProjectSourceCrs) {
+        throw new Error('좌표계 정보 누락');
+    }
+
+    const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+        geoms: [feature],
+        source_crs: state.currentProjectSourceCrs
+    });
+
+    if (!results || results.length === 0) {
+        throw new Error('거리 계산 실패');
+    }
+
+    return Number(results[0].length_m || 0);
+}
 
 /** 거리 측정 모드 토글 */
 export function toggleDistanceMode(forceValue) {
     state.isDistanceMode = (forceValue !== undefined) ? forceValue : !state.isDistanceMode;
-    
+
     const chk = document.getElementById('chkDistanceMode');
     if (chk) chk.checked = state.isDistanceMode;
-    
+
     if (state.isDistanceMode) {
-        const mode = confirm("거리 측정 방식을 선택하세요.\n\n[확인]: 도상(관로) 따라 측정\n[취소]: 직선 거리 측정") ? 'map' : 'straight';
-        state.distanceMeasureMode = mode;
+        const selectedMode = window.confirm(
+            '거리 측정 기능을 선택하세요.\n\n[확인]: 세 점 수직 거리 측정\n[취소]: 단순 두 점 거리 측정'
+        ) ? 'orthogonal' : 'straight';
+
+        state.distanceMeasureMode = selectedMode;
         if (state.cadMap) state.cadMap.getCanvas().style.cursor = 'crosshair';
-        
-        // [추가] 정밀 좌표 확보를 위해 원본 GeoJSON 로드 시작 (백그라운드)
-        if (state.currentCadProjectId) ensureGeoJSONLoaded();
     } else {
         if (state.cadMap) state.cadMap.getCanvas().style.cursor = '';
-        state.distanceMeasureMode = null; // 기능을 끌 때만 모드 초기화
+        state.distanceMeasureMode = null;
         clearDistanceMeasurement();
     }
 }
 
 /** 거리 측정 클릭 핸들러 */
 export async function handleDistanceClick(coords, feature = null) {
-    // [수정] PMTiles 좌표 대신 Handle ID로 연결된 GeoJSON의 정밀 좌표를 최우선 사용
     const useCoords = (feature && feature.geometry) ? feature.geometry.coordinates : coords;
     const lon = useCoords[0];
     const lat = useCoords[1];
 
-    if (!state.distanceStartPoint) {
-        state.distanceStartPoint = { lon, lat };
-        const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8, anchor: 'center' })
-            .setLngLat(useCoords)
-            .addTo(state.cadMap);
-        state.distanceMarkers.push(startMarker);
-    } 
-    else {
+    if (state.distanceMeasureMode === 'straight') {
+        if (!state.distanceStartPoint) {
+            state.distanceStartPoint = { lon, lat };
+            const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8, anchor: 'center' })
+                .setLngLat([lon, lat])
+                .addTo(state.cadMap);
+            state.distanceMarkers.push(startMarker);
+            return;
+        }
+
         const start = state.distanceStartPoint;
-        const end = { lon: useCoords[0], lat: useCoords[1] };
-        
-        // 시작점과 끝점이 동일한 좌표인 경우(중복 클릭) 계산 방지
+        const end = { lon, lat };
+
         if (Math.abs(start.lon - end.lon) < 0.00000001 && Math.abs(start.lat - end.lat) < 0.00000001) {
             return;
         }
-        
+
         const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8, anchor: 'center' })
             .setLngLat([lon, lat])
             .addTo(state.cadMap);
@@ -52,157 +103,182 @@ export async function handleDistanceClick(coords, feature = null) {
 
         const lineId = `dist-line-${Date.now()}`;
         state.cadMap.addSource(lineId, {
-            'type': 'geojson',
-            'data': {
-                'type': 'Feature',
-                'properties': {},
-                'geometry': { 'type': 'LineString', 'coordinates': [[start.lon, start.lat], [end.lon, end.lat]] }
+            type: 'geojson',
+            data: {
+                type: 'Feature',
+                properties: {},
+                geometry: { type: 'LineString', coordinates: [[start.lon, start.lat], [end.lon, end.lat]] }
             }
         });
         state.cadMap.addLayer({
-            'id': lineId,
-            'type': 'line',
-            'source': lineId,
-            'layout': { 'line-join': 'round', 'line-cap': 'round' },
-            'paint': { 'line-color': '#000000', 'line-width': 3, 'line-dasharray': [2, 2] }
+            id: lineId,
+            type: 'line',
+            source: lineId,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#000000', 'line-width': 3, 'line-dasharray': [2, 2] }
         });
         state.distanceMarkers.push({ type: 'layer', id: lineId });
 
-        const popupContent = document.createElement('div');
-        popupContent.style.cssText = 'padding-right: 20px; position: relative; min-width: 60px;';
-        popupContent.innerHTML = `<div class="dist-val" style="font-weight:bold; font-size:14px;">계산 중...</div>`;
-
-        const closeBtn = document.createElement('button');
-        closeBtn.innerHTML = '×';
-        closeBtn.style.cssText = 'position: absolute; top: -5px; right: -5px; background: #dc3545; color: white; border: none; border-radius: 4px; width: 20px; height: 20px; font-size: 18px; line-height: 1; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center;';
-        
-        popupContent.appendChild(closeBtn);
-
-        // [추가] 두 점을 공유하는 도상 경로 자동 찾기 로직 (도상 모드일 때만)
-        if (state.distanceMeasureMode === 'map') {
-            if (!state.currentProjectGeoJSON) await ensureGeoJSONLoaded();
-
-            const findSharedMapPath = (s, e) => {
-                // [개선] 유사 위치가 아닌, 정밀 좌표가 선의 정점(Vertex)과 '완전히 일치'하는 레이어 탐색
-                const getLayersWithVertex = (lon, lat) => {
-                    const matchedLayers = new Set();
-                    const eps = 0.00000001; // 부동소수점 오차 방어용 (약 1mm 미만)
-                    
-                    state.currentProjectGeoJSON.features.forEach(feat => {
-                        if (!feat.geometry || !feat.geometry.type.includes('LineString')) return;
-                        
-                        // 해당 정밀 좌표가 선분의 정점 리스트 중 하나와 일치하는지 확인
-                        const hasVertex = feat.geometry.coordinates.some(c => 
-                            Math.abs(c[0] - lon) < eps && Math.abs(c[1] - lat) < eps
-                        );
-                        if (hasVertex) matchedLayers.add(feat.properties.layer);
-                    });
-                    return matchedLayers;
-                };
-
-                const startLayers = getLayersWithVertex(s.lon, s.lat);
-                const endLayers = getLayersWithVertex(e.lon, e.lat);
-
-                // 두 점을 공통 정점으로 공유하는 레이어 추출
-                const common = Array.from(startLayers).filter(layer => endLayers.has(layer));
-                
-                if (common.length === 0) return null;
-
-                // 3. 가장 적합한 레이어의 모든 선분을 베이스라인으로 설정
-                const layerName = common[0];
-                return {
-                    name: layerName,
-                    features: state.currentProjectGeoJSON.features.filter(f => 
-                        f.properties.layer === layerName && f.geometry.type.includes('LineString')
-                    )
-                };
-            };
-
-            state.distanceMapBaseline = findSharedMapPath(start, end);
-        }
-
-        // [수정] 결과 팝업이 측정 지점(마커)을 가리지 않도록 선의 중간(Midpoint) 좌표를 계산하여 표시
-        const midLon = (start.lon + end.lon) / 2;
-        const midLat = (start.lat + end.lat) / 2;
-
-        const popup = new maplibregl.Popup({ closeOnClick: false, closeButton: false, anchor: 'bottom', offset: 15 })
-            .setLngLat([midLon, midLat])
-            .setDOMContent(popupContent)
-            .addTo(state.cadMap);
-        
-        closeBtn.onclick = (e) => { e.stopPropagation(); clearDistanceMeasurement(); };
-        state.distanceMarkers.push(popup);
-
         try {
-            // [중요] 좌표계 정보가 없는 경우 임의의 기본값을 사용하지 않고 에러 처리
-            if (!state.currentProjectSourceCrs) {
-                throw new Error("좌표계 정보 누락");
-            }
-
-            if (state.distanceMeasureMode === 'map') {
-                if (!state.distanceMapBaseline) {
-                    throw new Error("공유 경로를 찾을 수 없음");
-                }
-                // [수정] 도상 거리 및 실제 경로 Geometry를 함께 요청
-                const res = await callSupabaseDirect('rpc/calculate_route_distance', 'POST', {
-                    baseline_geoms: state.distanceMapBaseline.features,
-                    start_pt: [start.lon, start.lat],
-                    end_pt: [end.lon, end.lat],
-                    source_crs: state.currentProjectSourceCrs
-                });
-
-                const dist = res.dist || 0;
-                
-                // [추가] 단순 직선 대신 실제 계산에 사용된 도상 경로(중간점 포함)를 지도에 표시
-                if (res.geom) {
-                    const source = state.cadMap.getSource(lineId);
-                    if (source) source.setData(res.geom);
-                }
-
-                const layerName = state.distanceMapBaseline.name;
-                
-                // [수정] 아주 미세한 거리라도 계산이 되었다면 표시 (정밀도 유지)
-                if (dist > 0.0001) {
-                    popupContent.querySelector('.dist-val').innerText = `[${layerName}]\n🗺️ ${dist.toFixed(3)}m`;
-                } else {
-                    popupContent.querySelector('.dist-val').innerText = `도상 경로 단절`;
-                    popupContent.querySelector('.dist-val').style.color = '#dc3545';
-                }
-            } else {
-                // 기존 직선 거리 계산
-                const segmentFeature = {
-                    type: 'Feature',
-                    properties: { handle: 'MANUAL_MEASURE' },
-                    geometry: { type: 'LineString', coordinates: [[start.lon, start.lat], [end.lon, end.lat]] }
-                };
-                const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
-                    geoms: [segmentFeature],
-                    source_crs: state.currentProjectSourceCrs
-                });
-                if (results && results.length > 0) {
-                    popupContent.querySelector('.dist-val').innerText = `${results[0].length_m.toFixed(3)}m`;
-                } else throw new Error();
-            }
+            const dist = await calculateLineLength(createLineFeature(start, end, 'MANUAL_MEASURE'));
+            const popupContent = createMeasurementPopup(
+                `<div class="dist-val" style="font-weight:bold; font-size:14px;">${dist.toFixed(3)}m</div>`,
+                [(start.lon + end.lon) / 2, (start.lat + end.lat) / 2]
+            );
+            popupContent.querySelector('.dist-val').style.color = '#1f3c88';
         } catch (err) {
-            if (err.message === "공유 경로를 찾을 수 없음") {
-                popupContent.querySelector('.dist-val').innerText = `공유 경로 없음`;
-                showAlert("두 점을 연결하는 도상 경로를 찾을 수 없습니다. 직선 거리를 확인하세요.", "warning");
-            } else if (err.message === "좌표계 정보 누락") {
-                popupContent.querySelector('.dist-val').innerText = `좌표계 오류`;
-                showAlert("이 프로젝트에 설정된 좌표계(EPSG) 정보가 없습니다. 도면 변환 시 좌표계를 다시 설정해 주세요.", "error");
-            } else {
-                popupContent.querySelector('.dist-val').innerText = `계산 불가`;
-            }
-            popupContent.querySelector('.dist-val').style.color = '#dc3545';
+            const popupContent = createMeasurementPopup(
+                '<div class="dist-val" style="font-weight:bold; font-size:13px; color:#dc3545;">거리 계산 불가</div>',
+                [(start.lon + end.lon) / 2, (start.lat + end.lat) / 2]
+            );
+            showAlert('두 점 거리 계산에 실패했습니다. 좌표계를 확인해 주세요.', 'error');
         }
+
         state.distanceStartPoint = null;
+        return;
+    }
+
+    if (!state.distanceStartPoint) {
+        state.distanceStartPoint = { lon, lat };
+        const startMarker = new maplibregl.Marker({ color: '#28a745', scale: 0.8, anchor: 'center' })
+            .setLngLat([lon, lat])
+            .addTo(state.cadMap);
+        state.distanceMarkers.push(startMarker);
+        return;
+    }
+
+    if (!state.distanceSecondPoint) {
+        const start = state.distanceStartPoint;
+        const end = { lon, lat };
+
+        if (Math.abs(start.lon - end.lon) < 0.00000001 && Math.abs(start.lat - end.lat) < 0.00000001) {
+            return;
+        }
+
+        state.distanceSecondPoint = end;
+
+        const endMarker = new maplibregl.Marker({ color: '#dc3545', scale: 0.8, anchor: 'center' })
+            .setLngLat([lon, lat])
+            .addTo(state.cadMap);
+        state.distanceMarkers.push(endMarker);
+
+        const lineId = `dist-line-${Date.now()}`;
+        state.cadMap.addSource(lineId, {
+            type: 'geojson',
+            data: {
+                type: 'Feature',
+                properties: {},
+                geometry: { type: 'LineString', coordinates: [[start.lon, start.lat], [end.lon, end.lat]] }
+            }
+        });
+        state.cadMap.addLayer({
+            id: lineId,
+            type: 'line',
+            source: lineId,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#000000', 'line-width': 3, 'line-dasharray': [2, 2] }
+        });
+        state.distanceMarkers.push({ type: 'layer', id: lineId });
+
+        // A-B 기준선 선택 직후에는 중간 팝업을 띄우지 않고, 최종 결과는 C 선택 후에만 표시한다.
+        return;
+    }
+
+    const start = state.distanceStartPoint;
+    const baseEnd = state.distanceSecondPoint;
+    const target = { lon, lat };
+
+    if (Math.abs(start.lon - target.lon) < 0.00000001 && Math.abs(start.lat - target.lat) < 0.00000001) {
+        return;
+    }
+
+    if (Math.abs(baseEnd.lon - target.lon) < 0.00000001 && Math.abs(baseEnd.lat - target.lat) < 0.00000001) {
+        return;
+    }
+
+    const dx = baseEnd.lon - start.lon;
+    const dy = baseEnd.lat - start.lat;
+    const ab2 = dx * dx + dy * dy;
+
+    if (ab2 < 1e-12) {
+        showAlert('기준선의 길이가 너무 짧아 직교 지점을 계산할 수 없습니다.', 'warning');
+        return;
+    }
+
+    const vx = target.lon - start.lon;
+    const vy = target.lat - start.lat;
+    const t = Math.min(1, Math.max(0, (vx * dx + vy * dy) / ab2));
+    const foot = {
+        lon: start.lon + dx * t,
+        lat: start.lat + dy * t
+    };
+
+    const footMarker = new maplibregl.Marker({ color: '#17a2b8', scale: 0.8, anchor: 'center' })
+        .setLngLat([foot.lon, foot.lat])
+        .addTo(state.cadMap);
+    state.distanceMarkers.push(footMarker);
+
+    const targetMarker = new maplibregl.Marker({ color: '#ffc107', scale: 0.8, anchor: 'center' })
+        .setLngLat([target.lon, target.lat])
+        .addTo(state.cadMap);
+    state.distanceMarkers.push(targetMarker);
+
+    const perpLineId = `dist-perp-${Date.now()}`;
+    state.cadMap.addSource(perpLineId, {
+        type: 'geojson',
+        data: {
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'LineString', coordinates: [[foot.lon, foot.lat], [target.lon, target.lat]] }
+        }
+    });
+    state.cadMap.addLayer({
+        id: perpLineId,
+        type: 'line',
+        source: perpLineId,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#17a2b8', 'line-width': 2, 'line-dasharray': [3, 3] }
+    });
+    state.distanceMarkers.push({ type: 'layer', id: perpLineId });
+
+    try {
+        const meas = [
+            createLineFeature(start, baseEnd, 'AB'),
+            createLineFeature(start, foot, 'AH'),
+            createLineFeature(foot, baseEnd, 'HB'),
+            createLineFeature(foot, target, 'HC')
+        ];
+
+        const results = await Promise.all(meas.map(feature => calculateLineLength(feature)));
+        const [ab, ah, hb, hc] = results;
+
+        const popupContent = createMeasurementPopup(
+            `<div class="dist-val" style="font-weight:bold; font-size:13px; line-height:1.6; color:#1f3c88;">
+                <div>AB: ${ab.toFixed(3)}m</div>
+                <div>AH: ${ah.toFixed(3)}m</div>
+                <div>HB: ${hb.toFixed(3)}m</div>
+                <div>HC: ${hc.toFixed(3)}m</div>
+            </div>`,
+            [foot.lon, foot.lat]
+        );
+        popupContent.querySelector('.dist-val').style.color = '#1f3c88';
+
+        state.distanceStartPoint = null;
+        state.distanceSecondPoint = null;
+    } catch (err) {
+        const popupContent = createMeasurementPopup(
+            '<div class="dist-val" style="font-weight:bold; font-size:13px; color:#dc3545;">직교 거리 계산 불가</div>',
+            [foot.lon, foot.lat]
+        );
+        popupContent.querySelector('.dist-val').style.color = '#dc3545';
+        showAlert('직교 거리 계산에 실패했습니다. 좌표계를 확인해 주세요.', 'error');
     }
 }
 
 /** 거리 측정 초기화 */
 export function clearDistanceMeasurement() {
     state.distanceStartPoint = null;
-    state.distanceMapBaseline = null;
+    state.distanceSecondPoint = null;
     if (state.distanceMarkers) {
         state.distanceMarkers.forEach(item => {
             if (item.remove) {
