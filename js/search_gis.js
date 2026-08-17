@@ -473,7 +473,7 @@ async function analyzePointToPointDistance(pointNames, useBookmark, isAudit, isS
     if (!isSubTask) showAlert(`${foundPoints.length}개 지점 연결 거리 계산 중...`, "info");
 
     try {
-        const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+        const results = await callSupabaseDirect('rpc/calculate_line_lengths_search_gis', 'POST', {
             geoms: [segmentFeature],
             source_crs: state.currentProjectSourceCrs
         });
@@ -568,7 +568,7 @@ async function executeMultiLayerDistanceSummation(tasks, useBookmark, isAudit, i
             const chunkResults = [];
             for (let i = 0; i < processedLineFeatures.length; i += chunkSize) {
                 const chunk = processedLineFeatures.slice(i, i + chunkSize);
-                const chunkResultsData = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+                const chunkResultsData = await callSupabaseDirect('rpc/calculate_line_lengths_search_gis', 'POST', { // [수정] RPC 함수명 변경
                     geoms: chunk,
                     source_crs: state.currentProjectSourceCrs
                 });
@@ -669,7 +669,7 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit, isSubTask
         const results = [];
         for (let i = 0; i < processedLineFeatures.length; i += chunkSize) {
             const chunk = processedLineFeatures.slice(i, i + chunkSize);
-            const chunkResults = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+            const chunkResults = await callSupabaseDirect('rpc/calculate_line_lengths_search_gis', 'POST', { // [수정] RPC 함수명 변경
                 geoms: chunk,
                 source_crs: state.currentProjectSourceCrs
             });
@@ -772,7 +772,7 @@ async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit, 
         const results = [];
         for (let i = 0; i < segments.length; i += chunkSize) {
             const chunk = segments.slice(i, i + chunkSize);
-            const chunkResults = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+            const chunkResults = await callSupabaseDirect('rpc/calculate_line_lengths_search_gis', 'POST', { // [수정] RPC 함수명 변경
                 geoms: chunk,
                 source_crs: state.currentProjectSourceCrs
             });
