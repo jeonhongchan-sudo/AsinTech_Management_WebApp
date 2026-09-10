@@ -62,33 +62,40 @@ function resolveMeasurementPoint(rawLon, rawLat, feature = null) {
         let bestFeature = null;
 
         state.currentProjectGeoJSON.features.forEach(feat => {
-            if (!feat || !feat.geometry || feat.geometry.type !== 'Point' || !Array.isArray(feat.geometry.coordinates)) return;
-            // GeoJSON 피처의 WGS84 좌표
-            const px = Number(feat.geometry.coordinates[0]);
-            const py = Number(feat.geometry.coordinates[1]);
-            const dx = px - rawLon;
-            const dy = py - rawLat;
-            const distSq = dx * dx + dy * dy;
+            if (!feat || !feat.geometry) return;
+            const props = feat.properties || {};
+            const tmX = props.tm_x ?? props.x_coord ?? props.x;
+            const tmY = props.tm_y ?? props.y_coord ?? props.y;
+            if (tmX === undefined || tmY === undefined) return;
 
-            if (distSq < bestDistSq) {
-                bestDistSq = distSq;
-                best = { lon: px, lat: py };
-                bestFeature = feat;
+            const checkCoords = (coords) => {
+                const px = Number(coords[0]);
+                const py = Number(coords[1]);
+                const dx = px - rawLon;
+                const dy = py - rawLat;
+                const distSq = dx * dx + dy * dy;
+
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    best = { lon: px, lat: py, tmX: Number(tmX), tmY: Number(tmY), handle: props.handle };
+                }
+            };
+
+            if (feat.geometry.type === 'Point' && Array.isArray(feat.geometry.coordinates)) {
+                checkCoords(feat.geometry.coordinates);
+            } else if (feat.geometry.type === 'LineString' && Array.isArray(feat.geometry.coordinates)) {
+                feat.geometry.coordinates.forEach(c => checkCoords(c));
             }
         });
 
-        if (best && bestFeature) {
-            const snapThreshold = 1.0; // WGS84 기준 스냅 임계값 (예: 1.0 = 1도)
-            if (bestDistSq <= snapThreshold * snapThreshold) {
-                // 가장 가까운 피처의 TM 좌표와 handle을 반환
-                return {
-                    lon: best.lon,
-                    lat: best.lat,
-                    tmX: Number(bestFeature.properties.tm_x || bestFeature.properties.x_coord || bestFeature.properties.x),
-                    tmY: Number(bestFeature.properties.tm_y || bestFeature.properties.y_coord || bestFeature.properties.y),
-                    handle: bestFeature.properties.handle
-                };
-            }
+        if (best) {
+            return {
+                lon: best.lon,
+                lat: best.lat,
+                tmX: best.tmX,
+                tmY: best.tmY,
+                handle: best.handle
+            };
         }
     }
 
@@ -135,39 +142,46 @@ function normalizeSupabaseCoordinateResult(result) {
 
 
 async function calculateLineLength(feature) {
-    if (!state.currentProjectSourceCrs) {
-        throw new Error('좌표계 정보 누락');
-    }
-
-    // calculate_distance_by_handles RPC 호출
-    // start와 end는 resolveMeasurementPoint에서 반환된 객체 (tmX, tmY, handle 포함)
-    const startHandle = feature.properties.handle; // 'AB', 'AH', 'HB', 'HC' 등
+    const startHandle = feature.properties.handle;
     const startTmX = feature.properties.tm_x;
     const startTmY = feature.properties.tm_y;
     const endTmX = feature.properties.tm_x_end;
     const endTmY = feature.properties.tm_y_end;
 
-    // Supabase RPC에 두 점의 TM 좌표를 직접 전달하여 거리 계산
-    // calculate_line_lengths 대신 이 부분은 새로운 RPC 함수를 호출해야 함.
-    // 임시로 calculate_line_lengths를 사용하지만, 내부 로직은 TM 좌표 기반으로 변경되어야 함
-    // 또는, 이전에 제안했던 calculate_line_lengths 함수의 수정을 기반으로 호출
-    const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
-        geoms: [{
-            type: 'Feature',
-            properties: { handle: startHandle },
-            geometry: {
-                type: 'LineString',
-                coordinates: [[startTmX, startTmY], [endTmX, endTmY]] // TM 좌표를 GeoJSON으로 구성
+    // TM 좌표가 모두 유효한 경우 기존 DB RPC 계산 사용
+    if (startTmX !== null && startTmX !== undefined && endTmX !== null && endTmX !== undefined && state.currentProjectSourceCrs) {
+        try {
+            const results = await callSupabaseDirect('rpc/calculate_line_lengths', 'POST', {
+                geoms: [{
+                    type: 'Feature',
+                    properties: { handle: startHandle },
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: [[startTmX, startTmY], [endTmX, endTmY]]
+                    }
+                }],
+                source_crs: state.currentProjectSourceCrs
+            });
+            if (results && results.length > 0) {
+                return Number(results[0].length_m || 0);
             }
-        }],
-        source_crs: state.currentProjectSourceCrs // 좌표계 정보는 계속 전달
-    });
-
-    if (!results || results.length === 0) {
-        throw new Error('거리 계산 실패');
+        } catch (e) {
+            console.warn('RPC 거리 계산 실패, 하버사인 계산으로 폴백:', e);
+        }
     }
 
-    return Number(results[0].length_m || 0);
+    // TM 좌표가 없거나 RPC 오류 시 WGS84 좌표 기반 하버사인(Haversine) 거리 계산 (m 단위)
+    const coords = feature.geometry.coordinates;
+    const [lon1, lat1] = coords[0];
+    const [lon2, lat2] = coords[1];
+    const R = 6371000; // 지구 반지름 (미터)
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
 }
 
 /** 거리 측정 모드 토글 */
@@ -199,14 +213,19 @@ export async function handleDistanceClick(coords, feature = null) {
     // GeoJSON에서 가장 가까운 포인트의 TM 좌표와 handle을 가져옴
     const resolvedPoint = resolveMeasurementPoint(rawLon, rawLat, feature);
 
-    // TM 좌표가 유효한지 확인
-    if (resolvedPoint.tmX === null || resolvedPoint.tmY === null) {
-        showAlert('선택된 지점의 유효한 TM 좌표를 찾을 수 없습니다. CAD 데이터에 TM 좌표가 포함되어 있는지 확인해 주세요.', 'error');
+    // 단순 두 점 거리 측정 모드('straight')이거나 직교 거리 측정 모드가 아닐 때, TM 좌표가 없어도 경위도(WGS84) 기반으로 진행할 수 있게 허용
+    if ((resolvedPoint.tmX === null || resolvedPoint.tmY === null) && state.distanceMeasureMode !== 'straight') {
+        showAlert('선택된 지점의 유효한 TM 좌표를 찾을 수 없습니다. 직교 거리 측정은 CAD 데이터 포인트가 필요합니다.', 'error');
         return;
     }
 
-    // 이제 exactPoint는 TM 좌표와 handle을 포함한 resolvedPoint 객체
-    const exactPoint = resolvedPoint;
+    const exactPoint = {
+        lon: resolvedPoint.lon ?? rawLon,
+        lat: resolvedPoint.lat ?? rawLat,
+        tmX: resolvedPoint.tmX,
+        tmY: resolvedPoint.tmY,
+        handle: resolvedPoint.handle || 'MANUAL'
+    };
 
     if (state.distanceMeasureMode === 'straight') {
         if (!state.distanceStartPoint) {
@@ -221,8 +240,12 @@ export async function handleDistanceClick(coords, feature = null) {
         const start = state.distanceStartPoint;
         const end = { lon: exactPoint.lon, lat: exactPoint.lat, tmX: exactPoint.tmX, tmY: exactPoint.tmY, handle: exactPoint.handle };
 
-        // WGS84 좌표 기준이지만, TM 좌표가 동일한지 확인하는 것이 더 정확할 수 있음.
-        if (Math.abs(start.tmX - end.tmX) < 0.00000001 && Math.abs(start.tmY - end.tmY) < 0.00000001) {
+        // 같은 점 재클릭 방지 (TM 좌표 비교 또는 경위도 좌표 비교)
+        const isSamePoint = (start.tmX !== null && end.tmX !== null)
+            ? (Math.abs(start.tmX - end.tmX) < 0.00000001 && Math.abs(start.tmY - end.tmY) < 0.00000001)
+            : (Math.abs(start.lon - end.lon) < 0.00000001 && Math.abs(start.lat - end.lat) < 0.00000001);
+
+        if (isSamePoint) {
             return;
         }
 

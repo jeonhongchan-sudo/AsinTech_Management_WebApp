@@ -47,6 +47,29 @@ export async function loadMapMemos() {
 
             marker.getElement().addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (state.isDistanceMode) {
+                    let targetFeature = null;
+                    if (state.cadMap) {
+                        const point = state.cadMap.project([memo.lon, memo.lat]);
+                        const snapRadius = 15;
+                        const bbox = [[point.x - snapRadius, point.y - snapRadius], [point.x + snapRadius, point.y + snapRadius]];
+                        const features = state.cadMap.queryRenderedFeatures(bbox, { layers: ['cad-points'] });
+                        if (features.length > 0) {
+                            let minDistance = Infinity;
+                            features.forEach(f => {
+                                const p = state.cadMap.project(f.geometry.coordinates);
+                                const dist = Math.hypot(p.x - point.x, p.y - point.y);
+                                if (dist < minDistance) { minDistance = dist; targetFeature = f; }
+                            });
+                            if (targetFeature && targetFeature.properties.handle && state.currentProjectGeoJSON) {
+                                const originalFeat = state.currentProjectGeoJSON.features.find(feat => feat.properties.handle === targetFeature.properties.handle);
+                                if (originalFeat) targetFeature = originalFeat;
+                            }
+                        }
+                    }
+                    handleDistanceClick([memo.lon, memo.lat], targetFeature);
+                    return;
+                }
                 const feature = {
                     geometry: { coordinates: [memo.lon, memo.lat] },
                     properties: { 
