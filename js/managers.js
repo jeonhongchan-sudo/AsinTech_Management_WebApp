@@ -233,8 +233,8 @@ async function processCadUpload(file, projectId) {
         };
 
         const expiryDate = formatPostgresTz(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000));
-        // [수정] 중복 레코드 방지를 위해 기존 프로젝트/타입 레코드 삭제 후 삽입
-        await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=eq.${isZip ? 'zip' : 'dxf'}`, 'DELETE');
+        // [수정] DXF 또는 ZIP 등 기존 원본 CAD 파일 레코드를 모두 삭제하여 중복 및 순서 혼선 방지
+        await callSupabaseDirect(`cad_files?project_id=eq.${projectId}&file_type=in.(dxf,zip)`, 'DELETE');
         await callSupabaseDirect('cad_files', 'POST', {
             project_id: parseInt(projectId),
             file_type: isZip ? 'zip' : 'dxf',
@@ -250,9 +250,9 @@ async function processCadUpload(file, projectId) {
             available_layers: extractedLayers
         });
 
-        // 4. 즉시 설정 UI 열기 (Action 대기 시간 0초)
-        showAlert("도면 분석이 완료되었습니다.", "success");
-        window.openCadConfigUI(projectId);
+        // 4. 즉시 설정 UI 열기 (업로드된 파일 형식(isZip)을 직접 전달하여 순서/캐시 꼬임 방지)
+        showAlert(isZip ? "SHP 파일 업로드 완료. 변환 설정을 진행합니다." : "DXF 레이어 분석이 완료되었습니다.", "success");
+        window.openCadConfigUI(projectId, isZip);
 
     } catch (e) {
         showAlert("업로드 및 분석 중 오류: " + e.message, "error");
@@ -260,16 +260,15 @@ async function processCadUpload(file, projectId) {
     }
 }
 
-/** [추가] CAD 설정 UI 열기 */
-export async function openCadConfigUI(projectId) {
+/** [추가] CAD 설정 UI 열기 (isZip을 직접 받아 DXF/SHP 분기 처리) */
+export async function openCadConfigUI(projectId, knownIsZip = null) {
     const configArea = document.getElementById('cadProcessConfig');
     const statusContent = document.getElementById('cadProcessStatus');
     const statusText = document.getElementById('cadProcessStatusText');
     
     try {
         // 1. Supabase에서 프로젝트 최신 상태 조회
-        // [수정] 파일 타입 확인을 위해 cad_files도 함께 조회
-        const [p] = await callSupabaseDirect(`cad_projects?id=eq.${projectId}&select=*,cad_files(file_type)`);
+        const [p] = await callSupabaseDirect(`cad_projects?id=eq.${projectId}&select=*,cad_files(file_type,updated_at)`);
         
         if (p.status === 'ANALYZING') {
             return showAlert("아직 분석이 진행 중입니다. 잠시 후 다시 시도해주세요.", "info");
@@ -281,8 +280,13 @@ export async function openCadConfigUI(projectId) {
             return showAlert("분석된 데이터가 없습니다.", "error");
         }
 
-        const sourceFile = p.cad_files?.find(f => f.file_type === 'dxf' || f.file_type === 'zip');
-        const isZip = sourceFile?.file_type === 'zip';
+        // 파일 형식 판별 (업로드 시 전달된 값 우선, 없으면 최신 updated_at 기준)
+        let isZip = knownIsZip;
+        if (isZip === null) {
+            const sourceFiles = (p.cad_files || []).filter(f => f.file_type === 'dxf' || f.file_type === 'zip');
+            sourceFiles.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+            isZip = sourceFiles.length > 0 && sourceFiles[0].file_type === 'zip';
+        }
 
         // 2. UI 전환
         const statusModal = document.getElementById('cadProcessModal');
@@ -298,51 +302,72 @@ export async function openCadConfigUI(projectId) {
 
         const layers = p.available_layers || [];
         
-        // 모든 설정 항목을 파일 타입에 관계없이 노출하도록 통합
-        let html = `
-            ${isZip ? `
-                <div style="background:#e7f5ff; padding:10px; border-radius:8px; border:1px solid #a5d8ff; margin-bottom:15px; color:#1864ab; font-size:12px;">
-                    <strong>📦 SHP(ZIP) 모드</strong>: SHP 파일은 압축 내 모든 객체를 변환하는 것을 권장합니다.
-                </div>` : ''}
+        let html = '';
 
-            <div style="margin-bottom:15px;">
-                <label style="font-weight:bold; display:block; margin-bottom:5px;">1. 변환할 레이어 선택 (${layers.length}개)</label>
-                <div style="display:flex; gap:5px; margin-bottom:8px;">
-                    <button class="btn btn-outline" style="padding:2px 8px; font-size:11px;" onclick="document.querySelectorAll('.layer-chk').forEach(c=>c.checked=true)">전체선택</button>
-                    <button class="btn btn-outline" style="padding:2px 8px; font-size:11px;" onclick="document.querySelectorAll('.layer-chk').forEach(c=>c.checked=false)">전체해제</button>
+        if (isZip) {
+            // [SHP (ZIP) 모드]: 레이어 선택 창 없이 좌표계만 선택하여 바로 변환
+            html = `
+                <div style="background:#f0f9ff; padding:15px; border-radius:8px; border:1px solid #b9e6fe; margin-bottom:15px;">
+                    <div style="font-weight:bold; color:#026aa2; font-size:14px; margin-bottom:6px;">📦 SHP 압축(ZIP) 파일 모드</div>
+                    <div style="font-size:12px; color:#475467; line-height:1.5;">
+                        압축 파일 내의 모든 도형(SHP) 데이터가 지도(PMTiles)로 일괄 변환됩니다.<br>
+                        (별도의 레이어 선택 없이 좌표계 설정 후 바로 변환할 수 있습니다.)
+                    </div>
                 </div>
-                <div style="max-height:150px; overflow-y:auto; border:1px solid #ddd; padding:10px; border-radius:4px; background:#fdfdfd;">
-                    ${layers.length > 0 ? layers.map(layer => `
-                        <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:4px; cursor:pointer;">
-                            <input type="checkbox" class="layer-chk" value="${layer}" checked> ${layer}
-                        </label>
-                    `).join('') : '<div style="color:#999; font-size:12px; text-align:center; padding:10px;">분석된 레이어가 없습니다.</div>'}
-                </div>
-            </div>
 
-            <div style="margin-bottom:15px;">
-                <label style="font-weight:bold; display:block; margin-bottom:5px;">2. 좌표계 설정</label>
-                <select id="cadCrsSelect" style="width:100%; padding:8px;">
-                    <option value="EPSG:5187">EPSG:5187 (동부원점)</option>
-                    <option value="EPSG:5186">EPSG:5186 (중부원점)</option>
-                    <option value="EPSG:5179">EPSG:5179 (UTM-K)</option>
-                </select>
-            </div>
-
-            <div style="margin-bottom:15px; border-top:1px solid #eee; padding-top:10px;">
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold;">
-                    <input type="checkbox" id="chkChainage" onchange="document.getElementById('centerlineArea').style.display = this.checked ? 'block' : 'none'"> Chainage(체인리지) 포함 변환
-                </label>
-                <div id="centerlineArea" style="display:none; margin-top:8px; padding-left:20px;">
-                    <label style="font-size:12px; color:#666;">도로 중심선 레이어 선택:</label>
-                    <select id="centerlineLayerSelect" style="width:100%; padding:5px; margin-top:4px;">
-                        ${layers.length > 0 ? layers.map(l => `<option value="${l}">${l}</option>`).join('') : '<option value="">(레이어 없음)</option>'}
+                <div style="margin-bottom:20px;">
+                    <label style="font-weight:bold; display:block; margin-bottom:6px; font-size:13px;">좌표계 설정</label>
+                    <select id="cadCrsSelect" style="width:100%; padding:10px; border:1px solid #d0d5dd; border-radius:6px; font-size:13px; background:#fff;">
+                        <option value="EPSG:5187">EPSG:5187 (동부원점)</option>
+                        <option value="EPSG:5186">EPSG:5186 (중부원점)</option>
+                        <option value="EPSG:5179">EPSG:5179 (UTM-K)</option>
                     </select>
                 </div>
-            </div>
 
-            <button class="btn btn-primary" style="width:100%; padding:12px; font-weight:bold;" onclick="window.executeCadConversion('${projectId}', ${isZip})">지도 변환 시작 (R2 업로드)</button>
-        `;
+                <button class="btn btn-primary" style="width:100%; padding:12px; font-weight:bold; border-radius:6px;" onclick="window.executeCadConversion('${projectId}', true)">지도 변환 시작 (R2 업로드)</button>
+            `;
+        } else {
+            // [DXF 모드]: 브라우저에서 추출한 레이어 선택 및 좌표계/체인리지 설정
+            html = `
+                <div style="margin-bottom:15px;">
+                    <label style="font-weight:bold; display:block; margin-bottom:5px;">1. 변환할 레이어 선택 (${layers.length}개)</label>
+                    <div style="display:flex; gap:5px; margin-bottom:8px;">
+                        <button class="btn btn-outline" style="padding:2px 8px; font-size:11px;" onclick="document.querySelectorAll('.layer-chk').forEach(c=>c.checked=true)">전체선택</button>
+                        <button class="btn btn-outline" style="padding:2px 8px; font-size:11px;" onclick="document.querySelectorAll('.layer-chk').forEach(c=>c.checked=false)">전체해제</button>
+                    </div>
+                    <div style="max-height:150px; overflow-y:auto; border:1px solid #ddd; padding:10px; border-radius:4px; background:#fdfdfd;">
+                        ${layers.length > 0 ? layers.map(layer => `
+                            <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:4px; cursor:pointer;">
+                                <input type="checkbox" class="layer-chk" value="${layer}" checked> ${layer}
+                            </label>
+                        `).join('') : '<div style="color:#999; font-size:12px; text-align:center; padding:10px;">분석된 레이어가 없습니다.</div>'}
+                    </div>
+                </div>
+
+                <div style="margin-bottom:15px;">
+                    <label style="font-weight:bold; display:block; margin-bottom:5px;">2. 좌표계 설정</label>
+                    <select id="cadCrsSelect" style="width:100%; padding:8px;">
+                        <option value="EPSG:5187">EPSG:5187 (동부원점)</option>
+                        <option value="EPSG:5186">EPSG:5186 (중부원점)</option>
+                        <option value="EPSG:5179">EPSG:5179 (UTM-K)</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom:15px; border-top:1px solid #eee; padding-top:10px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold;">
+                        <input type="checkbox" id="chkChainage" onchange="document.getElementById('centerlineArea').style.display = this.checked ? 'block' : 'none'"> Chainage(체인리지) 포함 변환
+                    </label>
+                    <div id="centerlineArea" style="display:none; margin-top:8px; padding-left:20px;">
+                        <label style="font-size:12px; color:#666;">도로 중심선 레이어 선택:</label>
+                        <select id="centerlineLayerSelect" style="width:100%; padding:5px; margin-top:4px;">
+                            ${layers.length > 0 ? layers.map(l => `<option value="${l}">${l}</option>`).join('') : '<option value="">(레이어 없음)</option>'}
+                        </select>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" style="width:100%; padding:12px; font-weight:bold;" onclick="window.executeCadConversion('${projectId}', false)">지도 변환 시작 (R2 업로드)</button>
+            `;
+        }
         
         configArea.innerHTML = html;
 
@@ -353,11 +378,14 @@ export async function openCadConfigUI(projectId) {
 
 /** [추가] 최종 변환 트리거 (convert_r2.py 호출) */
 export async function executeCadConversion(projectId, isZip = false) {
-    const selectedLayers = Array.from(document.querySelectorAll('.layer-chk:checked')).map(c => c.value);
-    if (!isZip && selectedLayers.length === 0) return alert("최소 하나 이상의 레이어를 선택해야 합니다.");
+    let selectedLayers = [];
+    if (!isZip) {
+        selectedLayers = Array.from(document.querySelectorAll('.layer-chk:checked')).map(c => c.value);
+        if (selectedLayers.length === 0) return alert("최소 하나 이상의 레이어를 선택해야 합니다.");
+    }
 
     const crs = document.getElementById('cadCrsSelect').value;
-    const useChainage = document.getElementById('chkChainage')?.checked || false;
+    const useChainage = !isZip && (document.getElementById('chkChainage')?.checked || false);
     const centerlineLayer = useChainage ? document.getElementById('centerlineLayerSelect')?.value : null;
 
     const configArea = document.getElementById('cadProcessConfig');
@@ -414,7 +442,7 @@ export async function executeCadConversion(projectId, isZip = false) {
         }
     } catch (e) {
         alert("변환 시작 오류: " + e.message);
-        openCadConfigUI(projectId); // 실패 시 설정화면으로 복구
+        openCadConfigUI(projectId, isZip); // 실패 시 설정화면으로 복구
     }
 }
 
