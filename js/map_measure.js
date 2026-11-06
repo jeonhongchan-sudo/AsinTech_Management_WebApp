@@ -276,7 +276,7 @@ export async function handleDistanceClick(coords, feature = null) {
             // createLineFeature에 TM 좌표 정보도 함께 전달
             const dist = await calculateLineLength(createLineFeature(start, end, 'MANUAL_MEASURE'));
         const popupContent = createMeasurementPopup(
-                `<div class="dist-val" style="font-weight:bold; font-size:14px;">${dist.toFixed(2)}m</div>`,
+                `<div class="dist-val" style="font-weight:bold; font-size:14px;">${dist.toFixed(3)}m</div>`,
                 [(start.lon + end.lon) / 2, (start.lat + end.lat) / 2]
         );
         popupContent.querySelector('.dist-val').style.color = '#1f3c88';
@@ -421,10 +421,10 @@ export async function handleDistanceClick(coords, feature = null) {
 
         const popupContent = createMeasurementPopup(
             `<div class="dist-val" style="font-weight:bold; font-size:13px; line-height:1.6; color:#1f3c88;">
-                <div>AB: ${ab.toFixed(2)}m</div>
-                <div>AH: ${ah.toFixed(2)}m</div>
-                <div>HB: ${hb.toFixed(2)}m</div>
-                <div>HC: ${hc.toFixed(2)}m</div>
+                <div>AB: ${ab.toFixed(3)}m</div>
+                <div>AH: ${ah.toFixed(3)}m</div>
+                <div>HB: ${hb.toFixed(3)}m</div>
+                <div>HC: ${hc.toFixed(3)}m</div>
             </div>`,
             [foot.lon, foot.lat]
         );

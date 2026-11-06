@@ -1,4 +1,4 @@
-const CACHE_NAME = 'asintech-static-v1';
+const CACHE_NAME = 'asintech-static-v2';
 const APP_SHELL = [
   './',
   './index.html',

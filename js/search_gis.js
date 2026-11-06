@@ -599,7 +599,7 @@ async function executeMultiLayerDistanceSummation(tasks, useBookmark, isAudit, i
     let html = `<div style="padding:5px;"><h3 style="color:#2c3e50; margin-bottom:15px; border-bottom:2px solid #2c3e50; padding-bottom:10px;">📏 다중 레이어 거리 합산</h3>`;
     html += `<div style="background:#f1f8f9; padding:20px; border-radius:12px; text-align:center; border:1px solid #a3d2ca; margin-bottom:20px;">`;
     html += `<div style="font-size:13px; color:#666; margin-bottom:8px;">총 합계 (Grand Total)</div>`;
-    html += `<div style="font-size:32px; font-weight:bold; color:#07689f;">${grandTotal.toFixed(2)} m</div>`;
+    html += `<div style="font-size:32px; font-weight:bold; color:#07689f;">${grandTotal.toFixed(3)} m</div>`;
     html += `<div style="font-size:11px; color:#999; margin-top:8px;">기준 좌표계: ${state.currentProjectSourceCrs}</div>`;
     html += `</div>`;
     html += `<div style="font-size:12px; font-weight:bold; margin-bottom:10px; color:#555;">레이어별 상세 내역</div>`;
@@ -611,7 +611,7 @@ async function executeMultiLayerDistanceSummation(tasks, useBookmark, isAudit, i
         } else {
             html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid #eee;">
                 <span style="font-size:12px; color:#333;">${r.layer} <small style="color:#999;">(${r.count}건)</small></span>
-                <span style="font-size:13px; font-weight:bold; color:#16a085;">${r.total.toFixed(2)} m</span>
+                <span style="font-size:13px; font-weight:bold; color:#16a085;">${r.total.toFixed(3)} m</span>
             </div>`;
         }
     });
@@ -704,7 +704,7 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit, isSubTask
 
         let listHtml = `<div style="border:1px solid #ddd; border-radius:8px; overflow:hidden; max-height:220px; overflow-y:auto; background:#fff;">`;
         handleGroups.forEach((data) => {
-            const displayVal = data.isPoly ? "0.00" : data.sum.toFixed(2);
+            const displayVal = data.isPoly ? "0.000" : data.sum.toFixed(3);
             if (!data.isPoly) totalSum += data.sum;
 
             const polyBadge = data.isPoly ? `<span style="background:#f1f3f5; color:#868e96; padding:1px 4px; border-radius:3px; font-size:10px; margin-left:5px; border:1px solid #dee2e6;">폴리곤(제외)</span>` : '';
@@ -720,7 +720,7 @@ async function analyzeTotalDistance(targetLayer, useBookmark, isAudit, isSubTask
         const displaySum = hasLocalLength ? localTotalSum : totalSum;
 
         let html = `<div style="padding:5px;"><h3 style="color:#2c3e50; margin-bottom:15px; border-bottom:2px solid #2c3e50; padding-bottom:10px;">📏 레이어 거리 리포트: ${targetLayer}</h3>`;
-        html += `<div style="background:#f1f8f9; padding:15px; border-radius:8px; margin-bottom:15px; text-align:center; border:1px solid #a3d2ca;"><div style="font-size:13px; color:#666; margin-bottom:5px;">총 연장 (Total)</div><div style="font-size:24px; font-weight:bold; color:#07689f;">${displaySum.toFixed(2)} m</div><div style="font-size:11px; color:#999; margin-top:5px;">기준 좌표계: ${state.currentProjectSourceCrs}</div></div><div style="font-size:12px; font-weight:bold; margin-bottom:8px; color:#555;">상세 내역 (${results.length}건) ${hasLocalLength ? '<small style="color:#228be6;">(DB 최적화됨)</small>' : ''}</div>${listHtml}</div>`;
+        html += `<div style="background:#f1f8f9; padding:15px; border-radius:8px; margin-bottom:15px; text-align:center; border:1px solid #a3d2ca;"><div style="font-size:13px; color:#666; margin-bottom:5px;">총 연장 (Total)</div><div style="font-size:24px; font-weight:bold; color:#07689f;">${displaySum.toFixed(3)} m</div><div style="font-size:11px; color:#999; margin-top:5px;">기준 좌표계: ${state.currentProjectSourceCrs}</div></div><div style="font-size:12px; font-weight:bold; margin-bottom:8px; color:#555;">상세 내역 (${results.length}건) ${hasLocalLength ? '<small style="color:#228be6;">(DB 최적화됨)</small>' : ''}</div>${listHtml}</div>`;
 
         if (useBookmark) renderSearchResults(lineFeatures);
         
@@ -809,8 +809,8 @@ async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit, 
         if (useBookmark) {
             const bookmarkPoints = [];
             gaps.forEach(g => {
-                bookmarkPoints.push({ lon: g.p1.geometry.coordinates[0], lat: g.p1.geometry.coordinates[1], text: `${g.dist.toFixed(1)}m 이격(#1)`, handle: g.p1.properties.handle });
-                bookmarkPoints.push({ lon: g.p2.geometry.coordinates[0], lat: g.p2.geometry.coordinates[1], text: `${g.dist.toFixed(1)}m 이격(#2)`, handle: g.p2.properties.handle });
+                bookmarkPoints.push({ lon: g.p1.geometry.coordinates[0], lat: g.p1.geometry.coordinates[1], text: `${g.dist.toFixed(3)}m 이격(#1)`, handle: g.p1.properties.handle });
+                bookmarkPoints.push({ lon: g.p2.geometry.coordinates[0], lat: g.p2.geometry.coordinates[1], text: `${g.dist.toFixed(3)}m 이격(#2)`, handle: g.p2.properties.handle });
             });
             displayMatchesOnMap(bookmarkPoints);
         }
@@ -821,7 +821,7 @@ async function analyzeDistanceGap(targetLayer, threshold, useBookmark, isAudit, 
         gaps.forEach(g => {
             const label1 = g.p1.properties.text || g.p1.properties.handle || 'N/A';
             const label2 = g.p2.properties.text || g.p2.properties.handle || 'N/A';
-            html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#fff; border-bottom:1px solid #f3e5f5;"><div style="font-size:12px;"><div style="font-weight:bold; color:#e03131;">${g.dist.toFixed(2)}m 이격</div><div style="color:#666; font-size:11px;">#${label1} ↔ #${label2}</div></div><button class="btn btn-info btn-sm" style="padding:4px 8px; font-size:11px;" onclick="window.showPointLocation(${g.midLon}, ${g.midLat}, '이격구간', '${g.p1.properties.handle}'); window.closeAiResponseModal();">위치</button></div>`;
+            html += `<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#fff; border-bottom:1px solid #f3e5f5;"><div style="font-size:12px;"><div style="font-weight:bold; color:#e03131;">${g.dist.toFixed(3)}m 이격</div><div style="color:#666; font-size:11px;">#${label1} ↔ #${label2}</div></div><button class="btn btn-info btn-sm" style="padding:4px 8px; font-size:11px;" onclick="window.showPointLocation(${g.midLon}, ${g.midLat}, '이격구간', '${g.p1.properties.handle}'); window.closeAiResponseModal();">위치</button></div>`;
         });
         html += `</div></div>`;
 
